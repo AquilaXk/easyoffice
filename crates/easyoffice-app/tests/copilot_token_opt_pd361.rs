@@ -574,3 +574,122 @@ fn doc_replace_span_validation_pii_and_malicious_inputs_fail_closed() {
     assert!(lw_short_reqs[0].body_json.len() < ask_short_reqs[0].body_json.len());
     assert!(ask_short_reqs[0].body_json.len() < edit_cmd_reqs[0].body_json.len());
 }
+
+#[test]
+fn regression_fixes_entities_formulas_surrogate_compatible_tools_and_usage() {
+    // 1. doc.replace_span unescapes HTML entities, keeps math '<', and ignores href attributes in unique check
+    let ent_req = r#"{"action":"copilot_run","mode":"edit","module":"DOC","prompt":"치환","context":{"doc":{"paragraphs":[
+        "<strong>A &amp; B</strong> 문서",
+        "조건 2 < 3 이고 target_val 확인",
+        "<a href=\"https://example.com\">visit example.com</a>",
+        "<strong>dup</strong> and dup"
+    ]}},"provider":{"kind":"openai","baseUrl":"https://api.openai.com/v1","model":"gpt-4o","apiKey":"sk-test"}}"#;
+    let ent_reply = openai_text_reply(
+        r#"{"reply":"완료","operations":[
+            {"kind":"doc.replace_span","index":0,"search":"A & B","replace":"A와 B"},
+            {"kind":"doc.replace_span","index":1,"search":"target_val","replace":"next_val"},
+            {"kind":"doc.replace_span","index":2,"search":"example.com","replace":"site.kr"},
+            {"kind":"doc.replace_span","index":3,"search":"dup","replace":"one"}
+        ]}"#,
+    );
+    let (ent_res, _) = dispatch_raw_llm(ent_req, &ent_reply);
+    let ent_obj = parse_obj(&ent_res.unwrap());
+    assert_eq!(
+        StrictJsonValue::get_field(&ent_obj, "droppedOperations").and_then(StrictJsonValue::as_u64),
+        Some(1),
+        "duplicate visible text is dropped while entity/math/href spans succeed"
+    );
+    assert_eq!(
+        StrictJsonValue::get_field(&ent_obj, "operations")
+            .and_then(StrictJsonValue::as_array)
+            .map(<[StrictJsonValue]>::len),
+        Some(3)
+    );
+
+    // 2. SHEET $A{r} column-absolute, sheet-qualified =S1!A{r} / ='Sheet1'!B{r}, TSV & BASE newline sanitization
+    let mut sheet_cells = vec![
+        r#"{"coord":"A1","raw":"기초","value":"기초"}"#.to_string(),
+        r#"{"coord":"B1","raw":"단가","value":"단가"}"#.to_string(),
+        r#"{"coord":"C1","raw":"합","value":"합"}"#.to_string(),
+        r#"{"coord":"D1","raw":"참조","value":"참조"}"#.to_string(),
+        r#"{"coord":"E1","raw":"시트","value":"시트"}"#.to_string(),
+    ];
+    for r in 2..=4 {
+        sheet_cells.push(format!(r#"{{"coord":"A{r}","raw":"10","value":"10"}}"#));
+        sheet_cells.push(format!(
+            r#"{{"coord":"B{r}","raw":"메모{r}\n둘째줄\t끝","value":"메모{r}\n둘째줄\t끝"}}"#
+        ));
+        sheet_cells.push(format!(
+            r#"{{"coord":"C{r}","raw":"=$A{r}*10","value":"100"}}"#
+        ));
+        sheet_cells.push(format!(
+            r#"{{"coord":"D{r}","raw":"=S1!A{r}","value":"10"}}"#
+        ));
+        sheet_cells.push(format!(
+            r#"{{"coord":"E{r}","raw":"='Sheet1'!A{r}","value":"10"}}"#
+        ));
+    }
+    let s_req = format!(
+        r#"{{"action":"copilot_run","mode":"ask","module":"SHEET","prompt":"검토","context":{{"sheet":{{"name":"S1","cells":[{}]}}}},"provider":{{"kind":"openai","baseUrl":"https://api.openai.com/v1","model":"gpt-4o","apiKey":"sk-test"}}}}"#,
+        sheet_cells.join(",")
+    );
+    let (_, s_reqs) = dispatch_raw_llm(&s_req, &openai_text_reply("ok"));
+    let s_body = &s_reqs[0].body_json;
+    assert!(
+        s_body.contains("동형수식: C2:C4 => =$A{r}*10"),
+        "column-abs ref normalized: {s_body}"
+    );
+    assert!(
+        s_body.contains("동형수식: D2:D4 => =S1!A{r}"),
+        "short sheet-qualified ref preserved: {s_body}"
+    );
+    assert!(
+        s_body.contains("동형수식: E2:E4 => ='Sheet1'!A{r}"),
+        "quoted sheet ref preserved: {s_body}"
+    );
+    assert!(
+        !s_body.contains("메모2\\n둘째줄"),
+        "TSV cell newlines sanitized: {s_body}"
+    );
+    assert!(
+        s_body.contains("메모2 둘째줄 끝"),
+        "TSV cell stays single line: {s_body}"
+    );
+
+    let base_req = r#"{"action":"copilot_run","mode":"ask","module":"BASE","prompt":"확인","context":{"base":{"tables":["T"],"table":"T","totalRecords":1,"fields":[{"name":"메모","kind":"text"}],"records":[["첫줄\n둘째|줄"]]}},"provider":{"kind":"openai","baseUrl":"https://api.openai.com/v1","model":"gpt-4o","apiKey":"sk-test"}}"#;
+    let (_, base_reqs) = dispatch_raw_llm(base_req, &openai_text_reply("ok"));
+    assert!(
+        base_reqs[0].body_json.contains("  [0] 첫줄 둘째/줄"),
+        "BASE pipe & newline sanitized: {}",
+        base_reqs[0].body_json
+    );
+
+    // 3. Compatible (non-official) provider in read-only mode gets JSON toolCalls instructions
+    let ollama_pdf = r#"{"action":"copilot_run","mode":"ask","module":"PDF","prompt":"찾기","context":{"pdf":{"text":"[1쪽] 요약","pageCount":3}},"provider":{"kind":"ollama","model":"qwen3"}}"#;
+    let (_, ol_reqs) = dispatch_raw_llm(ollama_pdf, &openai_text_reply("확인"));
+    assert!(ol_reqs[0].body_json.contains("search_pdf_pages"));
+    assert!(ol_reqs[0].body_json.contains("toolCalls"));
+    let oai_pdf = r#"{"action":"copilot_run","mode":"ask","module":"PDF","prompt":"찾기","context":{"pdf":{"text":"[1쪽] 요약","pageCount":3}},"provider":{"kind":"openai","baseUrl":"https://api.openai.com/v1","model":"gpt-4o","apiKey":"sk-test"}}"#;
+    let (_, oa_reqs) = dispatch_raw_llm(oai_pdf, &openai_text_reply("확인"));
+    assert!(oa_reqs[0].body_json.contains("search_pdf_pages"));
+    assert!(!oa_reqs[0].body_json.contains("toolCalls"));
+
+    // 4. Unpaired high surrogate inside streamed emit_copilot_turn reply does not stall following characters
+    let edit_req = r#"{"action":"copilot_run","requestId":"r-surr","stream":true,"mode":"edit","module":"DOC","prompt":"x","context":{"doc":{"paragraphs":["본문"]}},"provider":{"kind":"openai","baseUrl":"https://api.openai.com/v1","model":"gpt-4o","apiKey":"sk-test"}}"#;
+    let surr_chunks = [
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"emit_copilot_turn\",\"arguments\":\"{\\\"reply\\\":\\\"앞\\\\uD83D\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"!뒤\\\",\\\"operations\\\":[]}\"}}]}}]}\n\n",
+        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":50,\"completion_tokens\":10,\"prompt_cache_hit_tokens\":40}}\n\n",
+        "data: [DONE]\n\n",
+    ];
+    let (surr_res, _, surr_pieces) = dispatch_stream_chunks(edit_req, &surr_chunks);
+    assert_eq!(surr_pieces.join(""), "앞\u{FFFD}!뒤");
+    let surr_obj = parse_obj(&surr_res.unwrap());
+    let u = StrictJsonValue::get_field(&surr_obj, "usage")
+        .and_then(StrictJsonValue::as_object)
+        .unwrap();
+    assert_eq!(
+        StrictJsonValue::get_field(u, "cachedTokens").and_then(StrictJsonValue::as_u64),
+        Some(40)
+    );
+}

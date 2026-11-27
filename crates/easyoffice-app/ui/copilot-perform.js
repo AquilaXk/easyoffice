@@ -44,14 +44,19 @@
           if (kind === "doc.replace_span") {
             const index = Number(op?.index);
             if (Number.isInteger(index) && index >= 0) {
+              const docHtml = host.__EASYOFFICE_COPILOT_DOC_HTML__;
               const blockEl = docBlocksOf(document.getElementById("doc-editor"))[index];
-              const cur = blockEl ? String(blockEl.textContent || "") : "";
+              const cur = blockEl
+                ? (docHtml?.plainActiveTextOfBlock ? docHtml.plainActiveTextOfBlock(blockEl) : String(blockEl.textContent || ""))
+                : "";
               const search = String(op?.search ?? "");
               const replace = String(op?.replace ?? "");
               const at = search ? cur.indexOf(search) : -1;
-              const nextText = at >= 0 ? cur.slice(0, at) + replace + cur.slice(at + search.length) : cur;
-              const hasMarkup = Boolean(blockEl?.querySelector?.("span.eo-run, a, strong, em, u, s")) || hasInlineMarkup(replace);
-              targets.push({ opIndex, kind: "doc-replace-span", entry: 0, index, text: nextText, atomicDoc: hasMarkup });
+              const unique = at >= 0 && cur.indexOf(search, at + 1) < 0;
+              const before = unique ? cur.slice(0, at) : cur;
+              const after = unique ? cur.slice(at + search.length) : "";
+              const hasMarkup = Boolean(blockEl?.querySelector?.("span.eo-run, a, strong, em, u, s, del, ins")) || hasInlineMarkup(replace);
+              targets.push({ opIndex, kind: "doc-replace-span", entry: 0, index, before, after, text: replace, atomicDoc: hasMarkup });
             }
           } else if (kind === "doc.replace_paragraphs" && Array.isArray(op.replacements)) {
             op.replacements.forEach((rep, entry) => {
@@ -127,10 +132,8 @@
             : (prefix ? { ...origRep, text: prefix } : null);
           op.replacements = keepFirst(op.replacements, partial);
         } else if (target.kind === "doc-replace-span") {
-          if (!fullAtomic && !stop.unstarted) {
-            if (prefix) op.replace = prefix;
-          }
-          if (stop.unstarted || (target.atomicDoc && !fullAtomic)) return;
+          if (stop.unstarted || (!fullAtomic && (target.atomicDoc || !prefix))) return;
+          if (!fullAtomic) op.replace = prefix;
         } else if (target.kind === "doc-append" || target.kind === "doc-range") {
           const item = op[target.key][target.entry];
           const partial = target.atomicDoc
@@ -346,6 +349,21 @@
         return typeOver(el, t);
       }
 
+      async function docSpanTarget(t) {
+        const el = docBlocksOf(document.getElementById("doc-editor"))[t.index];
+        if (!el) return typeInNewBlock(t, null);
+        remember(el);
+        el.scrollIntoView?.({ block: "nearest" });
+        await glideTo(caretAt(el));
+        await drag([el]);
+        if (stopped) return { typed: 0 };
+        cursor.setSelection([]);
+        el.textContent = t.before + t.after;
+        return typeInto(el, t.text, (prefix) => {
+          el.textContent = t.before + prefix + t.after;
+        });
+      }
+
       // 범위 교체: 처음에 옛 범위를 끌어 선택해 가리고, 새 블록들을 그 자리에 차례로 쳐 넣는다.
       const rangeAnchors = new Map();
 
@@ -397,7 +415,7 @@
       };
       const drivers = {
         "doc-replace": docTarget,
-        "doc-replace-span": docTarget,
+        "doc-replace-span": docSpanTarget,
         "doc-append": (t) => typeInNewBlock(t, null),
         "doc-range": docRangeTarget,
         "sheet-cell": sheetTarget,

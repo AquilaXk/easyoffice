@@ -553,13 +553,22 @@
     }
 
     function buildHistoryPayload() {
-      const completed = messages.filter((m) => !m.pending && !m.error);
-      const raw = completed.slice(-MAX_HISTORY_ITEMS).map((m) => ({
+      const completed = [];
+      for (let i = 0; i < messages.length; i += 1) {
+        const m = messages[i];
+        if (!m || m.pending || m.error) continue;
+        if (m.role === "user") {
+          const next = messages[i + 1];
+          if (next && next.role === "assistant" && (next.pending || next.error)) continue;
+        }
+        completed.push(m);
+      }
+      const raw = completed.map((m) => ({
         role: m.role,
         text: m.role === "user" ? String(m.text || "") : String(m.reply || ""),
       }));
       const compactApi = host.__EASYOFFICE_COPILOT_CONTEXT_COMPACT__;
-      return compactApi ? compactApi.compactHistory(raw, MAX_HISTORY_ITEMS) : raw;
+      return compactApi ? compactApi.compactHistory(raw, MAX_HISTORY_ITEMS) : raw.slice(-MAX_HISTORY_ITEMS);
     }
 
     let promptCacheSession = "s-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
@@ -591,7 +600,7 @@
           autoGrowTextarea(inputEl);
         }
       }
-      if (messages.length >= MAX_MESSAGES) messages.splice(0, messages.length - MAX_MESSAGES + 2);
+      if (messages.length >= MAX_MESSAGES) messages.splice(0, messages.length - MAX_MESSAGES + 4);
       turnCounter += 1;
       const turnId = "turn-" + turnCounter;
       messages.push({ id: turnId + "-u", role: "user", text: request.prompt });

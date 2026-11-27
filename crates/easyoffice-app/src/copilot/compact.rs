@@ -245,19 +245,32 @@ fn normalize_row_formula(formula: &str, base_row: u32) -> String {
     let mut out = String::with_capacity(formula.len() + 8);
     let mut i = 0usize;
     let mut in_quotes = false;
+    let mut in_single_quotes = false;
     while i < bytes.len() {
         let b = bytes[i];
-        if b == b'"' {
+        if b == b'"' && !in_single_quotes {
             in_quotes = !in_quotes;
             out.push('"');
             i += 1;
             continue;
         }
-        if !in_quotes && b.is_ascii_alphabetic() {
+        if b == b'\'' && !in_quotes {
+            in_single_quotes = !in_single_quotes;
+            out.push('\'');
+            i += 1;
+            continue;
+        }
+        if !in_quotes && !in_single_quotes && b.is_ascii_alphabetic() {
             let prev_ok = i == 0
+                || (bytes[i - 1] == b'$'
+                    && (i == 1
+                        || !(bytes[i - 2].is_ascii_alphanumeric()
+                            || bytes[i - 2] == b'_'
+                            || bytes[i - 2] == b'.')))
                 || !(bytes[i - 1].is_ascii_alphanumeric()
                     || bytes[i - 1] == b'_'
-                    || bytes[i - 1] == b'$');
+                    || bytes[i - 1] == b'$'
+                    || bytes[i - 1] == b'.');
             if prev_ok {
                 let col_start = i;
                 while i < bytes.len() && bytes[i].is_ascii_alphabetic() && i - col_start < 3 {
@@ -271,7 +284,10 @@ fn normalize_row_formula(formula: &str, base_row: u32) -> String {
                     let next_ok = i == bytes.len()
                         || !(bytes[i].is_ascii_alphanumeric()
                             || bytes[i] == b'('
-                            || bytes[i] == b'_');
+                            || bytes[i] == b'_'
+                            || bytes[i] == b'!'
+                            || bytes[i] == b'.'
+                            || bytes[i] == b'\'');
                     if next_ok {
                         if let Ok(r) = std::str::from_utf8(&bytes[row_start..i])
                             .unwrap_or("")
@@ -456,7 +472,7 @@ pub fn write_sheet_context(out: &mut String, sheet: &SheetContext, selection: &S
                     } else {
                         format_cell_display(&cell.raw, &cell.value)
                     };
-                    parts.push(text.replace('\t', " "));
+                    parts.push(text.replace(['\t', '\r', '\n'], " "));
                 } else {
                     parts.push(String::new());
                 }
@@ -518,7 +534,11 @@ pub fn write_base_context(out: &mut String, base: &BaseContext) {
     for (idx, row) in base.records.iter().enumerate() {
         let cells: Vec<String> = row
             .iter()
-            .map(|val| escape_context_text(val).replace('|', "/"))
+            .map(|val| {
+                escape_context_text(val)
+                    .replace('|', "/")
+                    .replace(['\r', '\n'], " ")
+            })
             .collect();
         let line = format!("  [{idx}] {}", cells.join(" | "));
         if !push_line(out, &line) {

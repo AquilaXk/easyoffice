@@ -156,10 +156,31 @@
   }
 
   function applyDocOpsToClone(clone, operations, ctx) {
+    const docHtml = host.__EASYOFFICE_COPILOT_DOC_HTML__;
     for (const op of operations) {
       const kind = String(op?.op || op?.type || op?.kind || "").trim();
-      if (kind !== "doc.append" && kind !== "doc.replace_paragraphs") continue;
+      if (kind !== "doc.append" && kind !== "doc.replace_paragraphs" && kind !== "doc.replace_span") continue;
       const existing = ctx.docBlocksOf ? ctx.docBlocksOf(clone) : Array.from(clone.children || []);
+      if (kind === "doc.replace_span") {
+        const idx = Number(op?.index);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= existing.length) {
+          throw new Error("대상을 찾을 수 없는 문단 인덱스입니다.");
+        }
+        const targetEl = existing[idx];
+        if (docHtml?.replaceSpanWithTrackChanges) {
+          docHtml.replaceSpanWithTrackChanges(ctx.document, clone, targetEl, op.search, op.replace);
+        } else {
+          const cleanSearch = String(op?.search ?? "");
+          const cleanReplace = String(op?.replace ?? "");
+          const cur = String(targetEl.textContent || "");
+          const firstAt = cleanSearch ? cur.indexOf(cleanSearch) : -1;
+          if (firstAt < 0 || cur.indexOf(cleanSearch, firstAt + 1) >= 0) {
+            throw new Error("부분 치환 대상 문구를 유일하게 찾을 수 없습니다.");
+          }
+          targetEl.textContent = cur.slice(0, firstAt) + cleanReplace + cur.slice(firstAt + cleanSearch.length);
+        }
+        continue;
+      }
       if (kind === "doc.replace_paragraphs" && Array.isArray(op.replacements)) {
         for (const rep of op.replacements) {
           const idx = Number(rep?.index);

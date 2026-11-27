@@ -55,6 +55,7 @@ fn parse_openai_usage_obj(u: &[(String, StrictJsonValue)]) -> TokenUsage {
         .or_else(|| obj_field(u, "input_tokens_details"))
         .and_then(|d| u64_field(d, "cached_tokens"))
         .or_else(|| u64_field(u, "cached_tokens"))
+        .or_else(|| u64_field(u, "prompt_cache_hit_tokens"))
         .unwrap_or(0);
     let reasoning_tokens = obj_field(u, "completion_tokens_details")
         .or_else(|| obj_field(u, "output_tokens_details"))

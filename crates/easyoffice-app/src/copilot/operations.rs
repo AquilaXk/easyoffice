@@ -74,18 +74,74 @@ fn op_matches_module(kind: &str, module: CopilotModule) -> bool {
     }
 }
 
+fn decode_html_entities(text: &str) -> String {
+    if !text.contains('&') {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(idx) = rest.find('&') {
+        out.push_str(&rest[..idx]);
+        let after = &rest[idx..];
+        let (rep, advance) = if after.starts_with("&amp;") {
+            ("&", 5)
+        } else if after.starts_with("&lt;") {
+            ("<", 4)
+        } else if after.starts_with("&gt;") {
+            (">", 4)
+        } else if after.starts_with("&quot;") {
+            ("\"", 6)
+        } else if after.starts_with("&#39;") {
+            ("'", 5)
+        } else if after.starts_with("&apos;") {
+            ("'", 6)
+        } else if after.starts_with("&nbsp;") {
+            (" ", 6)
+        } else {
+            ("&", 1)
+        };
+        out.push_str(rep);
+        rest = &after[advance..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn strip_simple_inline_tags(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    let mut in_tag = false;
-    for ch in text.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' if in_tag => in_tag = false,
-            _ if !in_tag => out.push(ch),
-            _ => {}
+    let mut rest = text;
+    while let Some(lt) = rest.find('<') {
+        out.push_str(&rest[..lt]);
+        let after = &rest[lt..];
+        let Some(gt) = after.find('>') else {
+            out.push_str(after);
+            rest = "";
+            break;
+        };
+        let inner = &after[1..gt];
+        let trimmed = inner.trim();
+        let is_tag = !inner.contains('<')
+            && trimmed
+                .strip_prefix('/')
+                .unwrap_or(trimmed)
+                .as_bytes()
+                .first()
+                .is_some_and(|b| b.is_ascii_alphabetic());
+        if is_tag {
+            if trimmed.eq_ignore_ascii_case("br")
+                || trimmed.eq_ignore_ascii_case("br/")
+                || trimmed.eq_ignore_ascii_case("br /")
+            {
+                out.push('\n');
+            }
+            rest = &after[gt + 1..];
+        } else {
+            out.push('<');
+            rest = &after[1..];
         }
     }
-    out
+    out.push_str(rest);
+    decode_html_entities(&out)
 }
 
 /// 선택 영역 명령의 결과는 선택한 문단(칸)을 바꾸는 작업 하나만 받는다.
@@ -452,15 +508,13 @@ fn validate_single_operation(
                 .as_ref()
                 .and_then(|d| d.paragraphs.get(index))
             {
-                let raw_hits = para_text.match_indices(search).count();
-                if raw_hits > 1 {
+                let plain = strip_simple_inline_tags(para_text);
+                let plain_hits = plain.match_indices(search).count();
+                if plain_hits > 1 {
                     return None;
                 }
-                if raw_hits == 0 {
-                    let plain = strip_simple_inline_tags(para_text);
-                    if plain.match_indices(search).count() != 1 {
-                        return None;
-                    }
+                if plain_hits == 0 && para_text.match_indices(search).count() != 1 {
+                    return None;
                 }
             }
             Some(CopilotOperation::DocReplaceSpan {

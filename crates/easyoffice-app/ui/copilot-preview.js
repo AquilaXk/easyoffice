@@ -69,11 +69,18 @@
       if (kind === "doc.replace_span") {
         const index = Number(op?.index);
         if (!Number.isInteger(index) || index < 0) return;
-        const before = index < blocks.length ? String(blocks[index].textContent || "") : "";
+        const blockEl = index < blocks.length ? blocks[index] : null;
+        const before = blockEl
+          ? (docHtml?.plainActiveTextOfBlock
+              ? docHtml.plainActiveTextOfBlock(blockEl)
+              : blockText(docHtml ? docHtml.serializeBlockForContext(blockEl) : (blockEl.textContent || "")))
+          : "";
         const search = String(op?.search ?? "");
-        const replace = String(op?.replace ?? "");
+        const replacePlain = blockText(String(op?.replace ?? ""));
         const at = search ? before.indexOf(search) : -1;
-        const after = at >= 0 ? before.slice(0, at) + replace + before.slice(at + search.length) : replace;
+        const after = at >= 0 && before.indexOf(search, at + 1) < 0
+          ? before.slice(0, at) + replacePlain + before.slice(at + search.length)
+          : replacePlain;
         entries.push(change("replace", "문단 " + (index + 1), before, after, { module: "DOC", paragraphIndex: index }, { docIndex: index }));
         return;
       }

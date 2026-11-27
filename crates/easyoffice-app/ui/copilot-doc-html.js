@@ -568,12 +568,28 @@
     return plainPreviewTextOfBlock(raw);
   }
 
-  function collectTextNodes(root, out = []) {
-    for (const child of root.childNodes || []) {
-      if (child.nodeType === 3) out.push(child);
-      else if (child.nodeType === 1) collectTextNodes(child, out);
+  function collectActiveTextEntries(root, out = []) {
+    if (!root) return out;
+    for (const child of Array.from(root.childNodes || [])) {
+      if (child.nodeType === 3) {
+        out.push({ node: child, text: String(child.data || "") });
+      } else if (child.nodeType === 1) {
+        const tag = (child.tagName || "").toLowerCase();
+        const ds = child.dataset || {};
+        if (tag === "del" && ds.eoRevId !== undefined) continue;
+        if (tag === "sup" && ds.eoNoteKind !== undefined) continue;
+        if (tag === "br") {
+          out.push({ br: child, text: "\n" });
+          continue;
+        }
+        collectActiveTextEntries(child, out);
+      }
     }
     return out;
+  }
+
+  function plainActiveTextOfBlock(blockEl) {
+    return collectActiveTextEntries(blockEl).map((e) => e.text).join("");
   }
 
   function replaceSpanWithTrackChanges(document, editor, blockEl, search, replace) {
@@ -582,7 +598,8 @@
     if (!cleanSearch.trim()) {
       throw new Error("검색 대상 문자열은 비어 있을 수 없습니다.");
     }
-    const plain = String(blockEl.textContent || "");
+    const entries = collectActiveTextEntries(blockEl);
+    const plain = entries.map((e) => e.text).join("");
     const firstAt = plain.indexOf(cleanSearch);
     if (firstAt < 0) {
       throw new Error("변경할 대상 구간을 문단에서 찾을 수 없습니다.");
@@ -596,7 +613,8 @@
     if (isTrackChangesActive(editor)) {
       const serialized = serializeInlineChildren(blockEl);
       const serAt = serialized.indexOf(cleanSearch);
-      if (serAt >= 0 && serialized.indexOf(cleanSearch, serAt + 1) < 0) {
+      const insideTag = serAt >= 0 && serialized.lastIndexOf("<", serAt) > serialized.lastIndexOf(">", serAt);
+      if (serAt >= 0 && !insideTag && serialized.indexOf(cleanSearch, serAt + 1) < 0) {
         const nextSer = serialized.slice(0, serAt) + cleanReplace + serialized.slice(serAt + cleanSearch.length);
         return replaceParagraphContentWithTrackChanges(document, editor, blockEl, nextSer);
       }
@@ -604,30 +622,43 @@
       return replaceParagraphContentWithTrackChanges(document, editor, blockEl, nextPlain);
     }
 
-    if (!hasInlineEl) {
+    if (!hasInlineEl && !plain.includes("\n")) {
       const nextPlain = plain.slice(0, firstAt) + cleanReplace + plain.slice(endAt);
       blockEl.replaceChildren();
       populateSanitizedInline(document, blockEl, nextPlain);
       return blockEl;
     }
 
-    // 인라인 서식 노드를 보존하면서 일치한 텍스트 노드 범위만 부분 치환한다.
-    const nodes = collectTextNodes(blockEl);
+    // 인라인 서식 노드를 보존하면서 활성 텍스트 범위(<del>/주석 제외)만 부분 치환한다.
     let offset = 0;
     let wroteReplacement = false;
-    for (const node of nodes) {
-      const len = node.data.length;
+    const needsInlineParse = TAG_LIKE_PLAIN_RE.test(cleanReplace) || cleanReplace.includes("\n");
+    for (const entry of entries) {
+      const len = entry.text.length;
       const nStart = offset;
       const nEnd = offset + len;
       offset = nEnd;
       if (nEnd <= firstAt || nStart >= endAt) continue;
+      if (entry.br) {
+        if (!wroteReplacement) {
+          wroteReplacement = true;
+          const parent = entry.br.parentNode || blockEl;
+          const frag = document.createDocumentFragment();
+          populateSanitizedInline(document, frag, cleanReplace);
+          parent.replaceChild(frag, entry.br);
+        } else {
+          entry.br.remove?.();
+        }
+        continue;
+      }
+      const node = entry.node;
       const localStart = Math.max(0, firstAt - nStart);
       const localEnd = Math.min(len, endAt - nStart);
-      const before = node.data.slice(0, localStart);
-      const after = node.data.slice(localEnd);
+      const before = entry.text.slice(0, localStart);
+      const after = entry.text.slice(localEnd);
       if (!wroteReplacement) {
         wroteReplacement = true;
-        if (TAG_LIKE_PLAIN_RE.test(cleanReplace)) {
+        if (needsInlineParse) {
           const parent = node.parentNode || blockEl;
           const frag = document.createDocumentFragment();
           if (before) frag.appendChild(document.createTextNode(before));
@@ -656,5 +687,6 @@
     replaceSpanWithTrackChanges,
     markBlockDeletedInPlace,
     plainPreviewTextOfBlock,
+    plainActiveTextOfBlock,
   });
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

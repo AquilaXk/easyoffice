@@ -319,3 +319,158 @@ test("HWP 64 KiB Korean trailing truncation emits omittedParagraphs/null slots w
   assert.throws(() => applyCopilotEdits(fakeWasm, fakeInput, parseApplyCopilotEditsParams({ steps: [{ kind: "replace_span", index: 2, search: "중복", replace: "x" }] })), /여러 번/);
   assert.throws(() => applyCopilotEdits(fakeWasm, fakeInput, parseApplyCopilotEditsParams({ steps: [{ kind: "replace_span", index: 0, search: "없는구절", replace: "x" }] })), /찾을 수 없/);
 });
+
+test("regression fixes: live UI chunk eviction across 9 turns, <del> active span replace, cutOperations stop, agent-loop clone check, and HWP target fallback", async () => {
+  // 1. Live copilot-ui history builds chunk-evicted prefix preserving Turn 8 -> Turn 9 shared prefix
+  const histories = [];
+  const uiH = await open({
+    module: "DOC",
+    run: (req) => {
+      if (!req.lightweight) histories.push(req.history || []);
+      return { status: "ok", mode: "ask", reply: "응답 " + req.prompt, operations: [] };
+    },
+  });
+  for (let t = 1; t <= 9; t += 1) {
+    await uiH.send("질문 " + t);
+  }
+  assert.equal(histories.length, 9);
+  assert.equal(histories[6].length, 12, "Turn 7 still carries 6 completed turns (12 items)");
+  assert.equal(histories[7].length, 10, "Turn 8 evicts one 4-item chunk (14 -> 10)");
+  assert.equal(histories[7][0].text, "질문 3");
+  assert.equal(histories[8].length, 12, "Turn 9 appends turn 8 onto exact Turn 8 prefix");
+  assert.deepEqual(histories[8].slice(0, 10), histories[7], "Turn 8 & Turn 9 share exact 10-item cache prefix");
+
+  // 2. <del data-eo-rev-id> and <sup data-eo-note-kind> excluded in replaceSpanWithTrackChanges & preview
+  const docHtml = uiH.host.__EASYOFFICE_COPILOT_DOC_HTML__;
+  const preview = uiH.host.__EASYOFFICE_CREATE_COPILOT_PREVIEW__({
+    document: uiH.document,
+    win: uiH.host,
+    docBlocksOf: docHtml.docBlocksOf,
+    slideDeckState: [],
+    sheetDataStore: {},
+    getActiveSheetName: () => "S1",
+  });
+  const editor = uiH.document.getElementById("doc-editor");
+  const p = uiH.document.createElement("p");
+  const del = uiH.document.createElement("del");
+  del.dataset.eoRevId = "1";
+  del.textContent = "매출 100";
+  const sup = uiH.document.createElement("sup");
+  sup.dataset.eoNoteKind = "fn";
+  sup.textContent = "1";
+  p.appendChild(del);
+  p.appendChild(uiH.document.createTextNode("현행 매출 100"));
+  p.appendChild(sup);
+  editor.replaceChildren(p);
+
+  assert.equal(docHtml.plainActiveTextOfBlock(p), "현행 매출 100");
+  const prevChanges = preview.buildChanges("DOC", [
+    { kind: "doc.replace_span", index: 0, search: "매출 100", replace: "<strong>매출 200</strong>" },
+  ]);
+  assert.equal(prevChanges.entries.length, 1);
+  assert.equal(prevChanges.entries[0].segments.filter((s) => s.kind === "equal" || s.kind === "insert").map((s) => s.text).join(""), "현행 매출 200");
+
+  docHtml.replaceSpanWithTrackChanges(uiH.document, editor, p, "매출 100", "매출 200");
+  assert.equal(del.textContent, "매출 100", "deleted revision node left untouched");
+  assert.equal(docHtml.plainActiveTextOfBlock(p), "현행 매출 200");
+
+  // 3. Performer collectTargets + cutOperations on doc.replace_span preserves only typed prefix of replace
+  p.textContent = "안녕 세계 끝";
+  const perfEnv = { ...uiH.host };
+  loadUiModule(UI("copilot-timeline.js"), perfEnv);
+  loadUiModule(UI("copilot-perform-slide.js"), perfEnv);
+  loadUiModule(UI("copilot-perform.js"), perfEnv);
+  const performer = perfEnv.__EASYOFFICE_CREATE_COPILOT_PERFORMER__({
+    document: uiH.document,
+    win: perfEnv,
+    docBlocksOf: docHtml.docBlocksOf,
+    slideDeckState: [],
+    getActiveSlideIndex: () => 0,
+    getActiveSheetName: () => "S1",
+    blockText: (s) => String(s ?? ""),
+    isReducedMotion: () => false,
+    createCursor: () => ({ timing: {}, show() {}, hide() {}, destroy() {}, place() {}, setSelection() {}, setCaret() {}, setIdle() {}, moveTo: async () => true, press() {} }),
+    createTypist: () => ({ type: async () => ({ typed: 0 }), stop() {} }),
+  });
+  const spanOps = [{ kind: "doc.replace_span", index: 0, search: "세계", replace: "지구별" }];
+  const targets = performer.collectTargets("DOC", spanOps);
+  assert.equal(targets[0].before, "안녕 ");
+  assert.equal(targets[0].after, " 끝");
+  assert.equal(targets[0].text, "지구별");
+
+  const midCut = performer.cutOperations(spanOps, targets, { target: targets[0], typed: 2 });
+  assert.equal(midCut.length, 1);
+  assert.equal(midCut[0].replace, "지구", "mid-typing cut keeps prefix of replace only, not paragraph prefix");
+
+  const zeroCut = performer.cutOperations(spanOps, targets, { target: targets[0], typed: 0 });
+  assert.equal(zeroCut.length, 0, "0 typed before drag drops unstarted replace_span");
+
+  const unstartedCut = performer.cutOperations(spanOps, targets, { target: targets[0], typed: 0, unstarted: true });
+  assert.equal(unstartedCut.length, 0, "unstarted stop drops replace_span");
+
+  // 4. Agent loop verifyProposedOperations checks doc.replace_span against live clone and triggers self-correction
+  let verifyTurn = 0;
+  const verifyReqs = [];
+  const loopH = await open({
+    module: "DOC",
+    run: (req) => {
+      if (req.lightweight) return { status: "ok", mode: "ask", reply: "", operations: [] };
+      verifyReqs.push(req);
+      verifyTurn += 1;
+      if (verifyTurn === 1) {
+        return answer([{ kind: "doc.replace_span", index: 0, search: "존재하지않는구문", replace: "x" }]);
+      }
+      return answer([{ kind: "doc.replace_span", index: 0, search: "문서 본문", replace: "고친 본문" }]);
+    },
+  });
+  const loopP = loopH.document.createElement("p");
+  loopP.textContent = "문서 본문입니다.";
+  loopH.editor.replaceChildren(loopP);
+  await loopH.send("부분 치환", 24);
+  assert.equal(verifyTurn, 2, "invalid doc.replace_span triggered verification retry in agent loop");
+  assert.ok(Array.isArray(verifyReqs[1].loopSteps) && verifyReqs[1].loopSteps.length >= 2, "retry placed in loopSteps");
+
+  // 5. HWP refreshHwpSnapshot falls back directly to targetStart when surrounding window stops before targetStart
+  const hugePara = "가나다".repeat(12000); // > 64 KiB across two paragraphs
+  const hwpParas = Array.from({ length: 25 }, (_, i) => (i === 20 ? "TARGET_AT_20" : `${i}:${hugePara.slice(0, 6000)}`));
+  const extEnv = {};
+  loadUiModule(UI("copilot-text.js"), extEnv);
+  loadUiModule(UI("copilot-ext-ops.js"), extEnv);
+  const seenCalls = [];
+  const extOps = extEnv.__EASYOFFICE_CREATE_COPILOT_EXT_OPS__({
+    document: { getElementById: () => null },
+    getHwpHost: () => ({
+      usesLegacy: () => false,
+      getStatus: () => "ready",
+      call: async (method, params) => {
+        seenCalls.push(params.startIndex);
+        if (method !== "readParagraphRange") return {};
+        const paras = [];
+        let bytes = 0;
+        const end = Math.min(hwpParas.length, params.startIndex + params.count);
+        let truncatedByBytes = false;
+        for (let idx = params.startIndex; idx < end; idx += 1) {
+          const text = hwpParas[idx];
+          const len = Buffer.byteLength(text, "utf8");
+          if (paras.length > 0 && bytes + len > 64 * 1024) {
+            truncatedByBytes = true;
+            break;
+          }
+          bytes += len;
+          paras.push({ index: idx, text });
+        }
+        return {
+          documentGeneration: 1,
+          pageCount: 2,
+          totalParagraphs: hwpParas.length,
+          truncatedByBytes,
+          selection: { hasSelection: true, text: "TARGET_AT_20", startParagraphIndex: 20, endParagraphIndex: 20 },
+          paragraphs: paras,
+        };
+      },
+    }),
+  });
+  const hwpRes = await extOps.extractHwpContextAsync(null);
+  assert.ok(seenCalls.includes(20), `direct fallback fetched targetStart=20: calls=${JSON.stringify(seenCalls)}`);
+  assert.equal(hwpRes.context.doc.paragraphs[20], "TARGET_AT_20");
+});

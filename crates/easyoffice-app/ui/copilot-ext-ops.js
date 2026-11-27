@@ -87,6 +87,14 @@
         for (const p of extra?.paragraphs || []) {
           byIndex.set(p.index, p);
         }
+        if (targetStart >= 0 && (!byIndex.has(targetStart) || (targetEnd >= targetStart && !byIndex.has(targetEnd)))) {
+          const fallbackStart = !byIndex.has(targetStart) ? targetStart : targetEnd;
+          const fallbackCount = Math.min(MAX_CONTEXT_PARAGRAPHS, Math.max(1, winEnd - fallbackStart + 1));
+          const direct = await hwp.call("readParagraphRange", { startIndex: fallbackStart, count: fallbackCount });
+          for (const p of direct?.paragraphs || []) {
+            byIndex.set(p.index, p);
+          }
+        }
       }
 
       cachedHwpSnapshot = {

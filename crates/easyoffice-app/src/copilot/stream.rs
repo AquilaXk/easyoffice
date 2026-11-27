@@ -421,20 +421,28 @@ fn scan_json_str_literal(bytes: &[u8], mut i: usize) -> Option<(String, usize, b
                         return Some((out, i, false));
                     };
                     if (0xD800..=0xDBFF).contains(&hi) {
-                        if i + 12 > bytes.len() || bytes[i + 6] != b'\\' || bytes[i + 7] != b'u' {
+                        if i + 6 == bytes.len()
+                            || (i + 7 == bytes.len() && bytes[i + 6] == b'\\')
+                            || (i + 12 > bytes.len()
+                                && i + 8 <= bytes.len()
+                                && bytes[i + 6] == b'\\'
+                                && bytes[i + 7] == b'u')
+                        {
                             return Some((out, i, false));
                         }
-                        let Some(lo) = parse_hex4(&bytes[i + 8..]) else {
-                            return Some((out, i, false));
-                        };
-                        if (0xDC00..=0xDFFF).contains(&lo) {
-                            let cp = 0x10000
-                                + ((u32::from(hi) - 0xD800) << 10)
-                                + (u32::from(lo) - 0xDC00);
-                            if let Some(ch) = char::from_u32(cp) {
-                                out.push(ch);
+                        if i + 12 <= bytes.len() && bytes[i + 6] == b'\\' && bytes[i + 7] == b'u' {
+                            if let Some(lo) = parse_hex4(&bytes[i + 8..])
+                                .filter(|lo| (0xDC00..=0xDFFF).contains(lo))
+                            {
+                                let cp = 0x10000
+                                    + ((u32::from(hi) - 0xD800) << 10)
+                                    + (u32::from(lo) - 0xDC00);
+                                out.push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                                i += 12;
+                            } else {
+                                out.push('\u{FFFD}');
+                                i += 6;
                             }
-                            i += 12;
                         } else {
                             out.push('\u{FFFD}');
                             i += 6;
