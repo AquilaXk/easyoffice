@@ -736,13 +736,7 @@ fn check_sheet_op(session: &RecalcSession, op: &SheetOp) -> Result<(), EasyOffic
         )));
     }
     match op {
-        SheetOp::Move { moved, order }
-            if moved.is_empty() || moved.len() > names.len() || order.len() > names.len() =>
-        {
-            Err(EasyOfficeError::InvalidArgument(
-                "이동할 시트 수나 탭 순서가 시트 수를 넘습니다.".to_string(),
-            ))
-        }
+        // The moved sheets and the order are checked before anything is read (`sheet_refs_ipc::check_move`).
         SheetOp::Move { .. } => Ok(()),
         SheetOp::Delete { .. } if names.len() < 2 => Err(EasyOfficeError::InvalidArgument(
             "마지막 시트는 삭제할 수 없습니다.".to_string(),

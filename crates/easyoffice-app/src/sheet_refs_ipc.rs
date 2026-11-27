@@ -106,6 +106,35 @@ fn parse_op(entries: &Entries) -> Result<SheetOp, EasyOfficeError> {
     }
 }
 
+/// A move names at least one sheet and gives the session's own sheets, each once (a name's case does not
+/// matter), in their new order. It is checked before any formula, rule or link is read, so a long or
+/// repeating `order` costs one pass over the session's sheets and nothing else.
+fn check_move(op: &SheetOp, tab_order: &[&str]) -> Result<(), EasyOfficeError> {
+    let SheetOp::Move { moved, order } = op else {
+        return Ok(());
+    };
+    let refused = || {
+        EasyOfficeError::InvalidArgument(
+            "시트 이동 요청의 탭 순서가 세션의 시트와 맞지 않습니다.".to_string(),
+        )
+    };
+    if moved.is_empty() || moved.len() > tab_order.len() || order.len() != tab_order.len() {
+        return Err(refused());
+    }
+    let names: std::collections::HashSet<String> =
+        tab_order.iter().map(|name| name.to_lowercase()).collect();
+    let mut unseen = names.clone();
+    if moved
+        .iter()
+        .all(|name| names.contains(&name.to_lowercase()))
+        && order.iter().all(|name| unseen.remove(&name.to_lowercase()))
+    {
+        Ok(())
+    } else {
+        Err(refused())
+    }
+}
+
 /// The rules of the request's sheets whose operand formulas the change rewrites, as
 /// `,"rules":{sheet: rules}`.
 fn followed_rules_json(
@@ -153,6 +182,7 @@ impl EasyOfficeIpcRouter {
             return Ok(EXPIRED.to_string());
         };
         let tab_order: Vec<&str> = tab_order.iter().map(String::as_str).collect();
+        check_move(&op, &tab_order)?;
         let change = op.change(&tab_order);
         let mut rules = String::new();
         followed_rules_json(entries, change, &mut rules)?;

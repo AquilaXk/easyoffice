@@ -125,6 +125,9 @@ fn span_after_move(
     if hit_start == is_moved(end) {
         return SpanAfter::Unchanged;
     }
+    if tab_order.len() != new_order.len() {
+        return SpanAfter::Gone;
+    }
     let (moved_end, other_end) = if hit_start {
         (start, end)
     } else {
@@ -139,9 +142,6 @@ fn span_after_move(
     let (Some(moved_from), Some(other_from), Some(moved_to), Some(other_to)) = places else {
         return SpanAfter::Gone;
     };
-    if tab_order.len() != new_order.len() {
-        return SpanAfter::Gone;
-    }
     if (moved_from < other_from) == (moved_to < other_to) {
         return SpanAfter::Unchanged;
     }

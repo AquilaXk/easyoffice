@@ -320,18 +320,74 @@ fn a_move_answers_the_rules_that_name_a_span_end() {
     assert!(rules.contains("=SUM(Feb:Mar!$B$1)"), "{rules}");
 }
 
+fn refusal(body: &str) -> String {
+    EasyOfficeIpcRouter::dispatch("evaluate_sheet", body)
+        .unwrap_err()
+        .to_string()
+}
+
 #[test]
-fn a_move_with_a_wrong_new_order_closes_only_the_span_of_the_moved_end() {
-    let id = open_with(
-        &["Jan", "Feb", "Mar", "Sum"],
-        &[
-            ("Sum!A1", "=SUM(Jan:Mar!A1)"),
-            ("Sum!A2", "=SUM(Feb:Mar!A1)"),
-        ],
+fn a_move_order_that_is_not_the_sessions_sheets_is_refused_before_anything_is_rewritten() {
+    let tabs = [
+        "Sheet1", "Sheet2", "Sheet3", "Sheet4", "Sheet5", "Sheet6", "Sum",
+    ];
+    let id = open_with(&tabs, &[("Sum!A1", "=SUM(Sheet2:Sheet6!A1)")]);
+    let names = |list: &[&str]| {
+        list.iter()
+            .map(|n| format!("\"{n}\""))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let huge: Vec<String> = (0..5_000).map(|i| format!("\"S{i}\"")).collect();
+    let orders = [
+        // A name twice (and so one of the session's names missing): Sheet2:Sheet6 must not become Sheet3:Sheet6.
+        names(&[
+            "Sheet1", "Sheet6", "Sheet6", "Sheet4", "Sheet5", "Sheet6", "Sheet2",
+        ]),
+        // A name the session does not have.
+        names(&[
+            "Sheet1",
+            "Sheet3",
+            "Sheet4",
+            "Sheet5",
+            "Sheet6",
+            "Elsewhere",
+            "Sum",
+        ]),
+        // The same name in another case twice.
+        names(&[
+            "Sheet1", "Sheet3", "Sheet4", "Sheet5", "Sheet6", "SHEET6", "Sum",
+        ]),
+        // Too short, too long, empty.
+        names(&["Sheet1", "Sheet3", "Sheet4", "Sheet5", "Sheet6", "Sum"]),
+        names(&[
+            "Sheet1", "Sheet3", "Sheet4", "Sheet5", "Sheet6", "Sheet2", "Sum", "Sum",
+        ]),
+        String::new(),
+        huge.join(","),
+    ];
+    // The rules and link targets are malformed on purpose: the order check answers first.
+    let malformed = ",\"rules\":[],\"linkTargets\":7";
+    for order in &orders {
+        let plain = moved(&id, r#""Sheet2""#, order);
+        let message = refusal(&plain);
+        assert!(message.contains("탭 순서"), "{order}: {message}");
+        let with_rules = refs(
+            &id,
+            &format!("\"op\":\"move\",\"sheets\":[\"Sheet2\"],\"order\":[{order}]{malformed}"),
+        );
+        let message = refusal(&with_rules);
+        assert!(message.contains("탭 순서"), "{order}: {message}");
+    }
+    // The session's own names in another case are a fine order.
+    let fine = names(&[
+        "sheet1", "SHEET3", "Sheet4", "Sheet5", "Sheet6", "sheet2", "SUM",
+    ]);
+    let got = texts(&call(&moved(&id, r#""Sheet2""#, &fine)));
+    assert_eq!(
+        got,
+        vec![("Sum!A1".to_string(), "=SUM(Sheet3:Sheet6!A1)".to_string())]
     );
-    // The order lacks Mar, which is the other end of the span.
-    let got = texts(&call(&moved(&id, r#""Jan""#, r#""Feb","Jan","Sum""#)));
-    assert_eq!(got, vec![("Sum!A1".to_string(), "=SUM(#REF!)".to_string())]);
 }
 
 /// `fmt` saved from the structured `sheets` (a JSON array) and decoded again: the JSON the file opens as.
