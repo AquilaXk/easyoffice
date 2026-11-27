@@ -7,6 +7,10 @@
   const MAX_CONTEXT_TEXT_CHARS = 24000;
   const MAX_PDF_SEARCH_HITS = 20;
   const HWP_SURROUNDING_WINDOW = 16;
+  // The HWP editor's snapshot holds up to 2048 paragraphs; the page applies at most 64 operations at once.
+  const MAX_HWP_PARAGRAPH_INDEX = 2047;
+  const MAX_HWP_ITEMS = 2048;
+  const MAX_HWP_OPERATIONS = 64;
 
   function plainTextFromDocItem(item) {
     const docHtml = host.__EASYOFFICE_COPILOT_DOC_HTML__;
@@ -212,6 +216,15 @@
       };
     }
 
+    // The paragraphs a range replacement covers, held inside the document the snapshot read (the DOC path
+    // does the same with the blocks it has), so an `endIndex` of 2e9 cannot make the loops that read it run.
+    function hwpRange(op, total) {
+      const last = total > 0 ? Math.min(total - 1, MAX_HWP_PARAGRAPH_INDEX) : MAX_HWP_PARAGRAPH_INDEX;
+      const start = Number.isInteger(op.startIndex) ? Math.min(last, Math.max(0, op.startIndex)) : 0;
+      const end = Number.isInteger(op.endIndex) ? Math.min(last, Math.max(start, op.endIndex)) : total > 0 ? last : start;
+      return { start, end };
+    }
+
     function hwpEntries(op, entries, change) {
       const kind = String(op.op || op.type || op.kind || "");
       const byIndex = cachedHwpSnapshot?.byIndex || new Map();
@@ -228,7 +241,7 @@
         return;
       }
       if (kind === "doc.replace_paragraphs" && Array.isArray(op.replacements)) {
-        for (const rep of op.replacements) {
+        for (const rep of op.replacements.slice(0, MAX_HWP_ITEMS)) {
           const idx = Number(rep?.index);
           if (!Number.isInteger(idx) || idx < 0) continue;
           const before = byIndex.get(idx)?.text ?? "";
@@ -238,10 +251,9 @@
         return;
       }
       const items = Array.isArray(op.blocks) ? op.blocks : Array.isArray(op.paragraphs) ? op.paragraphs : op.text !== undefined ? [String(op.text)] : [];
-      const afterText = items.map(plainTextFromDocItem).join("\n");
+      const afterText = items.slice(0, MAX_HWP_ITEMS).map(plainTextFromDocItem).join("\n");
       if (kind === "doc.replace_paragraphs") {
-        const start = Number.isInteger(op.startIndex) ? Math.max(0, op.startIndex) : 0;
-        const end = Number.isInteger(op.endIndex) ? Math.max(start, op.endIndex) : Math.max(0, total - 1);
+        const { start, end } = hwpRange(op, total);
         const beforeParts = [];
         for (let i = start; i <= end; i += 1) beforeParts.push(byIndex.get(i)?.text ?? "");
         entries.push(change("replace", "문단 " + (start + 1) + (end > start ? "~" + (end + 1) : ""), beforeParts.join("\n"), afterText, { module: "HWP", paragraphIndex: start }));
@@ -266,11 +278,18 @@
     async function applyHwpOperations(operations) {
       const hwp = getEmbedHwpHost();
       if (!hwp) throw new Error("한글 편집기가 아직 준비되지 않았습니다.");
+      if (!Array.isArray(operations) || operations.length > MAX_HWP_OPERATIONS) {
+        throw new Error("코파일럿 작업 개수가 허용 상한(" + MAX_HWP_OPERATIONS + "개)을 초과했습니다.");
+      }
       const steps = [];
       const locations = [];
 
       for (const op of operations) {
         const kind = String(op?.op || op?.type || op?.kind || "").trim();
+        const listed = Array.isArray(op?.replacements) ? op.replacements : Array.isArray(op?.blocks) ? op.blocks : Array.isArray(op?.paragraphs) ? op.paragraphs : [];
+        if (listed.length > MAX_HWP_ITEMS) {
+          throw new Error("코파일럿 문단 개수가 허용 상한(" + MAX_HWP_ITEMS + "개)을 초과했습니다.");
+        }
         if (kind === "doc.replace_span") {
           const idx = Number(op?.index);
           if (!Number.isInteger(idx) || idx < 0) throw new Error("한글 부분 교체 대상 문단 번호가 올바르지 않습니다.");
@@ -288,8 +307,7 @@
         } else if (kind === "doc.replace_paragraphs") {
           const items = Array.isArray(op.blocks) ? op.blocks : Array.isArray(op.paragraphs) ? op.paragraphs : [String(op.text ?? "")];
           const texts = items.map(plainTextFromDocItem);
-          const startIndex = Number.isInteger(op.startIndex) ? Math.max(0, op.startIndex) : 0;
-          const endIndex = Number.isInteger(op.endIndex) ? Math.max(startIndex, op.endIndex) : Math.max(0, (cachedHwpSnapshot?.totalParagraphs || 1) - 1);
+          const { start: startIndex, end: endIndex } = hwpRange(op, cachedHwpSnapshot?.totalParagraphs || 0);
           steps.push({ kind: "replace_range", startIndex, endIndex, texts });
           locations.push({ module: "HWP", label: "문단 " + (startIndex + 1), paragraphIndex: startIndex });
         } else if (kind === "doc.append") {
