@@ -192,7 +192,7 @@ export const docSteps = [
   }],
 
   // PD-376: every field, combo box and color button of the 글꼴 dialog has the reference dialog's box (22px high, 11px text), the three
-  // controls under 한글 글꼴, 글꼴 스타일 and 크기 start on one line, and the list boxes use the reference's list rows.
+  // controls under 한글 글꼴, 글꼴 스타일 and 크기 start on one line with no empty area below them.
   ["글꼴 대화상자의 모든 컨트롤이 참조 대화상자의 높이·글자 크기를 쓰고 한글 글꼴·글꼴 스타일·크기가 한 줄에서 시작한다", async (page) => {
     await typeFirstParagraph(page, "가나다라");
     await page.evaluate(() => document.querySelector('.md-item[data-studio-menu-cmd="font-dialog"]').click());
@@ -208,13 +208,17 @@ export const docSteps = [
       for (const box of boxes) assert.deepEqual([box.height, box.font], [22, "11px"], `${tab}: ${box.id}`);
     }
     await page.click("#doc-font-tab-font");
-    const tops = await page.$$eval('.custom-select[data-select-id="doc-font-family"], #doc-font-style, #doc-font-size', (els) => els.map((el) => el.getBoundingClientRect().top));
+    const tops = await page.$$eval('.custom-select[data-select-id="doc-font-family"], .custom-select[data-select-id="doc-font-style"], #doc-font-size', (els) => els.map((el) => el.getBoundingClientRect().top));
     assert.equal(new Set(tops).size, 1, `한글 글꼴, 글꼴 스타일 and 크기 start on one line: ${tops}`);
-    const rows = await page.$$eval("#doc-font-size-list .goto-bookmark-item", (els) => els.map((el) => getComputedStyle(el).fontSize));
-    assert.ok(rows.length > 0 && rows.every((size) => size === "11px"), "the list rows have the field's text size");
-    const lists = await page.$$eval("#doc-font-size-list, #doc-font-style-list", (els) => els.map((el) => ({ height: el.getBoundingClientRect().height, row: el.querySelector(".goto-bookmark-item").getBoundingClientRect().height })));
-    for (const list of lists) assert.equal((list.height - 2) % list.row, 0, `a list shows whole rows: ${JSON.stringify(list)}`);
-    assert.equal(lists[0].height, lists[1].height, "both lists have one height");
+    // 크기 is the reference's 기준 크기 field (60px) and its spin buttons sit inside it: nothing is cut. The block holds no empty rows: it ends where 영어 글꼴 ends.
+    const size = await page.$eval("#doc-font-size", (el) => ({ width: el.getBoundingClientRect().width, clipped: el.scrollWidth > el.clientWidth }));
+    assert.deepEqual(size, { width: 60, clipped: false });
+    const block = await page.evaluate(() => ({
+      end: document.querySelector("#doc-font-pane-font .dialog-font-top").getBoundingClientRect().bottom,
+      latin: document.querySelector('.custom-select[data-select-id="doc-font-latin"]').getBoundingClientRect().bottom,
+      colors: document.querySelector("#doc-font-pane-font .dialog-font-colors").getBoundingClientRect().top,
+    }));
+    assert.deepEqual([block.end - block.latin, block.colors - block.end], [0, 6], "no empty area under 영어 글꼴, and the next row is 6px below");
     // Every group is the same distance from the next on both tabs, the last group of a tab from the preview group included.
     for (const tab of ["font", "advanced"]) {
       await page.click(`#doc-font-tab-${tab}`);
@@ -240,8 +244,8 @@ export const docSteps = [
     await page.keyboard.press("Shift+ArrowLeft");
     await page.evaluate(() => document.querySelector('.md-item[data-studio-menu-cmd="font-dialog"]').click());
     await page.waitForSelector("#doc-font-dialog[open]");
-    await page.click("#doc-font-size-list .goto-bookmark-item:nth-child(6)");
-    assert.equal(await page.inputValue("#doc-font-size"), "12", "a row of the size list fills the field");
+    await page.fill("#doc-font-size", "12");
+    await page.selectOption("#doc-font-style", "굵게");
     await page.click("#doc-font-color-host [data-color-toggle]");
     await page.click('#doc-font-color-host .sb-hl-swatch[aria-label="#ff0000"]');
     await page.selectOption("#doc-font-underline-style", "14");
@@ -274,6 +278,7 @@ export const docSteps = [
     assert.equal(hit.underlineColor, "0000FF");
     assert.equal(hit.color, "FF0000");
     assert.equal(hit.sizeHalfPt, 24);
+    assert.equal(hit.bold, true, "the chosen 글꼴 스타일 reaches the run");
     assert.deepEqual([hit.font, hit.fontEastAsia], ["Pretendard", "바탕"], "영어 글꼴 and 한글 글꼴 are two run values");
     assert.equal(await page.$eval(`${EDITOR} .eo-run`, (el) => el.style.fontFamily.replaceAll('"', "")), "Pretendard, 바탕", "Latin first, then East Asian");
   }],

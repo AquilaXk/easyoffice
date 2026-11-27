@@ -1633,13 +1633,11 @@
             <label class="dialog-label" for="doc-font-style">글꼴 스타일(<span class="dialog-key">Y</span>):</label>
             <label class="dialog-label" for="doc-font-size">크기(<span class="dialog-key">S</span>):</label>
             <select id="doc-font-family" class="sb-combo dialog-select" data-accesskey="t"></select>
-            <input id="doc-font-style" class="dialog-text-input dialog-field" type="text" data-accesskey="y" data-list="보통,기울임꼴,굵게,굵게 기울임꼴" />
-            <input id="doc-font-size" class="dialog-input dialog-field" type="number" min="1" max="1638" step="0.5" data-accesskey="s" data-list="8,9,10,10.5,11,12,14,16,18,20,22,24,26,28,36,48,72" />
+            <select id="doc-font-style" class="sb-combo dialog-select" data-accesskey="y"><option value="보통">보통</option><option value="기울임꼴">기울임꼴</option><option value="굵게">굵게</option><option value="굵게 기울임꼴">굵게 기울임꼴</option></select>
+            <input id="doc-font-size" class="dialog-input dialog-field" type="number" min="1" max="1638" step="0.5" data-accesskey="s" list="doc-font-size-presets" />
+            <datalist id="doc-font-size-presets"><option value="8"></option><option value="9"></option><option value="10"></option><option value="10.5"></option><option value="11"></option><option value="12"></option><option value="14"></option><option value="16"></option><option value="18"></option><option value="20"></option><option value="22"></option><option value="24"></option><option value="26"></option><option value="28"></option><option value="36"></option><option value="48"></option><option value="72"></option></datalist>
             <label class="dialog-label" for="doc-font-latin">영어 글꼴(<span class="dialog-key">F</span>):</label>
-            <select id="doc-font-latin" class="sb-combo dialog-select" data-accesskey="f"></select>
-            <div id="doc-font-style-list" class="goto-bookmark-list" aria-label="글꼴 스타일 목록"></div>
-            <div id="doc-font-size-list" class="goto-bookmark-list" aria-label="크기 목록"></div>
-          </div>
+            <select id="doc-font-latin" class="sb-combo dialog-select" data-accesskey="f"></select>          </div>
           <div class="dialog-font-colors">
             <label class="dialog-label" for="doc-font-color">글꼴 색(<span class="dialog-key">C</span>):</label>
             <div id="doc-font-color-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle data-accesskey="c" aria-haspopup="true" aria-expanded="false" title="글꼴 색" aria-label="글꼴 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span class="dialog-swatch-text">자동</span><span class="custom-select-arrow" aria-hidden="true">▾</span></button><input id="doc-font-color" type="color" value="#000000" aria-label="글꼴 색" /><div id="doc-font-color-palette" class="sb-hl-palette" hidden></div></div>
@@ -3340,7 +3338,6 @@
     <script src="./doc-paste-model.js"></script>
     <script src="./doc-paste.js"></script>
     <script src="./doc-line-spacing.js"></script>
-    <script src="./dialog-combo.js"></script>
     <script src="./doc-font-defaults.js"></script>
     <script src="./doc-font-dialog.js"></script>
     <script src="./doc-font-styles.js"></script>

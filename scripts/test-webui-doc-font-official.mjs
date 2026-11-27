@@ -3,17 +3,17 @@ import assert from "node:assert/strict";
 import { flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { createRunHarness, rangeOf, p } from "./test-support/doc-run-harness.mjs";
 
-// The 글꼴 dialog follows the word processor's official dialog: the 배율 box is a field with its presets, the value
-// fields carry their unit (`2pt`), the access keys (Alt+letter) move the focus, and the preview has a frame and a note line.
+// The 글꼴 dialog follows the word processor's official dialog: 글꼴 스타일 is a combo box, 크기 and the 배율 box are spin fields
+// with their presets, the value fields have their unit beside them, the access keys (Alt+letter) move the focus, and the preview has a frame and a note line.
 
 const byId = (h, id) => h.document.getElementById(id);
 const fire = (el, type = "change") => el.dispatchEvent({ type, target: el, bubbles: true });
 const savedRuns = (h) => h.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(h.editor).flatMap((b) => b.runs || []);
 const withKey = (h, key) => savedRuns(h).filter((r) => r[key] !== undefined).map((r) => r[key]);
 
-async function openDialog(h, tab = "advanced") {
+async function openDialog(h, tab = "advanced", { whole = false } = {}) {
   const node = h.blocks[0].childNodes[0];
-  h.selection.addRange(rangeOf(node, 0, node, 1));
+  h.selection.addRange(whole ? rangeOf(h.blocks[0], 0, h.blocks[0], h.blocks[0].childNodes.length) : rangeOf(node, 0, node, 1));
   h.document.dispatchEvent({ type: "selectionchange" });
   await flushAsyncTurns(10);
   h.userClick(h.document.querySelector('.md-item[data-studio-menu-cmd="font-dialog"]'));
@@ -38,19 +38,15 @@ test("배율 is a field you can type into, and its presets are the field's own l
   assert.deepEqual(withKey(h, "scalePercent"), [150]);
 });
 
-test("the arrow keys step through a list box and put the row in the field", async () => {
+test("크기 is the reference's spin field of half-point steps with its presets in a list of its own", async () => {
   const h = await createRunHarness([p("가나다")]);
   await openDialog(h, "font");
   const size = byId(h, "doc-font-size");
-  const press = (key) => size.dispatchEvent({ type: "keydown", key, bubbles: true, preventDefault() {}, stopPropagation() {} });
-  assert.equal(size.value, "10", "the list starts on the field's row");
-  press("ArrowDown");
-  assert.equal(size.value, "10.5");
-  press("ArrowDown");
-  assert.equal(size.value, "11");
-  press("ArrowUp");
-  assert.equal(size.value, "10.5");
-  assert.equal(size.getAttribute("aria-activedescendant"), byId(h, "doc-font-size-list").children[3].id);
+  assert.deepEqual([size.getAttribute("type"), size.classList.contains("dialog-input"), size.getAttribute("step"), size.getAttribute("min")], ["number", true, "0.5", "1"]);
+  assert.equal(size.value, "10");
+  const presets = h.document.getElementById(size.getAttribute("list"));
+  assert.equal(presets.tagName, "DATALIST");
+  assert.deepEqual([...presets.querySelectorAll("option")].map((o) => o.value), ["8", "9", "10", "10.5", "11", "12", "14", "16", "18", "20", "22", "24", "26", "28", "36", "48", "72"]);
 });
 
 test("the value fields are spin fields with the unit beside them, and a pasted number with its unit is accepted", async () => {
@@ -103,23 +99,40 @@ test("글꼴 tab has the official items with their access keys", async () => {
     assert.ok(labels.includes(label), `${label} in ${labels}`);
   }
   assert.deepEqual([...h.document.querySelectorAll("#doc-font-dialog legend")].map((l) => l.textContent).slice(0, 1), ["효과"]);
-  const sizes = [...byId(h, "doc-font-size-list").querySelectorAll(".goto-bookmark-item")].map((row) => row.textContent);
-  assert.deepEqual(sizes, ["8", "9", "10", "10.5", "11", "12", "14", "16", "18", "20", "22", "24", "26", "28", "36", "48", "72"]);
+  const style = byId(h, "doc-font-style");
+  assert.equal(style.tagName, "SELECT", "글꼴 스타일 is a combo box like 한글 글꼴");
+  assert.equal(style.classList.contains("dialog-select"), true);
+  assert.deepEqual([...style.querySelectorAll("option")].map((o) => o.textContent), ["보통", "기울임꼴", "굵게", "굵게 기울임꼴"]);
 });
 
-test("크기 and 글꼴 스타일 are fields with list boxes: a row fills the field and typing highlights the row", async () => {
+test("크기 takes a typed value and 글꼴 스타일 a chosen one, and 확인 writes both", async () => {
   const h = await createRunHarness([p("가나다")]);
   await openDialog(h, "font");
   const size = byId(h, "doc-font-size");
-  const rows = [...byId(h, "doc-font-size-list").querySelectorAll(".goto-bookmark-item")];
-  h.userClick(rows[5]);
-  assert.equal(size.value, "12", "a row fills the field");
   size.value = "2";
   fire(size, "input");
-  assert.equal(rows.findIndex((r) => r.getAttribute("aria-selected") === "true"), rows.findIndex((r) => r.textContent.startsWith("2")), "the first row that starts with the text is highlighted");
-  assert.equal(rows.filter((r) => r.classList.contains("selected")).length, 1, "the highlighted row carries the list's selected class");
+  const style = byId(h, "doc-font-style");
+  style.value = "굵게";
+  fire(style);
   h.userClick(byId(h, "btn-doc-font-apply"));
   assert.deepEqual(savedRuns(h).filter((r) => r.sizeHalfPt).map((r) => r.sizeHalfPt), [4], "2 pt is 4 half-points");
+  assert.equal(savedRuns(h).some((r) => r.bold === true), true);
+});
+
+test("a mixed selection shows 글꼴 스타일 blank, and only a style the user picks is applied", async () => {
+  const h = await createRunHarness([p("가나다")]);
+  const text = h.blocks[0].childNodes[0];
+  h.runs.applyFormat(h.editor, { startContainer: text, startOffset: 0, endContainer: text, endOffset: 1 }, { bold: true });
+  await openDialog(h, "font", { whole: true });
+  const style = byId(h, "doc-font-style");
+  assert.equal(style.value, "", "mixed bold shows nothing");
+  h.userClick(byId(h, "btn-doc-font-apply"));
+  assert.equal(savedRuns(h).filter((r) => r.bold === true).length, 1, "nothing picked leaves the runs as they were");
+  await openDialog(h, "font", { whole: true });
+  style.value = "보통";
+  fire(style);
+  h.userClick(byId(h, "btn-doc-font-apply"));
+  assert.equal(savedRuns(h).filter((r) => r.bold === true).length, 0, "picking 보통 on a mixed selection applies it to every run");
 });
 
 test("글꼴 색 and 밑줄 스타일 write the run's color and underline", async () => {

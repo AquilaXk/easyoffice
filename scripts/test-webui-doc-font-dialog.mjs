@@ -91,7 +91,7 @@ test("확인 applies only what changed on the 글꼴 tab", async () => {
   const [a] = h.blocks;
   await openDialog(h, a);
   const style = byId(h, "doc-font-style");
-  assert.deepEqual([...byId(h, "doc-font-style-list").querySelectorAll(".goto-bookmark-item")].map((o) => o.textContent), ["보통", "기울임꼴", "굵게", "굵게 기울임꼴"], "the 글꼴 스타일 list box");
+  assert.deepEqual([...style.querySelectorAll("option")].map((o) => o.textContent), ["보통", "기울임꼴", "굵게", "굵게 기울임꼴"], "the 글꼴 스타일 combo box");
   assert.equal(style.value, "보통");
   style.value = "굵게 기울임꼴";
   fire(style);

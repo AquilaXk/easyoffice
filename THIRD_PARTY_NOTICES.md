@@ -760,35 +760,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Awesomplete (MIT)
-
-Source: https://github.com/LeaVerou/awesomplete (`awesomplete.js`, Copyright (c) 2015 Lea Verou).
-Nothing is vendored or linked at runtime. The field-and-list-box behavior of the dialogs `crates/easyoffice-app/ui/dialog-combo.js` (PD-376) is ported from it: the instance fields (`index`, `ul`), `goto`, `next`, `previous` and `select`, the `combobox` / `listbox` / `option` ARIA roles with `aria-controls` and `aria-activedescendant`, the mousedown-then-click pick that keeps the focus in the field, and the Up / Down handling (`awesomplete.js` lines 14-141 and 191-319). Changed to fit: plain `{ label, value }` items without the filter, sort, `innerHTML` highlight and status line, `event.key` in place of `keyCode`, a list that is part of the markup and never closes, and a `change` event after a pick.
-
-```
-The MIT License (MIT)
-
-Copyright (c) 2015 Lea Verou
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
 ## Open XML SDK (MIT)
 
 Source: https://github.com/dotnet/Open-XML-SDK (`data/schemas/schemas_microsoft_com_office_word_2010_wordml.json`, Copyright (c) .NET Foundation and Contributors).

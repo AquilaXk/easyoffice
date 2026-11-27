@@ -132,13 +132,15 @@
     }
   }
 
-  // The list boxes of the 글꼴 tab (`data-list` on the field, the `<id>-list` box under it: 글꼴 스타일, 크기). Returns them; the
-  // highlighted row follows the field. 배율's presets are the field's own `<datalist>`.
-  function bindListBoxes(dialog) {
-    const combo = host.__EASYOFFICE_DIALOG_COMBO__;
-    return Array.from(dialog.querySelectorAll("input[data-list]")).map((input) => (
-      combo?.attach(input, dialog.querySelector(`#${input.id}-list`), input.dataset.list.split(","))
-    ));
+  // 글꼴 스타일 is a combo box; a mixed selection shows it blank, by an empty choice that exists only while it is shown.
+  function showStyle(select, key) {
+    const blank = Array.from(select.querySelectorAll("option")).find((option) => option.value === "");
+    if (key === "" && !blank) {
+      const option = select.ownerDocument.createElement("option");
+      option.value = "";
+      select.insertBefore(option, select.firstChild);
+    } else if (key !== "" && blank) blank.remove();
+    select.value = STYLE_LABEL[key] ?? "";
   }
 
   // Alt+letter (Option+letter on a Mac, whose `key` is a symbol, so the physical key is read) moves the focus to the control
@@ -163,7 +165,6 @@
   const PENDING_TITLE = "아직 지원하지 않는 항목입니다";
   let bound = false;
   let current = null;
-  let listBoxes = [];
 
   function open(runs, document) {
     const byId = (id) => document.getElementById(id);
@@ -309,7 +310,7 @@
     els.allcaps.checked = fxParts.allCaps;
     els.hidden.checked = fxParts.hidden;
     els.emphasis.value = String(fxParts.emphasis);
-    els.style.value = STYLE_LABEL[initial.style || "regular"];
+    showStyle(els.style, initial.style);
     els.size.value = initial.size;
     els.strike.checked = initial.strike;
     els.sup.checked = initial.sup;
@@ -358,7 +359,6 @@
         });
       }
       bindNumberFields(els.dialog);
-      listBoxes = bindListBoxes(els.dialog);
       for (const key of Object.keys(COLOR_HOST)) {
         host.__EASYOFFICE_COLOR_PICKER__?.setupColorPicker(els.dialog.querySelector(COLOR_HOST[key]), (picked) => current.setColor(key, picked), { clear: true, clearLabel: "자동" });
       }
@@ -391,7 +391,6 @@
         apply();
       });
     }
-    for (const box of listBoxes) box?.sync();
     els.dialog.showModal();
     els.family.focus();
   }
@@ -470,7 +469,7 @@
     const patch = {};
     Object.assign(patch, fontPatch(els, initial));
     const chosen = styleOfText(els.style.value);
-    if (chosen && chosen !== (initial.style || "regular")) {
+    if (chosen && chosen !== initial.style) {
       const style = STYLE_OF[chosen];
       patch.bold = style.bold ? true : null;
       patch.italic = style.italic ? true : null;
