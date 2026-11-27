@@ -6783,3 +6783,14 @@
 - **Trade-offs** 18·20px 컨트롤이 24px가 되고 명령 팔레트 입력이 작아진다. 3px 단위 안쪽 여백은 1px씩 달라진다.
 - **Verified by** `scripts/test-design-guard.mjs`, 전체 WebKit 묶음(`scripts/webkit-dom/run.mjs`).
 - **Revisit when** 남은 스타일시트(toolbar·styles·base·board·menu-bar·home·content)의 알려진 위반을 줄일 때.
+
+## PD-384 — 나머지 스타일시트의 알려진 크기 위반을 줄이고, 조건부 서식 대화상자 이름을 원문에 맞춘다 (2026-11-28)
+
+- **Decision** 알려진 위반을 toolbar.css 27, styles.css 22, menu-bar.css 11, base.css 9, board.css 8, home.css 4, content.css 2곳에서 모두 0으로 줄였다(copilot.css 6곳은 다른 세션이 맡는다). 간격·안쪽 여백·글자 크기는 `--space-*`·`--font-size-*`, 컨트롤 높이는 `--control-height-sm`(24px)로 바꿨다. 20·22px였던 선택 상자·입력·단추는 24px가 된다. 표 칸 안 입력은 `calc(var(--control-height-sm) - 2 * var(--control-border-width))`로 칸(24px)보다 2px 작게 둔다. 메뉴 항목은 토큰 `--menu-item-line-height`(16px)와 `--menu-item-padding`으로 줄 16px + 위아래 4px = 24px(전 26px)가 되고, 메뉴 제목은 24px 높이(전 30px)다. 수식 입력줄 색 겹침 글자의 왼쪽 여백은 입력 칸과 같은 `--control-padding-x` + 테두리로 맞췄다(전 7px).
+- **크기 검사에서 뺀 것(`DRAWN_SIZES`)** 아이콘·견본·구분선·여러 줄 입력 칸의 줄 수처럼 그림 자체의 크기다. 도구 모음 아이콘(`.tb-sprite`, `.tb-icon-text`, `.tb-icon-svg`, 줄 간격 아이콘, 색 막대 스프라이트), 색 팔레트 견본 14px와 팔레트 줄 간격·최근 색 줄, 도구 구분선 18px, 발표자 노트·메모·차트 계열 입력 칸의 최소 높이, 보드 스타일 색 칩 12px, 메뉴 아이콘 칸 16px와 하위 메뉴 화살표 12px. 도구 줄 높이 56px·34px와 BASE 격자 줄 24px·26px는 선택자가 컨트롤 낱말(`input`, `btn`, `menu` 등)을 갖지 않아 검사 범위 밖이라 그대로 둔다.
+- **조건부 서식 대화상자 이름** 규칙 편집 안내 원문(support.microsoft.com/ko-kr/excel/use-conditional-formatting-to-highlight-information-in-excel)에서 `True일 경우 중지` 확인란과 서식 항목 `숫자, 글꼴, 테두리 또는 채우기`를 확인했다. `이 규칙이 맞으면 아래 규칙 중단` → `True일 경우 중지`, `배경` → `채우기`로 바꿨다. 원문에 없는 확인란 글 `사용`은 뺐고 확인란은 `aria-label`(`채우기`·`글꼴 색`·`테두리`)로 이름을 가진다. `글자` → `글꼴 색`은 원문 본문에서 확인하지 못했고 `글꼴`(굵게·기울임 등 줄)과 겹치지 않게 붙인 이름이다. `우선순위` 줄 이름도 원문에서 확인하지 못해 그대로 둔다.
+- **재사용 판단 (구현 원칙 3단계)** 스타일 값과 문자열 수정이라 크레이트·이식 대상이 없다. 기존 토큰으로 충분해 새 의존성이 없고, 메뉴 항목 토큰 둘만 `tokens.css`에 더했다.
+- **Why** 컨트롤 크기를 Spectrum S 한 벌로 맞추고(PD-378), 크기 검사는 컨트롤 크기만 막는다.
+- **Trade-offs** 22px 컨트롤이 24px가 되어 도구 줄이 조금 커진다. 메뉴 제목 높이가 줄고 메뉴 항목이 2px 낮아진다. 팔레트 견본 간격은 1px 그대로다.
+- **Verified by** `scripts/test-design-guard.mjs`, `scripts/test-webui-sheet-rules.mjs`, 전체 WebKit 묶음(`scripts/webkit-dom/run.mjs`).
+- **Revisit when** copilot.css의 알려진 위반을 줄일 때, `글꼴 색`·`우선순위`의 원문 이름을 확인할 때.

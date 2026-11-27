@@ -2,7 +2,7 @@
 
 ## 지금
 - [ ] 설치본 실기기 점검(아래; 현재 공개판은 `v0.2.3`)
-- [ ] 디자인 가드 알려진 크기 위반 줄이기(PD-383): toolbar.css 27, styles.css 22, menu-bar.css 11, base.css 9, board.css 8, home.css 4, content.css 2 (copilot.css는 다른 세션). 도구 줄 높이 56px·34px처럼 줄 자체 배치 크기는 `DRAWN_SIZES`로 뺄지 판단
+- [ ] 디자인 가드 알려진 크기 위반: copilot.css 6곳이 남음(다른 세션이 줄임, PD-384)
 
 ## v0.2.3 실기기 점검 (macOS·Windows)
 - [ ] 설치·실행, 앱 정보 버전 0.2.3, 아이콘
