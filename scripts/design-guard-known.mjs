@@ -5,16 +5,6 @@
 
 /** Dialog and control rules with a literal px in height, min-height, font-size, line-height, gap or padding, per stylesheet (selector, cut at 110 characters). */
 export const KNOWN_SIZE_VIOLATIONS = {
-  "board.css": [
-    "#pane-board .custom-select",
-    "#pane-board .custom-select-value",
-    "#pane-board .custom-select-sizer",
-    ".board-chart-series-input",
-    ".board-style-group .dialog-swatch",
-    ".board-style-group .dialog-swatch-chip",
-    ".board-style-select",
-    ".board-style-input",
-  ],
   "content.css": [
     "#doc-comment-dialog .doc-comment-textarea",
     ".sheet-chart-btn",

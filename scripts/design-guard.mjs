@@ -120,6 +120,9 @@ export const DRAWN_SIZES = new Map([
   // menu-bar.css (PD-384): the icon box and the sub-menu arrow of a menu item.
   [".md-icon", ["height"]],
   [".md-arrow .eo-icon", ["height"]],
+  // board.css (PD-384): the chart series field's rows and the colour chip of the style bar.
+  [".board-chart-series-input", ["min-height"]],
+  [".board-style-group .dialog-swatch-chip", ["height"]],
 ]);
 
 /**
