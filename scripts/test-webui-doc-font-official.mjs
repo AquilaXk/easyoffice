@@ -132,8 +132,9 @@ test("글꼴 색 and 밑줄 스타일 write the run's color and underline", asyn
   h.userClick(h.document.querySelector('#doc-font-color-host .sb-hl-swatch[aria-label="#ff0000"]'));
   assert.equal(h.document.querySelector("#doc-font-color-host .dialog-swatch-text").textContent, "#FF0000");
   const style = byId(h, "doc-font-underline-style");
-  assert.deepEqual([...style.querySelectorAll("option")].map((o) => o.textContent), ["(없음)", "한 줄"]);
-  style.value = "single";
+  assert.deepEqual([...style.querySelectorAll("option")].map((o) => o.textContent), ["(없음)", "한 줄", "단어만", "이중 선", "굵은 선", "점선", "굵은 점선", "파선", "굵은 파선",
+    "긴 파선", "굵은 긴 파선", "1점 쇄선", "굵은 1점 쇄선", "2점 쇄선", "굵은 2점 쇄선", "물결선", "굵은 물결선", "이중 물결선"]);
+  style.value = "0";
   fire(style);
   h.userClick(byId(h, "btn-doc-font-apply"));
   const run = savedRuns(h).find((r) => r.color);
@@ -141,7 +142,7 @@ test("글꼴 색 and 밑줄 스타일 write the run's color and underline", asyn
   assert.equal(run.underline, true);
   await openDialog(h, "font");
   assert.equal(h.document.querySelector("#doc-font-color-host .dialog-swatch-text").textContent, "#FF0000", "the dialog shows the run's color");
-  assert.equal(byId(h, "doc-font-underline-style").value, "single");
+  assert.equal(byId(h, "doc-font-underline-style").value, "0");
 });
 
 test("기본값으로 설정 asks once and makes the font and size the document's defaults", async () => {
@@ -179,7 +180,7 @@ test("기본값으로 설정 asks once and makes the font and size the document'
 test("the items the engine does not keep yet are visible and off", async () => {
   const h = await createRunHarness([p("가나다")]);
   await openDialog(h, "font");
-  for (const id of ["doc-font-latin", "doc-font-underline-color", "doc-font-emphasis", "doc-font-smallcaps", "doc-font-dstrike", "doc-font-allcaps", "doc-font-hidden", "btn-doc-font-effects"]) {
+  for (const id of ["doc-font-latin", "btn-doc-font-effects"]) {
     assert.equal(byId(h, id).disabled, true, id);
   }
 });

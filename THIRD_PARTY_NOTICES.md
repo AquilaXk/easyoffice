@@ -763,7 +763,7 @@ SOFTWARE.
 ## Awesomplete (MIT)
 
 Source: https://github.com/LeaVerou/awesomplete (`awesomplete.js`, Copyright (c) 2015 Lea Verou).
-Nothing is vendored or linked at runtime. The editable combo box of the dialogs `crates/easyoffice-app/ui/dialog-combo.js` (PD-373) is ported from it: the instance fields (`index`, `ul`, `container`, `isOpened`), `open`, `close`, `goto`, `next`, `previous` and `select`, the `combobox` / `listbox` / `option` ARIA roles with `aria-expanded`, `aria-controls` and `aria-activedescendant`, the mousedown-then-click pick that keeps the focus in the field, and the Enter / Esc / Up / Down handling (`awesomplete.js` lines 14-141 and 191-319). Changed to fit: plain `{ label, value }` items without the filter, sort, `innerHTML` highlight and status line, `event.key` in place of `keyCode`, a toggle arrow, an inline list and a `change` event after a pick.
+Nothing is vendored or linked at runtime. The editable combo box of the dialogs `crates/easyoffice-app/ui/dialog-combo.js` (PD-374) is ported from it: the instance fields (`index`, `ul`, `container`, `isOpened`), `open`, `close`, `goto`, `next`, `previous` and `select`, the `combobox` / `listbox` / `option` ARIA roles with `aria-expanded`, `aria-controls` and `aria-activedescendant`, the mousedown-then-click pick that keeps the focus in the field, and the Enter / Esc / Up / Down handling (`awesomplete.js` lines 14-141 and 191-319). Changed to fit: plain `{ label, value }` items without the filter, sort, `innerHTML` highlight and status line, `event.key` in place of `keyCode`, a toggle arrow, an inline list and a `change` event after a pick.
 
 ```
 The MIT License (MIT)
@@ -792,12 +792,41 @@ SOFTWARE.
 ## Open XML SDK (MIT)
 
 Source: https://github.com/dotnet/Open-XML-SDK (`data/schemas/schemas_microsoft_com_office_word_2010_wordml.json`, Copyright (c) .NET Foundation and Contributors).
-Nothing is vendored or linked at runtime. The OpenType run features of DOCX in `crates/easyoffice-formats/src/rich_char_open_type.rs` (PD-373) follow its schema data: the 16 values of `w14:ST_Ligatures`, the values of `w14:ST_NumSpacing` and `w14:ST_NumForm`, and the elements `w14:ligatures`, `w14:numSpacing`, `w14:numForm`, `w14:stylisticSets` > `w14:styleSet` (`w14:id`, `w14:val`) and `w14:cntxtAlts`. The ligature names are read as a bit set of the four words `standard`, `contextual`, `historical` and `discretional` instead of a table of 16 strings, and every read value is clamped.
+Nothing is vendored or linked at runtime. The OpenType run features of DOCX in `crates/easyoffice-formats/src/rich_char_open_type.rs` (PD-374) follow its schema data: the 16 values of `w14:ST_Ligatures`, the values of `w14:ST_NumSpacing` and `w14:ST_NumForm`, and the elements `w14:ligatures`, `w14:numSpacing`, `w14:numForm`, `w14:stylisticSets` > `w14:styleSet` (`w14:id`, `w14:val`) and `w14:cntxtAlts`. The ligature names are read as a bit set of the four words `standard`, `contextual`, `historical` and `discretional` instead of a table of 16 strings, and every read value is clamped.
 
 ```
 The MIT License (MIT)
 
 Copyright (c) .NET Foundation and Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## docx-rs (MIT)
+
+Source: https://github.com/bokuweb/docx-rs (`docx-core/src/documents/elements/{caps,dstrike,vanish,underline}.rs` and `docx-core/src/reader/run_property.rs`, Copyright (c) 2020 bokuweb).
+Nothing is vendored or linked at runtime. The run text effects of `crates/easyoffice-formats/src/rich_char_fx.rs` (PD-374) take from it which DOCX run property elements carry them (`w:caps`, `w:dstrike`, `w:vanish`, `w:u`) and how its run property reader dispatches on the element name. Its `w:u` keeps the value as an unchecked string and drops `w:color`; here the 17 names of `ST_Underline` are an index, the colour is read, and every read value is checked.
+
+```
+MIT License
+
+Copyright (c) 2020 bokuweb
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

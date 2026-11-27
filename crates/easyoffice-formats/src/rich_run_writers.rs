@@ -28,10 +28,14 @@ pub(crate) fn docx_run_properties(run: &RichRun) -> String {
     if run.italic {
         xml.push_str("<w:i/>");
     }
-    if run.strike {
+    xml.push_str(&run.advanced.fx.docx_caps());
+    if run.advanced.fx.double_strike {
+        xml.push_str("<w:dstrike/>");
+    } else if run.strike {
         xml.push_str("<w:strike/>");
     }
     xml.push_str(run.advanced.docx_snap_xml());
+    xml.push_str(run.advanced.fx.docx_vanish());
     if let Some(color) = run.color.as_deref() {
         xml.push_str(&format!("<w:color w:val=\"{color}\"/>"));
     }
@@ -48,7 +52,7 @@ pub(crate) fn docx_run_properties(run: &RichRun) -> String {
         xml.push_str(&format!("<w:highlight w:val=\"{name}\"/>"));
     }
     if run.underline {
-        xml.push_str("<w:u w:val=\"single\"/>");
+        xml.push_str(&run.advanced.fx.docx_underline());
     }
     if let (Some(fill), None) = (run.highlight.as_deref(), named_highlight) {
         xml.push_str(&format!(
@@ -60,6 +64,7 @@ pub(crate) fn docx_run_properties(run: &RichRun) -> String {
         RichScript::Superscript => xml.push_str("<w:vertAlign w:val=\"superscript\"/>"),
         RichScript::Subscript => xml.push_str("<w:vertAlign w:val=\"subscript\"/>"),
     }
+    xml.push_str(&run.advanced.fx.docx_emphasis());
     xml.push_str(&run.advanced.open_type.docx_xml());
     if xml.is_empty() {
         xml
@@ -143,9 +148,9 @@ pub(crate) fn odt_text_style_xml(index: usize, key: &OdtTextKey) -> String {
         xml.push_str(" fo:font-style=\"italic\"");
     }
     if *underline {
-        xml.push_str(" style:text-underline-style=\"solid\" style:text-underline-width=\"auto\" style:text-underline-color=\"font-color\"");
+        xml.push_str(&adv.fx.odt_underline());
     }
-    if *strike {
+    if *strike && !adv.fx.double_strike {
         xml.push_str(" style:text-line-through-style=\"solid\"");
     }
     if let Some(spacing) = spacing {
@@ -275,7 +280,7 @@ impl RtfRunTables {
         if let Some(spacing) = run.letter_spacing_twips {
             out.push_str(&format!("\\expndtw{spacing} "));
         }
-        out.push_str(&run.advanced.rtf_words());
+        out.push_str(&run.advanced.rtf_words(run.underline));
         if let Some(color) = &run.color {
             if let Some(&idx) = self.color_map.get(color) {
                 out.push_str(&format!("\\cf{idx} "));

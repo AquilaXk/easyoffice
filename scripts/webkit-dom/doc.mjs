@@ -157,7 +157,7 @@ export const docSteps = [
     assert.deepEqual(runs.filter((r) => r.scalePercent).map((r) => [r.text, r.scalePercent, r.positionHalfPt, r.kerningHalfPt]), [["다라", 150, 8, 24]]);
   }],
 
-  // PD-373: 글꼴 > 고급 > OpenType 기능 and the 줄 눈금에 맞춤 box reach the run, its computed style in the real WebKit and the save JSON;
+  // PD-374: 글꼴 > 고급 > OpenType 기능 and the 줄 눈금에 맞춤 box reach the run, its computed style in the real WebKit and the save JSON;
   // the 배율 combo opens its preset list and the unit sits inside the value field.
   ["글꼴 대화상자 OpenType 기능과 줄 눈금 상자가 런과 저장 JSON에 닿고 값 칸에 단위가 든다", async (page) => {
     await typeFirstParagraph(page, "가나다라 1234");
@@ -190,5 +190,48 @@ export const docSteps = [
     assert.equal(hit[0].snapToGrid, false);
     assert.equal(hit[0].letterSpacingTwips, 40);
     assert.equal(hit[0].scalePercent, 150);
+  }],
+
+  // PD-374: the 글꼴 탭's colors, underline style, double strikethrough, capitals, hidden text and emphasis reach the run, its computed style
+  // in the real WebKit and the save JSON.
+  ["글꼴 대화상자 글꼴 탭의 색·밑줄 스타일·이중 취소선·대문자·강조점이 런과 저장 JSON에 닿는다", async (page) => {
+    await typeFirstParagraph(page, "가나다라 abc");
+    await page.keyboard.press("Shift+ArrowLeft");
+    await page.keyboard.press("Shift+ArrowLeft");
+    await page.keyboard.press("Shift+ArrowLeft");
+    await page.evaluate(() => document.querySelector('.md-item[data-studio-menu-cmd="font-dialog"]').click());
+    await page.waitForSelector("#doc-font-dialog[open]");
+    await page.click("#doc-font-size ~ .dialog-combo-list li:nth-child(6)");
+    assert.equal(await page.inputValue("#doc-font-size"), "12", "a row of the size list fills the field");
+    await page.click("#doc-font-color-host [data-color-toggle]");
+    await page.click('#doc-font-color-host .sb-hl-swatch[aria-label="#ff0000"]');
+    await page.selectOption("#doc-font-underline-style", "14");
+    await page.click("#doc-font-underline-color-host [data-color-toggle]");
+    await page.click('#doc-font-underline-color-host .sb-hl-swatch[aria-label="#0000ff"]');
+    await page.check("#doc-font-dstrike");
+    await page.check("#doc-font-allcaps");
+    await page.selectOption("#doc-font-emphasis", "3");
+    await page.click("#btn-doc-font-apply");
+    await page.waitForSelector(`${EDITOR} .eo-run`);
+    const style = await page.$eval(`${EDITOR} .eo-run`, (el) => {
+      const s = getComputedStyle(el);
+      return { size: s.fontSize, color: s.color, line: s.textDecorationLine, kind: s.textDecorationStyle, lineColor: s.textDecorationColor, transform: s.textTransform, mark: s.textEmphasisStyle };
+    });
+    assert.equal(style.size, "16px");
+    assert.equal(style.color, "rgb(255, 0, 0)");
+    assert.match(style.line, /underline/);
+    assert.match(style.line, /line-through/);
+    assert.equal(style.kind, "wavy");
+    assert.equal(style.lineColor, "rgb(0, 0, 255)");
+    assert.equal(style.transform, "uppercase");
+    assert.match(style.mark, /circle/);
+    const runs = await page.evaluate(() => window.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(document.querySelector("#doc-editor")).flatMap((b) => b.runs || []));
+    const hit = runs.find((r) => r.textFx);
+    assert.equal(hit.text, "abc");
+    assert.equal(hit.underline, true);
+    assert.equal(hit.strike, undefined, "a double line is not a single one");
+    assert.equal(hit.underlineColor, "0000FF");
+    assert.equal(hit.color, "FF0000");
+    assert.equal(hit.sizeHalfPt, 24);
   }],
 ];

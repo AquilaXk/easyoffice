@@ -164,7 +164,7 @@
   function formatSpec(spec, run) {
     const runs = host.__EASYOFFICE_DOC_RUNS__;
     const fmt = runs ? runs.fromModelRun(run) : {};
-    if (fmt.size || fmt.spacing || fmt.scale || fmt.position || fmt.kerning || fmt.opentype || fmt.nogrid || fmt.font || fmt.face || fmt.color || fmt.highlight) {
+    if (fmt.size || fmt.spacing || fmt.scale || fmt.position || fmt.kerning || fmt.opentype || fmt.nogrid || fmt.textfx || fmt.ucolor || fmt.font || fmt.face || fmt.color || fmt.highlight) {
       spec = runs.buildRunSpec(fmt, [spec]);
     } else {
       [["strike", "s"], ["underline", "u"], ["italic", "em"], ["bold", "strong"]].forEach(([flag, tag]) => {

@@ -110,6 +110,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "doc-table-style.js",
     "doc-table-tab.js",
     "doc-table.js",
+    "doc-text-fx.js",
     "doc-toc.js",
     "export-dialog.js",
     "file-open.js",

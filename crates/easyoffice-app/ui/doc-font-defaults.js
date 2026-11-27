@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // 기본값으로 설정(D) of the 글꼴 dialog (PD-373): the font and size of the dialog become the document's defaults
+  // 기본값으로 설정(D) of the 글꼴 dialog (PD-374): the font and size of the dialog become the document's defaults
   // (`RichDocument::defaults`, PD-363), the font and size an unstyled paragraph takes. The official dialog asks whether the
   // change is for this document only or for every document built on the default template; this app keeps defaults per
   // document and has no template, so the prompt offers the first choice only.

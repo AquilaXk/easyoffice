@@ -1,4 +1,4 @@
-//! The packed OpenType features and the line-grid switch of a run (`openType`, `snapToGrid`, PD-373) through the save and
+//! The packed OpenType features and the line-grid switch of a run (`openType`, `snapToGrid`, PD-374) through the save and
 //! open requests.
 
 use super::tests::{blocks_array, json_field, request};
@@ -74,6 +74,54 @@ fn values_outside_the_bounds_or_of_the_wrong_kind_reject_the_save() {
             15 | 2 << 4 | 2 << 6 | 1 << 8 | 0xF_FFFF << 9
         ),
         ",\"snapToGrid\":false".to_string(),
+    ] {
+        assert!(save("docx", &ok).is_ok(), "{ok}");
+    }
+}
+
+// The packed text effects and the underline colour (`textFx`, `underlineColor`) of the 글꼴 tab.
+
+#[test]
+fn the_packed_effects_and_the_underline_color_survive_save_and_open() {
+    // double strike, small capitals, emphasis 3 (circle), underline style 14 (wave).
+    let packed = 1 | 2 | (3 << 4) | (14 << 7);
+    let run = format!(",\"underline\":true,\"textFx\":{packed},\"underlineColor\":\"ff0000\"");
+    let docx = save("docx", &run).unwrap();
+    let blocks = open("a.docx", &docx);
+    for pair in [
+        format!("\"textFx\":{packed}"),
+        "\"underlineColor\":\"FF0000\"".to_string(),
+    ] {
+        assert!(blocks.contains(&pair), "{pair} in {blocks}");
+    }
+    let plain = open("b.docx", &save("docx", ",\"underline\":true").unwrap());
+    for key in ["textFx", "underlineColor"] {
+        assert!(!plain.contains(key), "{key} in {plain}");
+    }
+}
+
+#[test]
+fn effect_values_outside_the_bounds_or_of_the_wrong_kind_reject_the_save() {
+    for bad in [
+        ",\"textFx\":0".to_string(),
+        ",\"textFx\":-1".to_string(),
+        format!(",\"textFx\":{}", 1 << 12),
+        format!(",\"textFx\":{}", 5 << 4),
+        format!(",\"textFx\":{}", 17 << 7),
+        ",\"textFx\":1.5".to_string(),
+        ",\"textFx\":\"double\"".to_string(),
+        ",\"textFx\":99999999999999999999".to_string(),
+        ",\"underlineColor\":\"red\"".to_string(),
+        ",\"underlineColor\":\"1234567\"".to_string(),
+        ",\"underlineColor\":12".to_string(),
+    ] {
+        assert!(save("docx", &bad).is_err(), "{bad}");
+    }
+    for ok in [
+        ",\"textFx\":1".to_string(),
+        format!(",\"textFx\":{}", 15 | (4 << 4) | (16 << 7)),
+        ",\"underlineColor\":\"00FF00\"".to_string(),
+        ",\"underlineColor\":\"\"".to_string(),
     ] {
         assert!(save("docx", &ok).is_ok(), "{ok}");
     }

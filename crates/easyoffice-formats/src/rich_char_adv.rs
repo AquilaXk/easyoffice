@@ -6,9 +6,10 @@
 //! a percent of the font size and keep kerning as a switch only, so those two convert with the run's
 //! size and read the switch back as [`DEFAULT_KERNING_HALF_PT`]. HWPX also limits the scale to 10-200 %.
 //!
-//! PD-373 adds the rest of the 고급 tab: the OpenType features ([`OpenType`], DOCX only) and the
+//! PD-374 adds the rest of the 고급 tab: the OpenType features ([`OpenType`], DOCX only) and the
 //! "문서 눈금이 지정되어 있으면 줄 눈금에 맞춤" switch (DOCX `w:snapToGrid`, on unless the run turns it off).
 
+use crate::rich_char_fx::TextFx;
 use crate::rich_char_open_type::OpenType;
 use crate::xml_stream::{attr, Attrs};
 
@@ -39,6 +40,8 @@ const MAX_PERMILLE: i64 = 1_000_000;
 pub struct CharAdvanced {
     /// OpenType features (ligatures, number spacing and form, stylistic sets, contextual alternates).
     pub open_type: OpenType,
+    /// Double strikethrough, capitals, hidden text, underline style and colour, emphasis mark (PD-374).
+    pub fx: TextFx,
     /// The run does not snap to the document's line grid (`w:snapToGrid` off); snapping is the default.
     pub grid_snap_off: bool,
     /// Width of the glyphs in percent of normal (1 to 600, never 100).
@@ -127,6 +130,12 @@ impl CharAdvanced {
         if self.grid_snap_off {
             out.push_str(",\"snapToGrid\":false");
         }
+        if self.fx.pack() != 0 {
+            out.push_str(&format!(",\"textFx\":{}", self.fx.pack()));
+        }
+        if let Some(color) = self.fx.underline_color {
+            out.push_str(&format!(",\"underlineColor\":\"{color:06X}\""));
+        }
     }
 
     /// The settings of `self`, each filled from `inherited` where `self` names none.
@@ -141,6 +150,11 @@ impl CharAdvanced {
                 self.open_type
             },
             grid_snap_off: self.grid_snap_off || inherited.grid_snap_off,
+            fx: if self.fx.is_none() {
+                inherited.fx
+            } else {
+                self.fx
+            },
         }
     }
 
@@ -153,12 +167,12 @@ impl CharAdvanced {
             "kerning" => self.kerning_half_pt = param.and_then(|v| char_kerning(i64::from(v))),
             "up" => self.position_half_pt = lift(1),
             "dn" => self.position_half_pt = lift(-1),
-            _ => {}
+            _ => self.fx.apply_rtf_word(word, param != Some(0)),
         }
     }
 
-    /// The RTF control words of the settings, each followed by a space.
-    pub(crate) fn rtf_words(&self) -> String {
+    /// The RTF control words of the settings, each followed by a space; `underlined` is whether the run has `\ul`.
+    pub(crate) fn rtf_words(&self, underlined: bool) -> String {
         let mut out = String::new();
         if let Some(scale) = self.scale_percent {
             out.push_str(&format!("\\charscalex{scale} "));
@@ -171,6 +185,7 @@ impl CharAdvanced {
         if let Some(kerning) = self.kerning_half_pt {
             out.push_str(&format!("\\kerning{kerning} "));
         }
+        out.push_str(&self.fx.rtf_words(underlined));
         out
     }
 
@@ -225,6 +240,7 @@ impl CharAdvanced {
                 .and_then(|p| position_from_permille((p * 10.0).round() as i64, size_half_pt)),
             kerning_half_pt: matches!(value("style:letter-kerning").as_deref(), Some("true" | "1"))
                 .then_some(DEFAULT_KERNING_HALF_PT),
+            fx: TextFx::from_odt(attrs),
             ..Self::default()
         }
     }
@@ -243,6 +259,7 @@ impl CharAdvanced {
         if self.kerning_half_pt.is_some() {
             xml.push_str(" style:letter-kerning=\"true\"");
         }
+        xml.push_str(&self.fx.odt_attrs());
         xml
     }
 
@@ -304,7 +321,7 @@ mod tests {
         adv.apply_rtf_word("dn", None);
         adv.apply_rtf_word("kerning", Some(24));
         adv.apply_rtf_word("fs", Some(24));
-        assert_eq!(adv.rtf_words(), "\\charscalex150 \\dn6 \\kerning24 ");
+        assert_eq!(adv.rtf_words(false), "\\charscalex150 \\dn6 \\kerning24 ");
         adv.apply_rtf_word("dn", Some(0));
         assert_eq!(adv.position_half_pt, None);
     }

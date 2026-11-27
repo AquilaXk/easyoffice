@@ -12,20 +12,22 @@
   const RUN_CLASS = "eo-run";
   const BOOL_PROPS = ["bold", "italic", "underline", "strike", "superscript", "subscript"];
   const BOOL_PROP_SET = new Set(BOOL_PROPS);
-  const VALUE_PROPS = ["size", "font", "face", "color", "highlight", "spacing", "scale", "position", "kerning", "opentype", "nogrid"];
+  const VALUE_PROPS = ["size", "font", "face", "color", "highlight", "spacing", "scale", "position", "kerning", "opentype", "nogrid", "textfx", "ucolor"];
   const PROPS = [...VALUE_PROPS, ...BOOL_PROPS];
   // Letter spacing (`spacing`): twips added after each character, either way up to 1,584 pt (PD-367).
   const MAX_SPACING_TWIPS = 31680;
   // Advanced settings of the font dialog (PD-372): `scale` is the glyph width in percent (1-600, never 100), `position` the
   // raise (positive) or lowering in half-points (either way up to 1,584 pt, never 0) and `kerning` the smallest kerned size in
   // half-points (1-3,276 = 1,638 pt).
-  // PD-373 adds `opentype` (the packed OpenType features, see `doc-open-type.js`) and `nogrid` (1: the run does not snap to the
+  // PD-374 adds `opentype` (the packed OpenType features, see `doc-open-type.js`) and `nogrid` (1: the run does not snap to the
   // document's line grid, 문서 눈금이 지정되어 있으면 줄 눈금에 맞춤 off; the save carries it as `snapToGrid: false`).
-  const ADVANCED_RANGE = { scale: [1, 600], position: [-3168, 3168], kerning: [1, 3276], opentype: [1, 2 ** 29 - 1], nogrid: [1, 1] };
+  // `textfx` is the packed text effects (double strikethrough, capitals, hidden, underline style, emphasis; `doc-text-fx.js`) and
+  // `ucolor` the underline colour, a hex colour like `color`.
+  const ADVANCED_RANGE = { scale: [1, 600], position: [-3168, 3168], kerning: [1, 3276], opentype: [1, 2 ** 29 - 1], nogrid: [1, 1], textfx: [1, 2 ** 12 - 1] };
   const TWIPS_PER_PX = 15;
   const DATA_KEY = {
     size: "eoSize", font: "eoFont", face: "eoFace", color: "eoColor", highlight: "eoHighlight", spacing: "eoSpacing",
-    scale: "eoScale", position: "eoPosition", kerning: "eoKerning", opentype: "eoOpentype", nogrid: "eoNogrid",
+    scale: "eoScale", position: "eoPosition", kerning: "eoKerning", opentype: "eoOpentype", nogrid: "eoNogrid", textfx: "eoTextfx", ucolor: "eoUcolor",
     bold: "eoBold", italic: "eoItalic", underline: "eoUnderline", strike: "eoStrike",
     superscript: "eoSuperscript", subscript: "eoSubscript",
   };
@@ -83,6 +85,7 @@
     if (n === 0 || (prop === "scale" && n === 100)) return null;
     const [min, max] = ADVANCED_RANGE[prop];
     if (prop === "opentype" && host.__EASYOFFICE_DOC_OPEN_TYPE__?.valid(n) === false) return undefined;
+    if (prop === "textfx" && host.__EASYOFFICE_DOC_TEXT_FX__?.valid(n) === false) return undefined;
     return Number.isInteger(n) && n >= min && n <= max ? n : undefined;
   }
 
@@ -102,7 +105,7 @@
     if (ADVANCED_RANGE[prop]) return advancedValue(prop, value);
     if (prop === "font") return normalizeFont(value) ?? undefined;
     if (prop === "face") return FACE_RE.test(String(value)) ? String(value) : undefined;
-    if (prop === "color" || prop === "highlight") return normalizeColor(value) ?? undefined;
+    if (prop === "color" || prop === "highlight" || prop === "ucolor") return normalizeColor(value) ?? undefined;
     return undefined;
   }
 
@@ -144,7 +147,7 @@
     if (font && FONT_RE.test(font)) fmt.font = font;
     const face = el.dataset[DATA_KEY.face];
     if (face && FACE_RE.test(face)) fmt.face = face;
-    ["color", "highlight"].forEach((p) => {
+    ["color", "highlight", "ucolor"].forEach((p) => {
       const c = normalizeColor(el.dataset[DATA_KEY[p]]);
       if (c) fmt[p] = c;
     });
@@ -230,6 +233,7 @@
       fontStyle: fmt.italic ? "italic" : "",
       textDecoration: deco,
       ...advancedCss(fmt),
+      ...Object.fromEntries(Object.entries(host.__EASYOFFICE_DOC_TEXT_FX__?.css(fmt) || {}).filter(([, v]) => v)),
     };
   }
 
@@ -270,13 +274,17 @@
     st.fontVariantLigatures = advanced.fontVariantLigatures || "";
     st.fontVariantNumeric = advanced.fontVariantNumeric || "";
     st.fontFeatureSettings = advanced.fontFeatureSettings || "";
+    // The text effects (PD-374) set their keys either way, so a run that lost one clears it; the plain decoration stays unless an effect owns it.
+    for (const [key, value] of Object.entries(host.__EASYOFFICE_DOC_TEXT_FX__?.css(fmt) || {})) {
+      if (key !== "textDecoration" || value) st[key] = value;
+    }
   }
 
   // Format of a structured-payload / decoded model run ({sizeHalfPt, font, color, highlight,
   // bold, italic, underline, strike, script}); invalid values are dropped.
   function fromModelRun(run) {
     const patch = normalizePatch({
-      size: run?.sizeHalfPt, spacing: run?.letterSpacingTwips, scale: run?.scalePercent, position: run?.positionHalfPt, kerning: run?.kerningHalfPt, opentype: run?.openType, nogrid: run?.snapToGrid === false ? 1 : undefined, font: run?.font, face: run?.fontFace, color: run?.color, highlight: run?.highlight,
+      size: run?.sizeHalfPt, spacing: run?.letterSpacingTwips, scale: run?.scalePercent, position: run?.positionHalfPt, kerning: run?.kerningHalfPt, opentype: run?.openType, nogrid: run?.snapToGrid === false ? 1 : undefined, textfx: run?.textFx, ucolor: run?.underlineColor, font: run?.font, face: run?.fontFace, color: run?.color, highlight: run?.highlight,
       bold: run?.bold === true ? true : undefined, italic: run?.italic === true ? true : undefined,
       underline: run?.underline === true ? true : undefined, strike: run?.strike === true ? true : undefined,
       superscript: run?.superscript === true || run?.script === "superscript" ? true : undefined,
@@ -586,6 +594,8 @@
       (a.kerning || 0) === (b.kerning || 0) &&
       (a.opentype || 0) === (b.opentype || 0) &&
       (a.nogrid || 0) === (b.nogrid || 0) &&
+      (a.textfx || 0) === (b.textfx || 0) &&
+      (a.ucolor || "") === (b.ucolor || "") &&
       (a.font || "") === (b.font || "") &&
       (a.face || "") === (b.face || "") &&
       (a.color || "") === (b.color || "") &&

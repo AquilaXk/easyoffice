@@ -129,6 +129,8 @@
           run.kerningHalfPt !== undefined ||
           run.openType !== undefined ||
           run.snapToGrid !== undefined ||
+          run.textFx !== undefined ||
+          run.underlineColor !== undefined ||
           run.font !== undefined ||
           run.fontFace !== undefined ||
           run.color !== undefined ||

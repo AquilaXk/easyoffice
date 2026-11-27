@@ -1644,22 +1644,32 @@
             <label class="dialog-label" for="doc-font-underline-style">밑줄 스타일(<span class="dialog-key">U</span>):</label>
             <select id="doc-font-underline-style" class="sb-combo dialog-select" data-accesskey="u">
               <option value="none">(없음)</option>
-              <option value="single">한 줄</option>
+              <option value="0">한 줄</option><option value="1">단어만</option><option value="2">이중 선</option><option value="3">굵은 선</option>
+              <option value="4">점선</option><option value="5">굵은 점선</option><option value="6">파선</option><option value="7">굵은 파선</option>
+              <option value="8">긴 파선</option><option value="9">굵은 긴 파선</option><option value="10">1점 쇄선</option><option value="11">굵은 1점 쇄선</option>
+              <option value="12">2점 쇄선</option><option value="13">굵은 2점 쇄선</option><option value="14">물결선</option><option value="15">굵은 물결선</option>
+              <option value="16">이중 물결선</option>
             </select>
             <label class="dialog-label" for="doc-font-underline-color">밑줄 색(<span class="dialog-key">I</span>):</label>
-            <select id="doc-font-underline-color" class="sb-combo dialog-select" data-accesskey="i" data-pending><option value="">자동</option></select>
+            <div id="doc-font-underline-color-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle data-accesskey="i" aria-haspopup="true" aria-expanded="false" title="밑줄 색" aria-label="밑줄 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span class="dialog-swatch-text">자동</span><span aria-hidden="true">▾</span></button><input id="doc-font-underline-color" type="color" value="#000000" aria-label="밑줄 색" /><div id="doc-font-underline-color-palette" class="sb-hl-palette" hidden></div></div>
             <label class="dialog-label" for="doc-font-emphasis">강조점(<span class="dialog-key">·</span>):</label>
-            <select id="doc-font-emphasis" class="sb-combo dialog-select" data-pending><option value="0">(없음)</option></select>
+            <select id="doc-font-emphasis" class="sb-combo dialog-select">
+              <option value="0">(없음)</option>
+              <option value="1">점</option>
+              <option value="2">쉼표</option>
+              <option value="3">원</option>
+              <option value="4">아래 점</option>
+            </select>
           </div>
           <fieldset class="dialog-group">
             <legend>효과</legend>
             <div class="dialog-effects">
               <label class="dialog-checkbox"><input id="doc-font-strike" type="checkbox" data-accesskey="k" /><span>취소선(<span class="dialog-key">K</span>)</span></label>
-              <label class="dialog-checkbox"><input id="doc-font-smallcaps" type="checkbox" data-accesskey="m" data-pending /><span>작은 대문자(<span class="dialog-key">M</span>)</span></label>
-              <label class="dialog-checkbox"><input id="doc-font-dstrike" type="checkbox" data-accesskey="l" data-pending /><span>이중 취소선(<span class="dialog-key">L</span>)</span></label>
-              <label class="dialog-checkbox"><input id="doc-font-allcaps" type="checkbox" data-accesskey="a" data-pending /><span>모두 대문자(<span class="dialog-key">A</span>)</span></label>
+              <label class="dialog-checkbox"><input id="doc-font-smallcaps" type="checkbox" data-accesskey="m" /><span>작은 대문자(<span class="dialog-key">M</span>)</span></label>
+              <label class="dialog-checkbox"><input id="doc-font-dstrike" type="checkbox" data-accesskey="l" /><span>이중 취소선(<span class="dialog-key">L</span>)</span></label>
+              <label class="dialog-checkbox"><input id="doc-font-allcaps" type="checkbox" data-accesskey="a" /><span>모두 대문자(<span class="dialog-key">A</span>)</span></label>
               <label class="dialog-checkbox"><input id="doc-font-sup" type="checkbox" data-accesskey="p" /><span>위 첨자(<span class="dialog-key">P</span>)</span></label>
-              <label class="dialog-checkbox"><input id="doc-font-hidden" type="checkbox" data-accesskey="h" data-pending /><span>숨김(<span class="dialog-key">H</span>)</span></label>
+              <label class="dialog-checkbox"><input id="doc-font-hidden" type="checkbox" data-accesskey="h" /><span>숨김(<span class="dialog-key">H</span>)</span></label>
               <label class="dialog-checkbox"><input id="doc-font-sub" type="checkbox" data-accesskey="b" /><span>아래 첨자(<span class="dialog-key">B</span>)</span></label>
             </div>
           </fieldset>
@@ -3319,6 +3329,7 @@
     <script src="./sheet-store.js"></script>
     <script src="./ribbon-catalog.js"></script>
     <script src="./doc-open-type.js"></script>
+    <script src="./doc-text-fx.js"></script>
     <script src="./doc-runs.js"></script>
     <script src="./doc-ime.js"></script>
     <script src="./doc-paste-sanitize.js"></script>

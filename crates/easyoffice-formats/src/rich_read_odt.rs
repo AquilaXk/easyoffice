@@ -190,6 +190,8 @@ fn char_fmt_from_text_properties(attrs: &Attrs<'_>) -> CharFmt {
         advanced: CharAdvanced::default(),
     };
     fmt.advanced = CharAdvanced::from_odt(attrs, fmt.size_half_pt);
+    // A double line is its own effect: the single strikethrough stays off.
+    fmt.strike &= !fmt.advanced.fx.double_strike;
     fmt
 }
 

@@ -215,8 +215,14 @@ pub(super) fn apply_run_property(fmt: &mut CharFmt, name: &str, attrs: &Attrs<'_
     match name {
         "w:b" => fmt.bold = toggle_on(val),
         "w:i" => fmt.italic = toggle_on(val),
-        "w:strike" | "w:dstrike" => fmt.strike = toggle_on(val),
-        "w:u" => fmt.underline = toggle_on(val),
+        "w:strike" => fmt.strike = toggle_on(val),
+        "w:dstrike" | "w:caps" | "w:smallCaps" | "w:vanish" | "w:em" => {
+            fmt.advanced.fx.apply_docx_property(name, attrs);
+        }
+        "w:u" => {
+            fmt.underline = toggle_on(val);
+            fmt.advanced.fx.apply_docx_property(name, attrs);
+        }
         "w:rFonts" => {
             fmt.font = ["w:eastAsia", "w:ascii", "w:hAnsi", "w:cs"]
                 .iter()

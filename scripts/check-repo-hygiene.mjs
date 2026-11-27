@@ -144,6 +144,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-app/ui/update-notice.js",
   "crates/easyoffice-app/ui/slide-studio.js",
   "crates/easyoffice-app/ui/doc-open-type.js",
+  "crates/easyoffice-app/ui/doc-text-fx.js",
   "crates/easyoffice-app/ui/doc-runs.js",
   "crates/easyoffice-app/ui/doc-runs-ui.js",
   "crates/easyoffice-app/ui/doc-line-spacing.js",

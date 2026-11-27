@@ -22,9 +22,10 @@ use easyoffice_formats::{
     ImageBudget, NumFmtTable, OdsUnpacked, OoxmlCodec, OpenType, PdfWriteOptions, RichAlignment,
     RichBlock, RichColumns, RichDocument, RichField, RichListKind, RichListNumber, RichPageFrame,
     RichParagraph, RichRun, RichScript, RichSlideDeck, RichToc, SheetStyling, StrictJsonValue,
-    MAX_COLUMN_PX, MAX_FONT_FACES, MAX_KERNING_HALF_PT, MAX_LETTER_SPACING_TWIPS, MAX_NUM_FMTS,
-    MAX_PACKED_OPEN_TYPE, MAX_PAGE_FRAME_PARAGRAPHS, MAX_PARA_SPACING_TWIPS, MAX_POSITION_HALF_PT,
-    MAX_SCALE_PERCENT, MAX_SIZE_PT, MAX_TOC_LEVEL, MAX_TOC_PAGE, MIN_COLUMN_PX, MIN_SIZE_PT,
+    TextFx, MAX_COLUMN_PX, MAX_FONT_FACES, MAX_KERNING_HALF_PT, MAX_LETTER_SPACING_TWIPS,
+    MAX_NUM_FMTS, MAX_PACKED_FX, MAX_PACKED_OPEN_TYPE, MAX_PAGE_FRAME_PARAGRAPHS,
+    MAX_PARA_SPACING_TWIPS, MAX_POSITION_HALF_PT, MAX_SCALE_PERCENT, MAX_SIZE_PT, MAX_TOC_LEVEL,
+    MAX_TOC_PAGE, MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
@@ -575,7 +576,7 @@ pub(crate) fn opt_bounded(
 }
 
 /// Width scale, raised or lowered position and kerning threshold of a run (PD-372), its packed OpenType
-/// features and its line-grid switch (PD-373). Each number is an integer inside the model's bounds or absent,
+/// features and its line-grid switch (PD-374). Each number is an integer inside the model's bounds or absent,
 /// `snapToGrid` is a boolean (`false` turns the grid off); a value outside them rejects the save.
 fn opt_advanced(run: &JsonObject) -> Result<CharAdvanced, EasyOfficeError> {
     let max_position = i64::from(MAX_POSITION_HALF_PT);
@@ -586,6 +587,21 @@ fn opt_advanced(run: &JsonObject) -> Result<CharAdvanced, EasyOfficeError> {
             .and_then(OpenType::unpack)
             .ok_or_else(|| invalid("구조화 저장: 'openType'의 칸 값이 범위를 벗어났습니다."))?,
     };
+    let underline_color = match opt_str(run, "underlineColor")?.filter(|c| !c.is_empty()) {
+        None => None,
+        Some(hex) => Some(
+            normalize_hex_color(hex)
+                .and_then(|c| u32::from_str_radix(&c, 16).ok())
+                .ok_or_else(|| {
+                    invalid("구조화 저장: 'underlineColor'는 6자리 16진 색이어야 합니다.")
+                })?,
+        ),
+    };
+    let packed_fx = opt_bounded(run, "textFx", 1, i64::from(MAX_PACKED_FX))?.unwrap_or(0);
+    let fx = u32::try_from(packed_fx)
+        .ok()
+        .and_then(|packed| TextFx::unpack(packed, underline_color))
+        .ok_or_else(|| invalid("구조화 저장: 'textFx'의 칸 값이 범위를 벗어났습니다."))?;
     let grid_snap_off = match field(run, "snapToGrid") {
         None => false,
         Some(v) => !v
@@ -594,6 +610,7 @@ fn opt_advanced(run: &JsonObject) -> Result<CharAdvanced, EasyOfficeError> {
     };
     Ok(CharAdvanced {
         open_type,
+        fx,
         grid_snap_off,
         scale_percent: opt_bounded(run, "scalePercent", 1, i64::from(MAX_SCALE_PERCENT))?
             .and_then(char_scale),

@@ -65,6 +65,7 @@ mod pptx_shape_read;
 mod pptx_theme_cache;
 mod pptx_theme_color;
 mod rich_char_adv;
+mod rich_char_fx;
 mod rich_char_open_type;
 mod rich_char_spacing;
 mod rich_defaults;
@@ -153,6 +154,7 @@ pub use rich_char_adv::{
     char_kerning, char_position, char_scale, CharAdvanced, MAX_KERNING_HALF_PT,
     MAX_POSITION_HALF_PT, MAX_SCALE_PERCENT,
 };
+pub use rich_char_fx::{TextFx, MAX_PACKED_FX};
 pub use rich_char_open_type::{OpenType, MAX_PACKED_OPEN_TYPE};
 pub use rich_char_spacing::{letter_spacing, MAX_LETTER_SPACING_TWIPS};
 pub use rich_defaults::RichDefaults;

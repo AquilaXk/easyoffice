@@ -40,6 +40,27 @@
   const styleOfText = (text) => Object.keys(STYLE_LABEL).find((k) => STYLE_LABEL[k] === String(text).trim());
 
   const OT = host.__EASYOFFICE_DOC_OPEN_TYPE__;
+  const FX = host.__EASYOFFICE_DOC_TEXT_FX__;
+  // The color boxes by the run value they set, and the controls that set a part of the packed text effects.
+  const COLOR_HOST = { color: "#doc-font-color-host", ucolor: "#doc-font-underline-color-host" };
+  const FX_KEYS = ["ulstyle", "emphasis", "dstrike", "smallcaps", "allcaps", "hidden"];
+  // What the sample takes from the effects besides the decoration line (the sample box holds the caps, dimming and marks).
+  const FX_SAMPLE_KEYS = ["textDecorationStyle", "textDecorationColor", "textDecorationThickness", "fontVariantCaps", "textTransform", "opacity", "textEmphasisStyle", "textEmphasisPosition"];
+
+  // The packed text effects of the controls on top of `base` (the selection's value; `null` when it is mixed): only a control
+  // the user touched replaces its part.
+  function composeFx(els, base, touched) {
+    const was = FX.parts(base || 0);
+    const t = (key) => touched.has(key);
+    return FX.pack({
+      doubleStrike: t("dstrike") ? els.dstrike.checked : was.doubleStrike,
+      smallCaps: t("smallcaps") ? els.smallcaps.checked : was.smallCaps,
+      allCaps: t("allcaps") ? els.allcaps.checked : was.allCaps,
+      hidden: t("hidden") ? els.hidden.checked : was.hidden,
+      emphasis: t("emphasis") ? Number(els.emphasis.value) : was.emphasis,
+      underline: t("ulstyle") ? (els.ulStyle.value === "none" ? 0 : Number(els.ulStyle.value)) : was.underline,
+    });
+  }
   const PLAIN_NUMBER_RE =/^-?(\d+\.?\d*|\.\d+)$/;
   const UNIT_SUFFIX_RE = /\s*(pt|%)$/i;
   const SAMPLE_NOTE = "화면과 프린터 모두에 같은 글꼴이 사용됩니다.";
@@ -157,27 +178,32 @@
       kern: byId("doc-font-kerning"), kernValue: byId("doc-font-kerning-value"),
       grid: byId("doc-font-grid"), ot: OT.controls(document),
       color: byId("doc-font-color"), ulStyle: byId("doc-font-underline-style"),
+      dstrike: byId("doc-font-dstrike"), smallcaps: byId("doc-font-smallcaps"), allcaps: byId("doc-font-allcaps"),
+      hidden: byId("doc-font-hidden"), emphasis: byId("doc-font-emphasis"),
       sample: byId("doc-font-sample"), sampleText: byId("doc-font-sample-text"), note: byId("doc-font-sample-note"), status: byId("doc-font-status"),
     };
     const R = host.__EASYOFFICE_DOC_RUNS__;
     const state = runs.getState?.() || {};
     // The OpenType controls (and the line-grid box) the user touched: only those replace what the selection had.
     const touched = new Set();
-    // The 글꼴 색 the dialog holds (6 hex digits; "" is 자동, the text color of the page).
-    let color = "";
-    const colorNow = () => color;
-    const paintColor = () => {
-      const chip = els.dialog.querySelector("#doc-font-color-host .dialog-swatch-chip");
-      const label = els.dialog.querySelector("#doc-font-color-host .dialog-swatch-text");
-      if (chip) chip.style.background = color ? `#${color}` : "";
-      if (label) label.textContent = color ? `#${color}` : "자동";
+    // The 글꼴 색 and 밑줄 색 the dialog holds (6 hex digits; "" is 자동, the text color of the page).
+    const colors = { color: "", ucolor: "" };
+    const colorNow = () => colors.color;
+    const paintColor = (key) => {
+      const host_ = els.dialog.querySelector(COLOR_HOST[key]);
+      const chip = host_?.querySelector(".dialog-swatch-chip");
+      const label = host_?.querySelector(".dialog-swatch-text");
+      if (chip) chip.style.background = colors[key] ? `#${colors[key]}` : "";
+      if (label) label.textContent = colors[key] ? `#${colors[key]}` : "자동";
     };
-    const setColor = (picked) => {
-      color = String(picked || "").replace(/^#/, "").toUpperCase();
-      touched.add("color");
-      paintColor();
+    const setColor = (key, picked) => {
+      colors[key] = String(picked || "").replace(/^#/, "").toUpperCase();
+      touched.add(key);
+      paintColor(key);
       drawSample();
     };
+    // The packed text effects of the controls on top of what the selection had (`null`: mixed, nothing known).
+    const fxNow = () => composeFx(els, initial.textfx, touched);
 
     // Tabs: one pane shows at a time.
     const showPane = (name) => {
@@ -213,8 +239,12 @@
       css.fontWeight = style.bold ? "700" : "400";
       css.fontStyle = style.italic ? "italic" : "normal";
       css.fontSize = Number.isFinite(pt) ? `${Math.min(SAMPLE_MAX_PX, Math.max(8, pt * (4 / 3)))}px` : "";
-      css.textDecoration = [els.ulStyle.value !== "none" ? "underline" : "", els.strike.checked ? "line-through" : ""].filter(Boolean).join(" ") || "none";
+      const underlined = els.ulStyle.value !== "none";
+      css.textDecoration = [underlined ? "underline" : "", els.strike.checked ? "line-through" : ""].filter(Boolean).join(" ") || "none";
       css.color = colorNow() ? `#${colorNow()}` : "";
+      const fx = FX.css({ underline: underlined, strike: els.strike.checked, textfx: fxNow(), ucolor: colors.ucolor });
+      if (fx.textDecoration) css.textDecoration = fx.textDecoration;
+      for (const key of FX_SAMPLE_KEYS) css[key] = fx[key];
       const twips = spacingTwips(els.kind.value, els.value.value);
       css.letterSpacing = twips ? `${(twips / TWIPS_PER_PT) * (4 / 3)}px` : "normal";
       const text = els.sampleText.style;
@@ -259,10 +289,21 @@
       nogrid: state.nogrid === MIXED ? null : state.nogrid === 1,
       color: state.color === MIXED ? null : (typeof state.color === "string" ? state.color : ""),
       underline: state.underline === true,
+      // The packed text effects and the underline colour; a mixed selection (null) shows none and keeps each part it did not touch.
+      textfx: state.textfx === MIXED ? null : (integer(state.textfx) ?? 0),
+      ucolor: state.ucolor === MIXED ? null : (typeof state.ucolor === "string" ? state.ucolor : ""),
     };
-    color = initial.color || "";
-    paintColor();
-    els.ulStyle.value = initial.underline ? "single" : "none";
+    colors.color = initial.color || "";
+    colors.ucolor = initial.ucolor || "";
+    paintColor("color");
+    paintColor("ucolor");
+    const fxParts = FX.parts(initial.textfx || 0);
+    els.ulStyle.value = initial.underline ? String(fxParts.underline) : "none";
+    els.dstrike.checked = fxParts.doubleStrike;
+    els.smallcaps.checked = fxParts.smallCaps;
+    els.allcaps.checked = fxParts.allCaps;
+    els.hidden.checked = fxParts.hidden;
+    els.emphasis.value = String(fxParts.emphasis);
     els.style.value = STYLE_LABEL[initial.style || "regular"];
     els.size.value = initial.size;
     els.strike.checked = initial.strike;
@@ -288,7 +329,7 @@
 
     // A modal dialog takes the selection from the editor (WebKit collapses it), so 확인 applies to the range the dialog opened on.
     current = {
-      els, R, initial, runs, document, drawSample, syncValue, showPane, touched, setColor, getColor: colorNow,
+      els, R, initial, runs, document, drawSample, syncValue, showPane, touched, setColor, colors, fxNow,
       range: runs.getLastRange?.() ?? null,
     };
     if (!bound) {
@@ -313,8 +354,23 @@
       }
       bindUnitFields(els.dialog);
       listBoxes = bindPresetCombos(els.dialog);
-      host.__EASYOFFICE_COLOR_PICKER__?.setupColorPicker(byId("doc-font-color-host"), (picked) => current.setColor(picked), { clear: true, clearLabel: "자동" });
-      els.ulStyle.addEventListener("change", () => current.drawSample());
+      for (const key of Object.keys(COLOR_HOST)) {
+        host.__EASYOFFICE_COLOR_PICKER__?.setupColorPicker(els.dialog.querySelector(COLOR_HOST[key]), (picked) => current.setColor(key, picked), { clear: true, clearLabel: "자동" });
+      }
+      // The text effects: a check box, the underline style or the emphasis mark marks its part as the user's. A line through
+      // the text is single or double, and the capitals are small or all, never both.
+      const EXCLUSIVE = { strike: "dstrike", dstrike: "strike", smallcaps: "allcaps", allcaps: "smallcaps" };
+      for (const [key, el] of [["ulstyle", els.ulStyle], ["emphasis", els.emphasis], ["dstrike", els.dstrike], ["smallcaps", els.smallcaps], ["allcaps", els.allcaps], ["hidden", els.hidden], ["strike", els.strike]]) {
+        el.addEventListener("change", () => {
+          if (key !== "strike") current.touched.add(key);
+          const other = EXCLUSIVE[key] && current.els[EXCLUSIVE[key]];
+          if (el.checked && other) {
+            other.checked = false;
+            current.touched.add(EXCLUSIVE[key]);
+          }
+          current.drawSample();
+        });
+      }
       // Items whose run property the engine does not keep yet stay visible and off.
       for (const el of els.dialog.querySelectorAll("[data-pending]")) {
         el.disabled = true;
@@ -400,7 +456,11 @@
     if (els.sub.checked !== initial.sub) patch.subscript = els.sub.checked ? true : null;
     const underlined = els.ulStyle.value !== "none";
     if (underlined !== initial.underline) patch.underline = underlined ? true : null;
-    if (current.touched.has("color")) patch.color = current.getColor() || null;
+    if (current.touched.has("color")) patch.color = current.colors.color || null;
+    if (current.touched.has("ucolor")) patch.ucolor = current.colors.ucolor || null;
+    const fxPacked = current.fxNow();
+    const fxTouched = FX_KEYS.some((key) => current.touched.has(key));
+    if (initial.textfx === null ? fxTouched : fxPacked !== initial.textfx) patch.textfx = fxPacked || null;
     const advanced = advancedPatch(els, initial, current.touched);
     if (advanced.box) {
       els.status.textContent = MSG_RANGE;

@@ -272,6 +272,10 @@ pub(super) const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         include_str!("../ui/doc-open-type.js"),
         "__EASYOFFICE_DOC_OPEN_TYPE__",
     ),
+    (
+        include_str!("../ui/doc-text-fx.js"),
+        "__EASYOFFICE_DOC_TEXT_FX__",
+    ),
     (include_str!("../ui/doc-runs.js"), "__EASYOFFICE_DOC_RUNS__"),
     (
         include_str!("../ui/doc-runs-ui.js"),

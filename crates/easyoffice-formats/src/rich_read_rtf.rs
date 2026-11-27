@@ -681,12 +681,16 @@ impl Reader {
     fn char_word(&mut self, word: &str, param: Option<i32>, on: bool) {
         let top = self.top();
         let st = &mut top.chars;
+        // The underline words (`\ul`, `\uldb`, `\ulwave`, ...) turn the line on and name its style.
+        if st.advanced.fx.apply_rtf_underline(word) {
+            st.underline = on;
+            return;
+        }
         match word {
             "b" => st.bold = on,
             "i" => st.italic = on,
-            "ul" | "uld" | "uldb" | "ulw" => st.underline = on,
             "ulnone" => st.underline = false,
-            "strike" | "striked" => st.strike = on,
+            "strike" => st.strike = on,
             "super" => {
                 st.script = if on {
                     RichScript::Superscript
