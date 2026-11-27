@@ -58,7 +58,10 @@ pub(crate) fn write_doc_defaults(out: &mut String, doc: &RichDocument) {
 }
 
 /// A typeface name: 1 to 256 characters, no control character; empty or absent is none.
-fn typeface(obj: &JsonObject, key: &str) -> Result<Option<String>, easyoffice_formats::EasyOfficeError> {
+fn typeface(
+    obj: &JsonObject,
+    key: &str,
+) -> Result<Option<String>, easyoffice_formats::EasyOfficeError> {
     match opt_str(obj, key)?.map(str::trim).filter(|f| !f.is_empty()) {
         None => Ok(None),
         Some(name) if name.chars().count() <= MAX_FONT_CHARS && !name.chars().any(char::is_control) => {
@@ -135,7 +138,11 @@ mod tests {
         assert_eq!(defaults.font.as_deref(), Some("Calibri"));
         assert_eq!(defaults.east_asian_font.as_deref(), Some("맑은 고딕"));
         assert_eq!(
-            (defaults.size_half_points, defaults.alignment, defaults.space_after_twips),
+            (
+                defaults.size_half_points,
+                defaults.alignment,
+                defaults.space_after_twips
+            ),
             (22, Some(RichAlignment::Left), 200)
         );
         let doc = RichDocument {
@@ -146,7 +153,10 @@ mod tests {
         write_doc_defaults(&mut wire, &doc);
         wire.push('}');
         let again = StrictJsonValue::parse(&wire).unwrap();
-        assert_eq!(parse_doc_defaults(again.as_object().unwrap()).unwrap(), Some(defaults));
+        assert_eq!(
+            parse_doc_defaults(again.as_object().unwrap()).unwrap(),
+            Some(defaults)
+        );
     }
 
     #[test]
@@ -159,7 +169,10 @@ mod tests {
             ..RichDocument::default()
         };
         write_doc_defaults(&mut wire, &start_edge);
-        assert!(!wire.contains("alignment") && !wire.contains("\"font\""), "{wire}");
+        assert!(
+            !wire.contains("alignment") && !wire.contains("\"font\""),
+            "{wire}"
+        );
         let again = StrictJsonValue::parse(&format!("{{{}}}", &wire[1..])).unwrap();
         assert_eq!(
             parse_doc_defaults(again.as_object().unwrap()).unwrap(),
@@ -183,11 +196,16 @@ mod tests {
         };
         assert_eq!(doc.defaults.unwrap().font.as_deref(), Some("Calibri"));
         let bare = StrictJsonValue::parse(r#"{"blocks":[]}"#).unwrap();
-        let (content, _) = parse_structured_content(bare.as_object().unwrap()).unwrap().unwrap();
+        let (content, _) = parse_structured_content(bare.as_object().unwrap())
+            .unwrap()
+            .unwrap();
         let StructuredContent::Document(doc, _) = content else {
             panic!("a document");
         };
-        assert_eq!(doc.defaults, None, "a new document keeps the Korean defaults");
+        assert_eq!(
+            doc.defaults, None,
+            "a new document keeps the Korean defaults"
+        );
     }
 
     #[test]

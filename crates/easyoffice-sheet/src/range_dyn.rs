@@ -24,7 +24,15 @@ fn can_pass_reference(expr: &Expr) -> bool {
         | Expr::SheetSpan(_) => true,
         Expr::FuncCall(f) => matches!(
             f.name.as_str(),
-            "TRANSPOSE" | "INDIRECT" | "OFFSET" | "INDEX" | "CHOOSE" | "IF" | ":" | "SINGLE" | "TRIMRANGE"
+            "TRANSPOSE"
+                | "INDIRECT"
+                | "OFFSET"
+                | "INDEX"
+                | "CHOOSE"
+                | "IF"
+                | ":"
+                | "SINGLE"
+                | "TRIMRANGE"
         ),
         _ => false,
     }

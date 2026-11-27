@@ -110,7 +110,8 @@ impl EasyOfficeIpcRouter {
     ) -> Result<String, EasyOfficeError> {
         let id = session_id(entries)?;
         let op = parse_op(entries)?;
-        let Some(tab_order) = crate::sheet_session::registry().sheet_names(id, owner, Instant::now())
+        let Some(tab_order) =
+            crate::sheet_session::registry().sheet_names(id, owner, Instant::now())
         else {
             return Ok(EXPIRED.to_string());
         };

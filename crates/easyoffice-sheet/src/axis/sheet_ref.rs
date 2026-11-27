@@ -43,7 +43,10 @@ enum SpanAfterDelete {
     /// No sheet of the span is left.
     Gone,
     /// The sheets that remain; equal ends are one sheet.
-    Span { start: String, end: String },
+    Span {
+        start: String,
+        end: String,
+    },
 }
 
 fn span_after_delete(start: &str, end: &str, gone: &str, tab_order: &[&str]) -> SpanAfterDelete {
@@ -61,7 +64,11 @@ fn span_after_delete(start: &str, end: &str, gone: &str, tab_order: &[&str]) -> 
         return SpanAfterDelete::Gone;
     }
     let deleted = if hit_start { from } else { to };
-    let heir = if deleted == first { first + 1 } else { last - 1 };
+    let heir = if deleted == first {
+        first + 1
+    } else {
+        last - 1
+    };
     let heir = tab_order[heir];
     let (start, end) = if hit_start {
         (heir, end)

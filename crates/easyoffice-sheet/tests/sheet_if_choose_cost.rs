@@ -29,7 +29,11 @@ fn timed(formula: &str) -> (String, Duration) {
 
 #[test]
 fn nested_if_and_choose_conditions_are_evaluated_once() {
-    for wrap in ["SUM(IF({}=1,1,2))", "SUM(CHOOSE({},1,2))", "SUM(IF({}=1,1))"] {
+    for wrap in [
+        "SUM(IF({}=1,1,2))",
+        "SUM(CHOOSE({},1,2))",
+        "SUM(IF({}=1,1))",
+    ] {
         // 28 levels of two calls stay under the 64 levels a formula may nest; 2^28 evaluations would not finish.
         let (value, took) = timed(&chain(wrap, 28));
         assert_eq!(value, "1", "{wrap}");

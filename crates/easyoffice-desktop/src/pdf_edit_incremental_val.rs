@@ -678,7 +678,10 @@ mod chunk_cursor_tests {
             b" << /A [ << /B > ] >> >> endobj",
         ] {
             let answer = scan_body(body).unwrap_or_else(|| {
-                panic!("the scan of {:?} did not end", String::from_utf8_lossy(body))
+                panic!(
+                    "the scan of {:?} did not end",
+                    String::from_utf8_lossy(body)
+                )
             });
             assert!(answer.is_err(), "{:?}", String::from_utf8_lossy(body));
         }
@@ -692,7 +695,12 @@ mod chunk_cursor_tests {
             b" [ ] endobj",
             b" << /Length 3 >> stream\nabc\nendstream endobj",
         ] {
-            assert_eq!(scan_body(body), Some(Ok(())), "{:?}", String::from_utf8_lossy(body));
+            assert_eq!(
+                scan_body(body),
+                Some(Ok(())),
+                "{:?}",
+                String::from_utf8_lossy(body)
+            );
         }
     }
 }

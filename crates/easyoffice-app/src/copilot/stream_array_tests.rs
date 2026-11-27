@@ -32,7 +32,11 @@ fn an_object_with_braces_in_strings_and_a_split_escape_still_ends_at_its_own_bra
     let mut reader = JsonArrayReader::default();
     let mut deltas = Vec::new();
     for byte in body.as_bytes() {
-        deltas.extend(reader.push(ProviderKind::Google, std::slice::from_ref(byte)).unwrap());
+        deltas.extend(
+            reader
+                .push(ProviderKind::Google, std::slice::from_ref(byte))
+                .unwrap(),
+        );
     }
     assert_eq!(deltas.len(), 2);
 }

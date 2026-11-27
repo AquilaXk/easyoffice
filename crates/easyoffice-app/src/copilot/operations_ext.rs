@@ -819,11 +819,9 @@ mod tests {
     }
 
     fn read_calls(args: &str) -> Vec<CopilotToolCall> {
-        let items = StrictJsonValue::parse(&format!(r#"[{{"name":"read_doc_blocks",{args}}}]"#)).unwrap();
-        validate_tool_calls(
-            &doc_request_with_unread_blocks(),
-            items.as_array().unwrap(),
-        )
+        let items =
+            StrictJsonValue::parse(&format!(r#"[{{"name":"read_doc_blocks",{args}}}]"#)).unwrap();
+        validate_tool_calls(&doc_request_with_unread_blocks(), items.as_array().unwrap())
     }
 
     #[test]
@@ -840,6 +838,11 @@ mod tests {
     #[test]
     fn a_start_index_at_the_integer_limit_is_refused_instead_of_overflowing() {
         assert!(read_calls(&format!(r#""startIndex":{}"#, u64::MAX)).is_empty());
-        assert!(read_calls(&format!(r#""startIndex":{},"endIndex":{}"#, u64::MAX, u64::MAX)).is_empty());
+        assert!(read_calls(&format!(
+            r#""startIndex":{},"endIndex":{}"#,
+            u64::MAX,
+            u64::MAX
+        ))
+        .is_empty());
     }
 }

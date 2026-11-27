@@ -791,18 +791,19 @@ impl SheetEngine {
         let present: Vec<&Grid> = numbers.iter().flatten().map(|g| g.as_ref()).collect();
         let (rows, cols) = crate::array_eval::broadcast_dims(&present);
         let single_row = args.len() == 2 && grid.rows == 1;
-        let item = |g: &Option<Arc<Grid>>, r: usize, c: usize| -> Result<Option<i64>, FormulaError> {
-            let Some(g) = g else { return Ok(None) };
-            let n = match crate::array_eval::broadcast_at(g, r, c) {
-                V::Error(e) => return Err(e),
-                V::Empty => 0.0,
-                other => other.as_number().ok_or(FormulaError::Value)?.trunc(),
+        let item =
+            |g: &Option<Arc<Grid>>, r: usize, c: usize| -> Result<Option<i64>, FormulaError> {
+                let Some(g) = g else { return Ok(None) };
+                let n = match crate::array_eval::broadcast_at(g, r, c) {
+                    V::Error(e) => return Err(e),
+                    V::Empty => 0.0,
+                    other => other.as_number().ok_or(FormulaError::Value)?.trunc(),
+                };
+                if n < 0.0 {
+                    return Err(FormulaError::Value);
+                }
+                Ok(Some(n as i64))
             };
-            if n < 0.0 {
-                return Err(FormulaError::Value);
-            }
-            Ok(Some(n as i64))
-        };
         let pick = |n: Option<i64>, len: usize| match n.unwrap_or(0) {
             0 if len == 1 => Ok(0),
             0 => Err(FormulaError::Value),

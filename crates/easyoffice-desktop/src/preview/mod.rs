@@ -343,25 +343,30 @@ fn preview_from_bundle(
         return PreviewOutcome::Cache(None);
     };
     let (bundle, limits) = (path.to_path_buf(), state.limits);
-    let worked = bounded::run(&state.gate, limits.permit_wait, limits.deadline, move || {
-        let max_bytes = kind.max_file_bytes() as usize;
-        let (zipped, _) = crate::pages_bundle_dir::read_pages_bundle_as_zip(&bundle, max_bytes)
-            .map_err(|_| RenderError::Unreadable)?;
-        let size = zipped.len() as u64;
-        let mut source = std::io::Cursor::new(zipped);
-        if let Some(embedded) = extract_thumbnail(&mut source) {
-            return Ok(embedded);
-        }
-        ready();
-        let png = render(read_document(&mut source, size, kind)?)?;
-        if png.len() > MAX_RENDERED_PNG_BYTES || sniff_image(&png) != Some("image/png") {
-            return Err(RenderError::TooLarge);
-        }
-        Ok(Thumbnail {
-            mime: "image/png",
-            bytes: png,
-        })
-    });
+    let worked = bounded::run(
+        &state.gate,
+        limits.permit_wait,
+        limits.deadline,
+        move || {
+            let max_bytes = kind.max_file_bytes() as usize;
+            let (zipped, _) = crate::pages_bundle_dir::read_pages_bundle_as_zip(&bundle, max_bytes)
+                .map_err(|_| RenderError::Unreadable)?;
+            let size = zipped.len() as u64;
+            let mut source = std::io::Cursor::new(zipped);
+            if let Some(embedded) = extract_thumbnail(&mut source) {
+                return Ok(embedded);
+            }
+            ready();
+            let png = render(read_document(&mut source, size, kind)?)?;
+            if png.len() > MAX_RENDERED_PNG_BYTES || sniff_image(&png) != Some("image/png") {
+                return Err(RenderError::TooLarge);
+            }
+            Ok(Thumbnail {
+                mime: "image/png",
+                bytes: png,
+            })
+        },
+    );
     match worked {
         Ok(found) => PreviewOutcome::Cache(Some(Arc::new(found))),
         Err(RenderError::Busy | RenderError::TimedOut) => PreviewOutcome::SkipCache,

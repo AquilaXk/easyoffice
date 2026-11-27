@@ -58,7 +58,12 @@ fn a_span_that_shrinks_to_one_sheet_becomes_a_plain_reference() {
         Some("=SUM(Sheet3!A1)")
     );
     assert_eq!(
-        delete("=SUM('Sheet 2':'Sheet 3'!A1:B2)", "Sheet 3", &["Sheet 2", "Sheet 3"]).as_deref(),
+        delete(
+            "=SUM('Sheet 2':'Sheet 3'!A1:B2)",
+            "Sheet 3",
+            &["Sheet 2", "Sheet 3"]
+        )
+        .as_deref(),
         Some("=SUM('Sheet 2'!A1:B2)")
     );
 }
@@ -164,7 +169,10 @@ fn the_workbook_plan_uses_its_own_tab_order() {
 #[test]
 fn inserting_between_the_ends_adds_the_sheet_and_outside_does_not() {
     let formula = "=SUM(Sheet2:Sheet4!A1)";
-    assert_eq!(sum_of(&["Sheet1", "Sheet2", "Sheet3", "Sheet4"], formula), 9.0);
+    assert_eq!(
+        sum_of(&["Sheet1", "Sheet2", "Sheet3", "Sheet4"], formula),
+        9.0
+    );
     // A sheet inserted between Sheet2 and Sheet4 counts.
     assert_eq!(
         sum_of(&["Sheet1", "Sheet2", "Sheet6", "Sheet3", "Sheet4"], formula),
@@ -172,7 +180,10 @@ fn inserting_between_the_ends_adds_the_sheet_and_outside_does_not() {
     );
     // A sheet inserted before the first end or after the last end does not.
     assert_eq!(
-        sum_of(&["Sheet6", "Sheet1", "Sheet2", "Sheet3", "Sheet4", "Sheet5"], formula),
+        sum_of(
+            &["Sheet6", "Sheet1", "Sheet2", "Sheet3", "Sheet4", "Sheet5"],
+            formula
+        ),
         9.0
     );
 }

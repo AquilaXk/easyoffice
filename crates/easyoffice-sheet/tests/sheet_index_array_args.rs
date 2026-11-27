@@ -42,7 +42,12 @@ fn the_picked_items_spill_in_the_shape_of_the_index_array() {
     m._set("J1", "=INDEX(A1:A10,{2;4})");
     m.evaluate();
     assert_eq!(
-        [m._get_text("H1"), m._get_text("I1"), m._get_text("J1"), m._get_text("J2")],
+        [
+            m._get_text("H1"),
+            m._get_text("I1"),
+            m._get_text("J1"),
+            m._get_text("J2")
+        ],
         ["1", "3", "2", "4"]
     );
 }

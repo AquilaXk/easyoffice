@@ -79,7 +79,11 @@ fn a_request_without_a_permit_reads_nothing_and_caches_nothing() {
     let held = state.gate.acquire(Duration::ZERO).expect("the only permit");
     let found = load_preview_with(&state, "00000000000000f2", &bundle, |_| panic!("no draw"));
     assert!(found.is_none(), "the folder was read without a permit");
-    assert_eq!(state.cache.lock().unwrap().len(), 0, "a busy answer is not remembered");
+    assert_eq!(
+        state.cache.lock().unwrap().len(),
+        0,
+        "a busy answer is not remembered"
+    );
 
     drop(held);
     let found = load_preview_with(&state, "00000000000000f2", &bundle, |_| panic!("no draw"));
