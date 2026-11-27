@@ -68,35 +68,58 @@ export async function startEngine(app) {
  * Runs the steps in order, each on a fresh page of `module` (a step cannot disturb the next), and keeps going after a
  * failure so one run lists every broken step. A failed step leaves a screenshot, the page text and the console lines in
  * `captureDir`. Returns the number of failed steps.
+ *
+ * The browser is started by `launch` and replaced every `RECYCLE_EVERY` steps: one WebKit process that has opened about
+ * 58 contexts stops loading the next page (`page.goto` runs into its timeout with no failed request, while the engine
+ * keeps answering), so a suite longer than that failed on whichever step happened to be the 59th.
  */
-export async function runSteps({ browser, baseUrl, captureDir, groups }) {
+const RECYCLE_EVERY = 20;
+
+/** One step on a fresh page of its module; true when it passed. */
+async function runStep(browser, { baseUrl, captureDir, module, name, body }) {
+  const context = await browser.newContext({ viewport: { width: 1100, height: 700 } });
+  const page = await context.newPage();
+  page.setDefaultTimeout(STEP_TIMEOUT_MS);
+  const log = [];
+  page.on("console", (msg) => log.push(`[${msg.type()}] ${msg.text()}`));
+  page.on("pageerror", (err) => log.push(`[pageerror] ${err.message}`));
+  const started = Date.now();
+  try {
+    await page.goto(`${baseUrl}/?module=${module}&win=webkit-dom`);
+    await page.waitForSelector({ SHEET: "#pane-sheet td[data-cell]", BASE: "#pane-base .base-grid-table", SLIDE: "#slide-thumb-list .slide-thumb" }[module] || "#doc-editor");
+    await body(page);
+    console.log(`ok   ${module.toLowerCase()}: ${name} (${Date.now() - started} ms)`);
+    return true;
+  } catch (err) {
+    console.log(`FAIL ${module.toLowerCase()}: ${name}\n     ${String(err.message).split("\n").join("\n     ")}`);
+    const stem = path.join(captureDir, `${module.toLowerCase()}-${name.replace(/[^\w가-힣]+/g, "-")}`);
+    await page.screenshot({ path: `${stem}.png` }).catch(() => {});
+    const text = await page.evaluate(() => document.body.innerText).catch(() => "");
+    fs.writeFileSync(`${stem}.txt`, `${err.stack}\n\n--- console ---\n${log.join("\n")}\n\n--- page text ---\n${text}\n`);
+    return false;
+  } finally {
+    await context.close();
+  }
+}
+
+export async function runSteps({ launch, baseUrl, captureDir, groups }) {
   fs.mkdirSync(captureDir, { recursive: true });
   let failed = 0;
-  for (const { module, steps } of groups) {
-    for (const [name, body] of steps) {
-      const context = await browser.newContext({ viewport: { width: 1100, height: 700 } });
-      const page = await context.newPage();
-      page.setDefaultTimeout(STEP_TIMEOUT_MS);
-      const log = [];
-      page.on("console", (msg) => log.push(`[${msg.type()}] ${msg.text()}`));
-      page.on("pageerror", (err) => log.push(`[pageerror] ${err.message}`));
-      const started = Date.now();
-      try {
-        await page.goto(`${baseUrl}/?module=${module}&win=webkit-dom`);
-        await page.waitForSelector({ SHEET: "#pane-sheet td[data-cell]", BASE: "#pane-base .base-grid-table", SLIDE: "#slide-thumb-list .slide-thumb" }[module] || "#doc-editor");
-        await body(page);
-        console.log(`ok   ${module.toLowerCase()}: ${name} (${Date.now() - started} ms)`);
-      } catch (err) {
-        failed += 1;
-        console.log(`FAIL ${module.toLowerCase()}: ${name}\n     ${String(err.message).split("\n").join("\n     ")}`);
-        const stem = path.join(captureDir, `${module.toLowerCase()}-${name.replace(/[^\w가-힣]+/g, "-")}`);
-        await page.screenshot({ path: `${stem}.png` }).catch(() => {});
-        const text = await page.evaluate(() => document.body.innerText).catch(() => "");
-        fs.writeFileSync(`${stem}.txt`, `${err.stack}\n\n--- console ---\n${log.join("\n")}\n\n--- page text ---\n${text}\n`);
-      } finally {
-        await context.close();
+  let ran = 0;
+  let browser = await launch();
+  try {
+    for (const { module, steps } of groups) {
+      for (const [name, body] of steps) {
+        if (ran > 0 && ran % RECYCLE_EVERY === 0) {
+          await browser.close();
+          browser = await launch();
+        }
+        ran += 1;
+        if (!(await runStep(browser, { baseUrl, captureDir, module, name, body }))) failed += 1;
       }
     }
+  } finally {
+    await browser.close();
   }
   return failed;
 }
