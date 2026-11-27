@@ -22,7 +22,12 @@
 //! change; without the sheets in it the span cannot be followed and fails closed to `#REF!`.
 //!
 //! A moved end follows that page's "Move an endpoint" rule (see `span_after_move`): the text stays
-//! while the two ends keep their order and changes only when the move reverses them.
+//! while the two ends keep their order and changes only when the move reverses them. This rule has
+//! no reference implementation to port: Univer (`packages/sheets-formula`, Apache-2.0) points
+//! formulas at sheet ids and only marks a 3D reference dirty when the order changes, IronCalc
+//! (`base/src/new_empty.rs` `move_sheet`, MIT or Apache-2.0) reorders the sheet list without
+//! reading formulas, and Apache POI (`FormulaShifter` sheet-move mode, Apache-2.0) shifts the
+//! BIFF extern sheet number of single-sheet references and leaves sheet ranges alone.
 
 use super::formula::scan_refs;
 
