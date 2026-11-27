@@ -245,13 +245,20 @@ mod tests {
     }
 
     #[test]
-    fn offcrypto_detects_case_insensitive_and_nested_stream_names() {
+    fn offcrypto_detects_case_insensitive_root_stream_names_only() {
+        let root = Ole2ContainerCodec::pack(&[
+            ("encryptioninfo".to_string(), vec![1, 2, 3]),
+            ("Other".to_string(), vec![4]),
+        ])
+        .unwrap();
+        assert!(is_ole2_offcrypto_encrypted(&root));
+        // PD-361: a nested storage holds an embedded object, not the encryption of the container
         let nested = Ole2ContainerCodec::pack(&[
             ("RootSub/encryptioninfo".to_string(), vec![1, 2, 3]),
             ("Other".to_string(), vec![4]),
         ])
         .unwrap();
-        assert!(is_ole2_offcrypto_encrypted(&nested));
+        assert!(!is_ole2_offcrypto_encrypted(&nested));
     }
 
     #[test]
