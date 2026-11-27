@@ -173,9 +173,9 @@
 #doc-toc-dialog .dialog-status-row:has(> :empty) { display: none; }
 #doc-toc-dialog .dialog-body:has(.dialog-status:empty) .dialog-row:nth-last-of-type(2) { margin-bottom: 0; }
 #doc-toc-dialog .dialog-checkbox { margin-left: 72px; }
-/* Font dialog of the word processor (doc-font-dialog.js): the tab bodies keep one height so the dialog does not jump between 글꼴 and 고급. */
+/* Font dialog of the word processor (doc-font-dialog.js). */
 #doc-font-dialog { width: min(480px, calc(100vw - 32px)); }
-#doc-font-dialog .dialog-body[data-font-pane] { min-height: 196px; padding-bottom: 0; }
+#doc-font-dialog .dialog-body[data-font-pane] { padding-bottom: 0; }
 /* Every group is 6px from the next (`.cs-fieldset` margin `6px 0`), also the last one of a tab from the preview group. */
 #doc-font-dialog .dialog-body[data-font-pane] > .dialog-group:last-child { margin-bottom: 0; }
 #doc-font-dialog #doc-font-sample-text { display: inline-block; transform-origin: left center; }
@@ -183,11 +183,11 @@
 #doc-font-dialog .doc-font-preview-body { padding-top: 0; }
 #doc-font-dialog .dialog-status-row:has(> :empty) { display: none; }
 /* Group frames of the dialog: the reference's `.cs-fieldset` (`char-shape-dialog.css` 34-46, MIT, see THIRD_PARTY_NOTICES.md), same values. */
-.tool-dialog .dialog-group { border: 1px solid var(--color-border); border-radius: var(--radius-sm); margin: 6px 0; padding: 6px 8px 8px; min-width: 0; }
-.tool-dialog .dialog-group legend { font-size: var(--font-size-sm); font-weight: bold; color: var(--color-text); padding: 0 4px; }
+.tool-dialog .dialog-group { border: 1px solid var(--color-border); border-radius: var(--radius-sm); margin: var(--dialog-row-gap) 0; padding: var(--space-3) var(--space-4) var(--space-4); min-width: 0; }
+.tool-dialog .dialog-group legend { font-size: var(--font-size-sm); font-weight: bold; color: var(--color-text); padding: 0 var(--space-2); }
 /* Label, field, label, field: the rows of a group line up in four columns (Word's 간격 [표준] 값 [ ] pairs). */
 /* The label column is as wide as the longest label (`스타일 모음(T):`, 5.8em; a wider font grows it), then the combo (150px), the value label, the value field (96px) and its unit. */
-.tool-dialog .dialog-grid { display: grid; grid-template-columns: minmax(5.8em, auto) 150px auto 96px auto; justify-content: start; align-items: center; gap: 6px 8px; }
+.tool-dialog .dialog-grid { display: grid; grid-template-columns: minmax(5.8em, auto) 150px auto 96px auto; justify-content: start; align-items: center; gap: var(--dialog-row-gap) var(--dialog-gap); }
 .tool-dialog .dialog-grid > .dialog-label { text-align: left; white-space: nowrap; }
 .tool-dialog .dialog-grid > .custom-select.dialog-select { justify-self: stretch; }
 .tool-dialog .dialog-grid .custom-select-trigger { width: 100%; box-sizing: border-box; }
@@ -195,7 +195,7 @@
 .tool-dialog .dialog-grid-wide { grid-template-columns: minmax(5.8em, auto) 150px; }
 .tool-dialog .dialog-inline-row .dialog-field { width: 96px; flex: none; }
 /* The 글꼴 tab: font, style and size share one row of labels over their fields (list boxes), then the label/field pairs, then the 효과 group in two columns. */
-#doc-font-dialog .dialog-font-top { display: grid; grid-template-columns: minmax(0, 1fr) 128px 72px; grid-template-rows: auto auto auto 1fr; grid-template-areas: "fl sl zl" "ff sf zf" "el sb zb" "ef sb zb"; align-items: start; gap: 6px 8px; margin-bottom: 6px; }
+#doc-font-dialog .dialog-font-top { display: grid; grid-template-columns: minmax(0, 1fr) 128px 72px; grid-template-rows: auto auto auto 1fr; grid-template-areas: "fl sl zl" "ff sf zf" "el sb zb" "ef sb zb"; align-items: start; gap: var(--dialog-row-gap) var(--dialog-gap); margin-bottom: var(--dialog-row-gap); }
 #doc-font-dialog .dialog-font-top > .dialog-label { text-align: left; }
 #doc-font-dialog .dialog-font-top > .custom-select { justify-self: stretch; }
 #doc-font-dialog .dialog-font-top > .dialog-field { width: 100%; }
@@ -210,7 +210,7 @@
 #doc-font-dialog #doc-font-style-list { grid-area: sb; }
 #doc-font-dialog #doc-font-size-list { grid-area: zb; }
 /* 글꼴 색, 밑줄 스타일 and 밑줄 색 are three columns with the label over each control; 강조점 is the row below. */
-#doc-font-dialog .dialog-font-colors { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "cl ul uc" "ch us uh" "el . ." "es . ."; gap: 6px 8px; margin-bottom: 6px; align-items: start; }
+#doc-font-dialog .dialog-font-colors { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "cl ul uc" "ch us uh" "el . ." "es . ."; gap: var(--dialog-row-gap) var(--dialog-gap); margin-bottom: var(--dialog-row-gap); align-items: start; }
 #doc-font-dialog .dialog-font-colors > .dialog-label { text-align: left; }
 #doc-font-dialog .dialog-font-colors label[for="doc-font-color"] { grid-area: cl; }
 #doc-font-dialog .dialog-font-colors label[for="doc-font-underline-style"] { grid-area: ul; }
@@ -223,26 +223,26 @@
 #doc-font-dialog .dialog-font-colors > .custom-select, #doc-font-dialog .dialog-font-colors > .dialog-color-host { justify-self: stretch; }
 .tool-dialog .dialog-font-colors .custom-select-trigger { width: 100%; box-sizing: border-box; }
 /* A color button has the combo box's cells: the chip and the name, then the 15px arrow cell (`.custom-select-arrow`) after its divider. */
-#doc-font-dialog .dialog-font-colors .dialog-swatch { display: grid; grid-template-columns: auto minmax(0, 1fr) 15px; width: 100%; box-sizing: border-box; padding: 0 0 0 4px; }/* The check boxes: `.cs-checkbox-label` gap 3px and margin-right 16px (`char-shape-dialog.css` 117-127), rows 6px apart as `.dialog-row`. */
-#doc-font-dialog .dialog-effects { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; }
-#doc-font-dialog .dialog-checkbox { gap: 3px; }
+#doc-font-dialog .dialog-font-colors .dialog-swatch { display: grid; grid-template-columns: auto minmax(0, 1fr) 15px; width: 100%; box-sizing: border-box; padding: 0 0 0 var(--space-2); }
+/* The check boxes: two columns, `.cs-checkbox-label` margin-right 16px (`char-shape-dialog.css` 117-127), rows `--dialog-row-gap` apart as `.dialog-row`. */
+#doc-font-dialog .dialog-effects { display: grid; grid-template-columns: 1fr 1fr; gap: var(--dialog-row-gap) var(--space-8); }
 /* The font dialog's footer: 기본값으로 설정 and 텍스트 효과 on the left, 확인 and 취소 on the right. */
-#doc-font-dialog .dialog-footer-split { display: flex; align-items: center; gap: 8px; }
+#doc-font-dialog .dialog-footer-split { display: flex; align-items: center; gap: var(--dialog-gap); }
 #doc-font-dialog .dialog-footer-gap { flex: 1; }
 /* 확인 and 취소 are the reference's 72px buttons (`.cs-right-col .dialog-btn`, `char-shape-dialog.css` 28-31). */
 #doc-font-dialog .dialog-footer .dialog-btn { min-width: 72px; white-space: nowrap; }
 .tool-dialog .dialog-swatch-text { font-size: var(--font-size-sm); color: var(--color-text); min-width: 28px; text-align: left; }
-.tool-dialog .dialog-inline-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.tool-dialog .dialog-inline-row { display: flex; align-items: center; gap: var(--dialog-gap); margin-top: var(--dialog-row-gap); }
 .tool-dialog .dialog-label-left { text-align: left; white-space: nowrap; }
 .tool-dialog .dialog-key { text-decoration: underline; }
-/* The list box of a dialog (dialog-combo.js fills it): the reference's `.goto-bookmark-list` and `.goto-bookmark-item` (`dialogs.css` 1023-1040, MIT, see THIRD_PARTY_NOTICES.md), same values except the height: 128px is six whole 21px rows and the two borders, so no row is cut. */
-.goto-bookmark-list { border: 1px solid var(--color-border); background: var(--color-surface); height: 128px; overflow-y: auto; }
-.goto-bookmark-item { padding: 4px 8px; font-size: var(--font-size-sm); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The list box of a dialog (dialog-combo.js fills it): the reference's `.goto-bookmark-list` and `.goto-bookmark-item` (`dialogs.css` 1023-1040, MIT, see THIRD_PARTY_NOTICES.md), same values except the height (`--dialog-list-height`: six whole rows, so no row is cut). */
+.goto-bookmark-list { border: 1px solid var(--color-border); background: var(--color-surface); height: var(--dialog-list-height); overflow-y: auto; }
+.goto-bookmark-item { padding: var(--list-row-padding-y) var(--list-row-padding-x); font-size: var(--font-size-sm); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .goto-bookmark-item:hover { background: var(--ui-selected); }
 .goto-bookmark-item.selected { background: var(--color-primary); color: var(--ui-text-on-accent); }
 /* The preview: a framed sample (the reference's `.cs-preview`, `char-shape-dialog.css` 86-92) and the line under it. */
-#doc-font-dialog .doc-font-sample { display: flex; align-items: center; justify-content: center; overflow: hidden; box-sizing: border-box; width: 100%; height: 48px; padding: 0 12px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); }
-#doc-font-dialog #doc-font-sample-note { display: block; margin-top: 6px; min-height: 16px; }
+#doc-font-dialog .doc-font-sample { display: flex; align-items: center; justify-content: center; overflow: hidden; box-sizing: border-box; width: 100%; height: var(--dialog-preview-height); padding: 0 var(--space-6); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); }
+#doc-font-dialog #doc-font-sample-note { display: block; margin-top: var(--dialog-row-gap); min-height: var(--dialog-status-height); }
 .dialog-status-row { min-height: 18px; line-height: 18px; text-align: right; }
 .dialog-status { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 /* After every display rule above, so `hidden` wins at equal specificity. */

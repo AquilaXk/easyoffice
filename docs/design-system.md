@@ -62,6 +62,8 @@ EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 �
 | `.dialog-footer` `.dialog-btn` `.dialog-btn-primary` | 아래 단추 줄 | 높이 `--control-height-md`, 글자 `--font-size-base`, 간격 `--dialog-gap` | dialogs.css 195-238 | PD-098 |
 | `.dialog-tabs` `.dialog-tab` `.dialog-tab-panel` | 탭 | 안쪽 `--dialog-tab-padding-y` `--dialog-tab-padding-x`, 글자 `--font-size-sm` | dialogs.css 530-570 | PD-098 |
 | `.dialog-list` | 목록 상자 | 글자 `--font-size-sm`, 행 안쪽 `--list-row-padding-y` `--list-row-padding-x` | style-dialog.css 30-50 | PD-098 |
+| `.goto-bookmark-list` `.goto-bookmark-item` | 필드 아래에 항상 열려 있는 목록(글꼴 스타일·크기, `ui/dialog-combo.js`가 동작만 붙임) | 높이 `--dialog-list-height`(행 여섯 줄), 글자 `--font-size-sm`, 행 안쪽 `--list-row-padding-y` `--list-row-padding-x` | dialogs.css 1023-1038 | PD-376 |
+| `.dialog-grid` `.dialog-grid-wide` `.dialog-field` `.dialog-swatch-text` | 라벨·칸·라벨·칸·단위 열 격자와 칸이 셀을 채우는 폭, 색 단추의 이름 | 간격 `--dialog-row-gap` `--dialog-gap`, 글자 `--font-size-sm`, 미리 보기 `--dialog-preview-height` | char-shape-dialog.css 4-31 | PD-376 |
 | `.dialog-status-row` `.dialog-status` `.dialog-pdf-note` | 상태·주석 줄 | 최소 높이 `--dialog-status-height`, 글자 `--font-size-sm` | find-dialog.css 59-68, dialogs.css 249-275 | PD-098 |
 
 한 줄(`.dialog-row`, `.dialog-footer`, `.dialog-btn-group`) 안의 컨트롤은 높이와 위쪽 위치가 같고, 높이는 `--control-height-*` 중 하나, 글자 크기는 `--font-size-*` 중 하나입니다(라벨은 제외). 열린 대화상자의 어떤 상자도 내용이 넘쳐 잘리지 않습니다.

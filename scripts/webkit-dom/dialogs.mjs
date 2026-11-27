@@ -5,9 +5,8 @@ import { KNOWN_DIALOG_VIOLATIONS } from "./dialog-known.mjs";
 // tab of it) through the menu command a user would use, measures it (dialog-layout.mjs) and fails with the dialog, the
 // element and the measured values. What a dialog already breaks is listed per step in dialog-known.mjs; that list only shrinks.
 //
-// Not covered yet (TODO.md): the word processor's font dialog (`doc-font-dialog.js`, `dialog-combo.js`, being rebuilt on the reference
-// components), the hyperlink, table properties and image dialogs (they need a selection first), and the dialogs of the slide, PDF and
-// base windows.
+// Not covered yet (TODO.md): the hyperlink, table properties and image dialogs (they need a selection first), and the dialogs of the
+// slide, PDF and base windows.
 
 const click = (selector) => (page) => page.evaluate((target) => document.querySelector(target).click(), selector);
 const choose = (selector, value) => (page) => page.evaluate(([target, picked]) => {
@@ -58,7 +57,18 @@ const SHEET_DIALOGS = [
   ["메모", "sheet-note-dialog", [click('[data-sheet-act="note-insert"]')]],
 ];
 
+/** Some text with a selection in the document, so the font dialog opens on a run. */
+async function selectDocText(page) {
+  await page.click("#doc-editor p");
+  await page.keyboard.type("가나다라 AaBb");
+  await page.keyboard.press("Shift+Home");
+}
+
+const FONT_DIALOG = click('[data-studio-menu-cmd="font-dialog"]');
+
 const DOC_DIALOGS = [
+  ["글꼴 글꼴 탭", "doc-font-dialog", [selectDocText, FONT_DIALOG]],
+  ["글꼴 고급 탭", "doc-font-dialog", [selectDocText, FONT_DIALOG, click("#doc-font-tab-advanced")]],
   ["용지 설정", "doc-page-setup-dialog", [click('[data-studio-menu-cmd="layout-paper"]')]],
   ["찾기 및 바꾸기", "find-dialog", [click('[data-studio-menu-cmd="replace"]')]],
   ["목차", "doc-toc-dialog", [click('[data-studio-menu-cmd="doc-mod-toc"]')]],

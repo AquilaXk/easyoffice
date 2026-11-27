@@ -93,7 +93,6 @@ export const KNOWN_SIZE_VIOLATIONS = {
     "#sheet-link-dialog .dialog-row",
     "#sheet-link-dialog .dialog-hyperlink-target legend",
     "#sheet-link-dialog .dialog-hyperlink-panel",
-    "#doc-font-dialog .dialog-body[data-font-pane]",
     ".dialog-status-row",
     "#sheet-protect-alert-dialog .dialog-body",
     ".dialog-tabs",
