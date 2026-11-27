@@ -33,6 +33,10 @@ fn run_has_formatting(run: &RichRun) -> bool {
         || run.strike
         || run.size_half_pt.is_some()
         || run.font.is_some()
+        || run.font_east_asia.is_some()
+        || run.font_face.is_some()
+        || run.letter_spacing_twips.is_some()
+        || !run.advanced.is_none()
         || run.color.is_some()
         || run.highlight.is_some()
         || run.script != RichScript::Normal
