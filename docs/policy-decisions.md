@@ -6803,3 +6803,18 @@
 - **Why** 이름이 화면과 다르면 메뉴를 찾지 못한다.
 - **Verified by** `scripts/test-webui-sheet-look.mjs`, `scripts/test-webui-verify-review-pd258.mjs`, `crates/easyoffice-desktop/src/native_menu/tests/contracts.rs`, 전체 WebKit 묶음.
 - **Revisit when** CSV·TSV 저장 형식 이름을 실기기와 대조할 때.
+
+## PD-386 — 코파일럿 편집을 공식 오피스 코파일럿 방식으로: 고치는 편집은 바꾸기·아래에 삽입·버리기, 새 내용은 초안으로 바로 넣고 유지·버리기 (2026-11-28)
+
+- **Decision (QA 2026-11-27)** 편집 응답을 `classifyEditMode`(`copilot-edit-mode.js`)로 둘로 나눈다.
+  - 연산이 모두 새 내용만 더하면(`doc.append`, `slide.add`, `slide.add_element`, `base.add_field`·`base.add_records`, `board.add_graph`, 빈 셀에만 쓰는 `sheet.write`) 미리보기 없이 기존 연출(`applyOperationsAnimated`)로 문서에 초안을 바로 넣고 단추는 `유지` / `버리기`다. `버리기`는 실행 취소 경로(`undoLastTurn`)로 넣은 것을 되돌리고, 그 사이 문서를 고쳤으면 비활성이다. `유지` 뒤와 다음 요청을 보내면 결정이 닫히고 `실행 취소` 칩이 남는다.
+  - 하나라도 기존 내용을 고치면(섞인 응답 포함) 지금처럼 미리보기를 먼저 보이고 단추는 `바꾸기` / `아래에 삽입` / `버리기`다. `바꾸기`는 이전 `수락`(지문 검사·stale 처리 그대로), `버리기`는 이전 `거절`이고 상태 문구는 `거절함` → `버림`이다.
+  - `아래에 삽입`은 DOC(Pages 포함)·HWP의 `doc.replace_span`·`doc.replace_paragraphs`만 있을 때 보인다. 원문은 두고 새 글을 원 문단(범위는 끝 문단) 바로 아래 새 문단으로 넣는다. 지문 검사는 `바꾸기`와 같고 연출 없이 한 번에 적용하며 실행 취소는 한 단계다. 시트·BASE·BOARD·슬라이드·`doc.scrub_pii`가 든 응답에는 단추를 숨긴다.
+  - 시트 `chart`·서식·조건부 서식·정렬·표 같은 나머지 시트 연산, `base.update_records`·`base.set_view`, `slide.update`는 고치는 편집으로 다룬다.
+- **HWP** 편집기 브리지(`copilot-bridge.ts`)에 `insert_after` 단계(문단 번호, 줄 목록)를 더했다. 그 문단의 글과 서식은 그대로 두고 줄마다 새 문단을 바로 아래에 넣는다. 같은 문단 아래 글은 모아 한 단계로 보내고 번호가 큰 문단부터 넣는다.
+- **재사용 판단 (구현 원칙 3단계)** 크레이트·기존 의존성에 해당 기능이 없고, 이식할 참조 구현도 없다. 기존 적용·연출·되돌리기 경로를 재구성했고 HWP 줄 나눔은 한 함수(`splitTextLines`)로 모았다.
+- **copilot.css 디자인 가드** 알려진 크기 위반 6곳을 모두 없앴다. 간격 `gap: 2px`는 `var(--space-1)`, 입력 칸 최소 높이 40px·메뉴 아래 줄 간격 1px·힌트 칩 안쪽 여백 `1px var(--space-2)`는 값 그대로 `--textarea-min-height`·`--menu-footer-gap`·`--menu-hint-padding` 토큰으로 옮겼다. 잠금 숫자는 0이다.
+- **Why** 공식 오피스 코파일럿은 고치는 제안은 비교해서 고르게 하고, 새로 만든 내용은 문서에 바로 보여 준 뒤 두거나 버리게 한다. 새 내용 하나에 미리보기와 수락을 거치게 하면 단계가 하나 더 든다.
+- **Trade-offs** 새 내용은 승인 전에 문서에 들어간다. 되돌리기 한 단계로 막고, 버리기가 안 되는 경우(그 사이 직접 고침)는 단추를 끈다. HWP 아래에 삽입은 실제 편집기에서 직접 확인하지 못했고 모의 편집기 시험으로만 확인했다.
+- **Verified by** `scripts/test-copilot-edit-mode-pd386.mjs`, `scripts/test-webui-copilot-*.mjs`, `scripts/test-design-guard.mjs`, WebKit `scripts/webkit-dom/run.mjs`.
+- **Revisit when** 시트 `chart`를 새 내용으로 볼지, HWP 아래에 삽입을 실제 편집기에서 확인할 때.
