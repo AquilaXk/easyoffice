@@ -162,9 +162,7 @@ fn variant_of(db: &Database, info: &FaceInfo, family: &str) -> Option<FontStyle>
     if !is_clean(&info.post_script_name) {
         return None;
     }
-    let records = db
-        .with_face_data(info.id, |data, index| read_records(data, index))
-        .unwrap_or_default();
+    let records = db.with_face_data(info.id, read_records).unwrap_or_default();
     let style = pick_name(
         &records,
         &[name_id::TYPOGRAPHIC_SUBFAMILY, name_id::SUBFAMILY],
