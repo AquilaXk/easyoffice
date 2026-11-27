@@ -942,7 +942,7 @@
     workspacePanels.renderModuleOutline("DOC");
     sheetController.updateSheetSelectionAndAggregates("A1");
     slideStudio.bind();
-    host.__EASYOFFICE_PAGES_UI__ = host.__EASYOFFICE_CREATE_PAGES_UI__?.({ document, getDocRuns: () => docRunsUi });
+    host.__EASYOFFICE_PAGES_UI__ = host.__EASYOFFICE_CREATE_PAGES_UI__?.({ document, getDocRuns: () => docRunsUi, systemFonts: desktopBridge.isAvailable() ? desktopBridge.systemFonts : null });
     host.__EASYOFFICE_PAGES_UI__?.bind?.();
     host.__EASYOFFICE_BASE_BOARD_HOST__?.init({ document, env: host, invokeIpc, desktopBridge, shellChrome, getActiveModule: () => activeModule, getWindowBridge: () => windowBridge, setFeedback: (t) => setStatusFeedback(t), recordUndo: () => ribbonHistory.pushUndoSnapshot(false), captureUndo: () => ribbonHistory.captureWorkspaceSnapshot(false), commitUndo: ribbonHistory.commitDeferredUndoSnapshot, noteActivity: () => workspaceSession?.noteActivity() });
     workspacePanels.renderSlideDeck(0);

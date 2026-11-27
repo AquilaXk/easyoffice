@@ -12,13 +12,13 @@
   const RUN_CLASS = "eo-run";
   const BOOL_PROPS = ["bold", "italic", "underline", "strike", "superscript", "subscript"];
   const BOOL_PROP_SET = new Set(BOOL_PROPS);
-  const VALUE_PROPS = ["size", "font", "color", "highlight", "spacing"];
+  const VALUE_PROPS = ["size", "font", "face", "color", "highlight", "spacing"];
   const PROPS = [...VALUE_PROPS, ...BOOL_PROPS];
   // Letter spacing (`spacing`): twips added after each character, either way up to 1,584 pt (PD-367).
   const MAX_SPACING_TWIPS = 31680;
   const TWIPS_PER_PX = 15;
   const DATA_KEY = {
-    size: "eoSize", font: "eoFont", color: "eoColor", highlight: "eoHighlight", spacing: "eoSpacing",
+    size: "eoSize", font: "eoFont", face: "eoFace", color: "eoColor", highlight: "eoHighlight", spacing: "eoSpacing",
     bold: "eoBold", italic: "eoItalic", underline: "eoUnderline", strike: "eoStrike",
     superscript: "eoSuperscript", subscript: "eoSubscript",
   };
@@ -36,6 +36,9 @@
   const STRUCTURAL_TAGS = new Set(["TABLE", "THEAD", "TBODY", "TFOOT", "TR", "UL", "OL", "DL"]);
   const NAMED_HIGHLIGHTS = { yellow: "FFFF00", lime: "00FF00", cyan: "00FFFF", pink: "FF00FF" };
   const FONT_RE = /^[^\u0000-\u001f"'\\;{}<>`]{1,64}$/u;
+  // The variant of the font (`face`, PD-368): a PostScript name, printable ASCII without quotes, brackets, slashes and the
+  // other characters CSS and the document formats treat specially, at most 128 characters (the engine's limit in bytes).
+  const FACE_RE = /^[A-Za-z0-9._+~!#$&*,:=?@^|-]{1,128}$/;
   const HEX_RE = /^#?([0-9a-f]{6})$/i;
   const SHORT_HEX_RE = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i;
   const WORD_RE = /[\p{L}\p{N}_]/u;
@@ -80,6 +83,7 @@
       return Number.isInteger(n) && Math.abs(n) <= MAX_SPACING_TWIPS ? n : undefined;
     }
     if (prop === "font") return normalizeFont(value) ?? undefined;
+    if (prop === "face") return FACE_RE.test(String(value)) ? String(value) : undefined;
     if (prop === "color" || prop === "highlight") return normalizeColor(value) ?? undefined;
     return undefined;
   }
@@ -116,6 +120,8 @@
     if (Number.isInteger(spacing) && spacing !== 0 && Math.abs(spacing) <= MAX_SPACING_TWIPS) fmt.spacing = spacing;
     const font = el.dataset[DATA_KEY.font];
     if (font && FONT_RE.test(font)) fmt.font = font;
+    const face = el.dataset[DATA_KEY.face];
+    if (face && FACE_RE.test(face)) fmt.face = face;
     ["color", "highlight"].forEach((p) => {
       const c = normalizeColor(el.dataset[DATA_KEY[p]]);
       if (c) fmt[p] = c;
@@ -168,6 +174,11 @@
     return (halfPt / 2) + "pt";
   }
 
+  // The face (PostScript name) first, so a machine that matches fonts by it draws the variant; the font name after it.
+  function familyToCss(fmt) {
+    return [fmt.face, fmt.font].filter(Boolean).map((name) => '"' + name + '"').join(", ");
+  }
+
   function spacingToCss(twips) {
     return twips ? String(Math.round((twips / TWIPS_PER_PX) * 1000) / 1000) + "px" : "";
   }
@@ -177,7 +188,7 @@
     const deco = [fmt.underline ? "underline" : "", fmt.strike ? "line-through" : ""].filter(Boolean).join(" ");
     return {
       fontSize: fmt.size ? halfPtToCss(fmt.size) : "",
-      fontFamily: fmt.font ? '"' + fmt.font + '"' : "",
+      fontFamily: familyToCss(fmt),
       color: fmt.color ? "#" + fmt.color : "",
       backgroundColor: fmt.highlight ? "#" + fmt.highlight : "",
       letterSpacing: spacingToCss(fmt.spacing),
@@ -208,7 +219,7 @@
     }
     const st = span.style;
     st.fontSize = fmt.size ? halfPtToCss(fmt.size) : "";
-    st.fontFamily = fmt.font ? '"' + fmt.font + '"' : "";
+    st.fontFamily = familyToCss(fmt);
     st.color = fmt.color ? "#" + fmt.color : "";
     st.backgroundColor = fmt.highlight ? "#" + fmt.highlight : "";
     st.letterSpacing = spacingToCss(fmt.spacing);
@@ -225,7 +236,7 @@
   // bold, italic, underline, strike, script}); invalid values are dropped.
   function fromModelRun(run) {
     const patch = normalizePatch({
-      size: run?.sizeHalfPt, spacing: run?.letterSpacingTwips, font: run?.font, color: run?.color, highlight: run?.highlight,
+      size: run?.sizeHalfPt, spacing: run?.letterSpacingTwips, font: run?.font, face: run?.fontFace, color: run?.color, highlight: run?.highlight,
       bold: run?.bold === true ? true : undefined, italic: run?.italic === true ? true : undefined,
       underline: run?.underline === true ? true : undefined, strike: run?.strike === true ? true : undefined,
       superscript: run?.superscript === true || run?.script === "superscript" ? true : undefined,
@@ -531,6 +542,7 @@
       (a.size || "") === (b.size || "") &&
       (a.spacing || 0) === (b.spacing || 0) &&
       (a.font || "") === (b.font || "") &&
+      (a.face || "") === (b.face || "") &&
       (a.color || "") === (b.color || "") &&
       (a.highlight || "") === (b.highlight || "")
     );

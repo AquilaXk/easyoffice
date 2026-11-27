@@ -128,6 +128,7 @@ pub(crate) fn push_annotated_run(
         strike: fmt.strike,
         size_half_pt: fmt.size_half_pt,
         font: fmt.font.clone(),
+        font_face: None,
         color: fmt.color.clone(),
         highlight: fmt.highlight.clone(),
         script: fmt.script,

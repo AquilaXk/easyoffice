@@ -15,6 +15,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "pdf_edit_save",
     "list_system_fonts",
     "read_system_font",
+    "list_font_styles",
     "get_update_notice",
     "set_update_check",
     "open_release_page",

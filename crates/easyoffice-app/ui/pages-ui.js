@@ -133,6 +133,20 @@
       syncInspectorValues();
     }
 
+    // The style popup above the 서체 포맷 buttons lists the variants of the selection's font (PD-368).
+    const fontStyles = host.__EASYOFFICE_CREATE_DOC_FONT_STYLES__?.({ systemFonts: deps.systemFonts });
+
+    function syncFontStyle() {
+      const select = byId("pages-insp-face");
+      if (select && fontStyles && doc.activeElement !== select) void fontStyles.sync(select, deps.getDocRuns?.()?.getState?.());
+    }
+
+    async function applyFontStyle(select) {
+      const patch = await fontStyles?.patchFor(select.dataset.eoFamily, select.value);
+      if (patch) deps.getDocRuns?.()?.applyPatch?.(patch);
+      syncInspectorValues();
+    }
+
     function applyLineSpacing(kind, amountText) {
       const value = lineKinds().valueOf(kind, amountText);
       if (value !== null) deps.getDocRuns?.()?.setLineSpacingRule?.(kind, value);
@@ -169,6 +183,7 @@
       const block = selectedBlocks()[0];
       syncLineSpacing(block);
       syncCharSpacing();
+      syncFontStyle();
       const listSel = byId("pages-insp-list");
       if (listSel && doc.activeElement !== listSel) {
         const kind = listKindOf(block);
@@ -376,6 +391,7 @@
         applyLineSpacing(kind, fallback);
       });
       byId("pages-insp-spacing")?.addEventListener("change", (ev) => applyCharSpacing(ev.target));
+      byId("pages-insp-face")?.addEventListener("change", (ev) => void applyFontStyle(ev.target));
       byId("pages-insp-lineamount")?.addEventListener("change", (ev) => applyLineSpacing(byId("pages-insp-linekind").value, ev.target.value));
       for (const [inspId, srcId] of [
         ["pages-insp-style", "doc-style-select"],

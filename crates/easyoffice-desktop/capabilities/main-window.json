@@ -16,6 +16,7 @@
     "allow-pdf-edit-save",
     "allow-list-system-fonts",
     "allow-read-system-font",
+    "allow-list-font-styles",
     "allow-get-update-notice",
     "allow-set-update-check",
     "allow-open-release-page",

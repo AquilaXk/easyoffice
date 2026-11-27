@@ -159,6 +159,9 @@ pub struct RichRun {
     pub size_half_pt: Option<u16>,
     /// Font family name; `None` inherits the document default.
     pub font: Option<String>,
+    /// PostScript name of the font variant the run is drawn in (a [`crate::font_face`] name, PD-368). The `.pages`
+    /// writer writes it in place of `font`; the other formats write `font`.
+    pub font_face: Option<String>,
     /// Text color as six upper-case hex digits (`RRGGBB`, no `#`).
     pub color: Option<String>,
     /// Highlight/shading color as six upper-case hex digits.

@@ -265,7 +265,7 @@
       return setSize(half / 2 + deltaPt, options);
     }
 
-    const setFont = (font, options) => applyPatch({ font }, options);
+    const setFont = (font, options) => applyPatch({ font, face: null }, options); // another font drops the variant (PD-368)
 
     function setColor(prop, hex, options) {
       const norm = R.normalizeColor(hex);

@@ -6461,19 +6461,24 @@
 - **Verified by** `crates/easyoffice-formats/tests/letter_spacing_pd367.rs`(포맷별 왕복, 규칙 낱말, 변조 값, Pages 단락 앞뒤 간격), `rich_char_spacing.rs` 단위 시험, `crates/easyoffice-app/src/convert_open/tests.rs`(JSON 키와 범위 거부), `scripts/test-webui-family-look-pd361.mjs`·`scripts/test-webui-doc-paragraphs.mjs`.
 - **Revisit when** 실제 Pages 문서로 `tracking`·단락 간격 단위를 확인할 때, 워드프로세서 글꼴 대화상자를 넣을 때.
 
-## PD-368 — 서체 스타일 팝업(가는체·폭좁은체 등) 설계 (2026-11-27)
+## PD-368 — 서체 스타일 팝업(가는체·폭좁은체 등): 시스템 서체의 변형 열거와 `font_face` (2026-11-27)
 
-- **Status** Designed (구현 전). 이 결정은 구현에 앞서 방식을 확정한다.
+- **Status** Implemented. 설계에서 열려 있던 두 질문은 QA가 같은 날 답했다(3항, 4항). 설계와 달라진 곳은 아래에 `구현에서 바뀜`으로 적었다.
 - **Context** Pages 포맷 사이드바 `서체` 섹션의 서체 팝업 아래에는 같은 서체 계열의 스타일(보통·가는체·굵은체·폭좁은체 등)을 고르는 팝업이 있다(`PD-362` 5항에서 엔진 기능이 없어 뺀 항목). 우리 모델의 `RichRun::font`는 서체 이름 하나이고 굵게·기울임은 별도 불리언이다.
-- **Decision (`PD-368`, 설계)**
-  1. **목록의 출처**: 데스크톱 셸이 시스템 서체를 계열별로 열거해 변형 목록 `{계열, PostScript 이름, 스타일 이름, 굵기(100~900), 너비, 기울임}`을 돌려주는 IPC를 둔다(macOS CoreText `CTFontManagerCopyAvailableFontFamilyNames`·`CTFontCopyAvailableTables` 대신 `CTFontDescriptorCreateMatchingFontDescriptors`로 계열별 기술자, Windows DirectWrite 글꼴 집합, Linux fontconfig). 웹 화면은 열거 API가 없으므로 이 IPC가 없는 환경(브라우저 시험)에서는 팝업을 `보통` 하나로 둔다. 목록은 계열당 64개, 전체 2,048개로 자른다.
-  2. **모델**: `RichRun`에 `font_face: Option<String>`(PostScript 이름)을 추가한다. `font`는 계열 이름을 그대로 두고, `font_face`가 있으면 그 변형을 뜻한다. 굵게·기울임 불리언과 함께 쓸 때는 변형의 굵기·기울임이 불리언을 대신한다(불리언만 켜진 런은 지금처럼 쓴다).
-  3. **포맷별 쓰기**: Pages는 글자 속성 필드 11.5가 PostScript 이름이므로 `font_face`를 그대로 쓴다(참조 구현 표로 확인). DOCX·ODT·RTF·HWPX는 변형을 서체 이름으로 쓴다(`w:rFonts`의 `AppleSDGothicNeo-Light` 같은 PostScript 이름이 아니라 워드프로세서가 계열로 취급하는 전체 이름 `Apple SD Gothic Neo Light`). 읽을 때는 서체 이름이 목록의 전체 이름과 일치하면 계열과 변형으로 나눈다.
-  4. **화면 표시**: 편집기 런은 `data-eo-face`를 가지고 CSS는 `font-family`에 계열을, `font-weight`·`font-stretch`에 변형의 값을 쓴다. 변형이 시스템 서체에 있을 때만 쓰고, 없는 변형은 팝업에서 `(없음)`으로 표시한다. 문서에 있으나 이 기기에 없는 변형은 이름을 보존한다.
-  5. **입력 상한**: `font_face`는 128바이트, 제어 문자 없는 문자열이며 JSON·파일에서 읽을 때 상한을 넘으면 지정 없음으로 읽는다(`pages_write`의 서체 이름 상한과 같다).
-- **재사용 판단 (구현 원칙 3단계)** (1) 서체 열거에 허용 라이선스 크레이트를 먼저 본다(예: `font-kit` MIT/Apache-2.0가 CoreText·DirectWrite·fontconfig를 한 인터페이스로 감싼다). 적합하면 그대로 쓰고 이미 쓰는 의존성과 겹치는지 확인한다. (2) 없으면 이미 쓰는 데스크톱 셸 의존성(CoreText 바인딩 등)을 확인한다. (3) 둘 다 아닐 때만 참조 앱의 서체 처리를 이식한다.
-- **Open questions** (1) Pages 한국어 화면의 스타일 이름(`가는체` 등)을 어떤 로케일 문자열에서 가져오는지(서체의 이름 표 `nameID 2` 현지화 이름 vs 고정 번역). (2) 변형 폭(너비)이 Pages `폭좁은체`처럼 계열의 별도 서체로 있는 경우의 목록 구성. 구현 전에 `font-kit` 도입 가능성과 위 두 질문을 확인한다.
-- **Revisit when** 구현을 시작할 때.
+- **Decision (`PD-368`)**
+  1. **목록의 출처**: 데스크톱 셸의 새 명령 `list_font_styles(name)`(`font_styles.rs`)이 서체 이름 하나를 받아 그 계열의 변형 목록 `{family, styles: [{face(PostScript 이름), fullName, style, weight, width(CSS font-stretch %), italic}]}`을 돌려준다. `name`은 계열 이름(영문·현지화), PostScript 이름, 전체 이름(`Apple SD Gothic Neo Light`) 어느 것이든 된다(계열 이름으로 못 찾으면 PostScript 이름, 그다음 "전체 이름이 계열 이름과 띄어쓰기로 시작하는" 가장 긴 계열). 웹 화면은 열거 API가 없으므로 셸이 없는 환경(브라우저 시험)에서는 팝업을 `보통` 하나로 두고 끈다. **구현에서 바뀜**: 설계의 CoreText·DirectWrite·fontconfig 직접 호출 대신 셸이 PDF 내보내기용으로 프로세스당 한 번 만드는 글꼴 데이터베이스(글꼴 DB 크레이트)를 쓴다. 세 OS를 한 코드로 읽고 폴더를 두 번 훑지 않는다.
+  2. **모델**: `RichRun::font_face: Option<String>`(PostScript 이름, `font_face()` 검증)을 더했다. 사용자가 변형을 고르면 화면이 `font`에 변형의 **전체 이름**을, `font_face`에 PostScript 이름을 둔다(보통 변형은 계열 이름만 두고 `font_face`는 비움). **구현에서 바뀜**: 설계는 `font`를 계열 이름으로 두려 했으나 DOCX·ODT·RTF·HWPX 쓰기가 전체 이름을 `font`로 그대로 쓰도록(엔진이 서체 목록을 몰라도 되게) 전체 이름으로 바꾸었다. 굵게·기울임 불리언은 그대로 두고 변형의 굵기·기울임으로 바꾸지 않는다(불리언은 사용자가 따로 켠 서식이고 변형은 서체 이름이다).
+  3. **포맷별 쓰기·읽기**: Pages는 `font_face`가 있으면 글자 속성 필드 5(서체 이름 문자열, `PD-367` 3항과 같은 근거)에 PostScript 이름을 쓰고 없으면 `font`를 쓴다. DOCX·ODT·RTF·HWPX는 `font`(전체 이름)를 쓴다. 읽을 때 DOCX 등은 `font_face` 없이 전체 이름을 `font`로 읽고, 화면이 팝업을 채울 때 `list_font_styles(font)`로 계열과 변형을 찾아 그 변형을 고른 것으로 보여 준다(전체 이름이 목록에 있을 때만, 없으면 이름 그대로). Pages 파일의 PostScript 이름은 `font`로 읽히며 같은 방법으로 풀린다.
+  4. **화면 표시**: 런은 `data-eo-face`(PostScript 이름, ASCII 128자 이하)를 가지고 CSS `font-family`는 `"face", "font"` 순서다(PostScript 이름을 서체 이름으로 맞추는 macOS·Linux에서 변형이 그려지고, 그렇지 않으면 전체 이름으로 내려간다). 설계는 `font-weight`·`font-stretch`로 그리려 했으나 열 때 목록이 없어도 그려져야 해서 이름으로 그린다. **한계**: Windows는 서체를 계열 이름·GDI 계열 이름으로 맞춰 PostScript 이름이 안 맞을 수 있다. 실기기 확인은 `TODO.md`. 다른 서체를 고르면(`setFont`) 변형은 지워진다.
+  5. **스타일 이름(QA 2026-11-27)**: 팝업 이름은 서체 자신의 이름 표에서 가져온다. 형식명 ID 17(타이포그래피 서브패밀리), 없으면 ID 2에서 한국어 기록, 없으면 영어 기록, 그것도 없으면 있는 기록을 쓴다(번역 표 없음). 이름 표에 서브패밀리가 없으면 PostScript 이름의 하이픈 뒤, 그것도 없으면 `Regular`이다. 전체 이름(ID 4)은 영어를 먼저 읽는다(Mac 서체는 영어 기록이 Macintosh 로마자 인코딩뿐이라 ASCII만 읽는다). 실제 설치 서체로 확인한 예: Apple SD Gothic Neo는 `얇은체`·`옅은체`·`일반체`·`볼드체`, Helvetica Neue는 `가는체`·`이탤릭체`·`자간 축소 볼드체`, 한국어 기록이 없는 Arial은 `Regular`·`Bold Italic`.
+  6. **계열 묶기(QA 2026-11-27)**: 타이포그래피 계열(이름 ID 16, 없으면 ID 1)로 묶는다(글꼴 DB 크레이트가 같은 규칙으로 얼굴의 계열을 정한다). 같은 타이포그래피 계열을 가진 폭좁은 서체(`HelveticaNeue-CondensedBold`, 너비 75%)는 팝업에 들어가고, 계열이 다르면 별도 계열로 남는다. 정렬은 보통 너비 먼저, 굵기 순, 세운 것 다음 기울인 것.
+  7. **상한**: 한 계열 64개, 한 번의 훑기에서 얼굴 25,000개(글꼴 목록 명령과 같음), 요청 이름·스타일 이름·PostScript 이름 128바이트(제어 문자 있으면 거부), 전체 이름 64자(문서 모델의 `font` 상한, 넘는 변형은 뺌). 화면은 응답을 한 번 더 걸러 계열당 64개, 알 수 없는 필드는 버리고 `font_face`는 ASCII 문자 집합으로 제한한다. `fontFace`가 JSON·파일에서 128바이트를 넘거나 제어 문자가 있으면 지정 없음으로 읽고(문자열이 아니면 형식 오류), 저장에서는 그 값을 쓰지 않는다.
+  8. **자리**: Pages 한국어 지원 문서 「서체 또는 서체 크기 변경하기」·「볼드체, 이탤릭체, 밑줄체 및 취소선」(`support.apple.com/ko-kr/guide/pages/tane4dc5cd05/mac`, `.../tanf69e05015/mac`, 2026-11-27 확인)는 "서체에 지원되는 다른 스타일이 있는 경우(예: 가는체 또는 폭좁은체) 버튼 위의 팝업 메뉴를 클릭하여 스타일을 선택"한다고 적는다. 그래서 팝업은 서체 이름 바로 아래가 아니라 `서체 포맷` 버튼(볼드체·이탤릭체·밑줄체·취소선) 바로 위, `문자 간격` 아래에 둔다(설계 문구 "서체 팝업 아래"를 문서에 맞춤). 문서가 팝업의 이름을 적지 않아 접근성 이름 `서체 스타일`은 우리 선택이다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 서체 열거 크레이트: CoreText·DirectWrite·fontconfig를 한 인터페이스로 감싸는 허용 라이선스(MIT/Apache-2.0) 열거 크레이트가 있으나 새 의존성이고 셸이 이미 쓰는 글꼴 DB 크레이트와 기능이 겹쳐 들이지 않았다(이름 표의 서브패밀리를 직접 읽어야 해서 어느 쪽이든 글꼴 파서 크레이트가 필요하다). 글꼴 DB 크레이트 자체는 허용 라이선스(MIT)다. (2) 이미 쓰는 의존성: 글꼴 DB 크레이트(셸의 PDF 내보내기용 글꼴 데이터베이스, 타이포그래피 계열·PostScript 이름·굵기·너비·기울임)와 글꼴 파서 크레이트(그 바탕이고 셸이 직접 의존, 이름 표)로 모두 해결해 새 의존성이 없다. (3) 이식한 코드 없음(`THIRD_PARTY_NOTICES.md`에 사용 사실만 적음).
+- **Why** 서체에 가는체·폭좁은체 같은 변형이 있어도 이름 하나와 굵게·기울임만으로는 고를 수 없고, 변형을 고른 문서를 다른 서식으로 저장하면 서체 이름이 바뀌어 달라 보인다.
+- **Trade-offs** (1) 변형은 데스크톱 셸에서만 열거되고 브라우저 시험·`--serve`에서는 `보통` 하나다. (2) DOCX 등에서는 변형이 서체 이름(전체 이름)이어서 그 서체가 없는 기기는 다른 서체로 대체한다. (3) 한국어 기록이 없는 서체는 영어 이름(`Regular`)이 그대로 보인다(QA 결정). (4) Windows의 그리기와 `.pages` 단위는 실기기로 확인하지 못했다.
+- **Verified by** `crates/easyoffice-desktop/src/font_styles_tests.rs`(이름 선택 순서, 타이포그래피 서브패밀리 우선, 계열 64개·정렬·중복 제거, 적대 이름, 번들 서체로 계열·PostScript·전체 이름 조회, 무시된 시험 `system_font_styles_are_listed`로 설치 서체 출력), `crates/easyoffice-formats/tests/font_face_pd368.rs`(Pages 쓰기, 다른 포맷, 상한), `crates/easyoffice-app/src/convert_open/font_face_tests.rs`(JSON 왕복·적대 값), `scripts/test-webui-font-styles-pd368.mjs`(팝업 항목·변형 적용·보통 변형·셸 없음·이상한 응답·64개), 헤드리스 WebKit 전·후 캡처(밝은·어두운 테마, 셸 응답은 대체).
+- **Revisit when** Windows·Linux 실기기에서 변형이 그려지는지 확인할 때(안 그려지면 `font-weight`·`font-stretch`를 함께 쓴다), 변형을 고른 DOCX를 참조 워드프로세서로 열어 볼 때.
 
 ## PD-369 — 코파일럿 멀티턴 캐시 안정성·제공자 호환 확장·차등 예산·경량 보조 라우팅 고도화 (Phase 1~3) (2026-11-27)
 

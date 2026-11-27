@@ -24,7 +24,8 @@
   });
   // Installed fonts for the Hangul editor (PD-128). The list holds names, styles and numbers, never a path;
   // a read quotes the revision of the list and a file number, and gets the font file as an ArrayBuffer.
-  const SYSTEM_FONT_COMMANDS = Object.freeze({ list: "list_system_fonts", read: "read_system_font" });
+  // `styles` answers the variants (가는체, 폭좁은체, ...) of one font's family for the Pages style popup (PD-368): names and numbers.
+  const SYSTEM_FONT_COMMANDS = Object.freeze({ list: "list_system_fonts", read: "read_system_font", styles: "list_font_styles" });
   // Update notice (PD-103): the shell checks for a newer release and installs it (signed package);
   // the page only reads the state, switches the check on or off and asks the shell to start the
   // install or to open the release page (it passes no address and no package).
@@ -229,6 +230,7 @@
   const systemFonts = Object.freeze({
     list: () => callShell(SYSTEM_FONT_COMMANDS.list, {}),
     read: (revision, file) => callShell(SYSTEM_FONT_COMMANDS.read, { revision: String(revision), file }),
+    styles: (name) => callShell(SYSTEM_FONT_COMMANDS.styles, { name: String(name) }),
   });
   const getUpdateNotice = () => callShell(UPDATE_COMMANDS.get, {});
   const setUpdateCheck = (enabled) => callShell(UPDATE_COMMANDS.set, { enabled: Boolean(enabled) });

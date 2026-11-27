@@ -125,6 +125,7 @@
           run.sizeHalfPt !== undefined ||
           run.letterSpacingTwips !== undefined ||
           run.font !== undefined ||
+          run.fontFace !== undefined ||
           run.color !== undefined ||
           run.highlight !== undefined)
     );

@@ -139,12 +139,18 @@ pub(super) fn look_of(run: &RichRun, default_half_points: u16) -> CharLook {
         underline: run.underline,
         strike: run.strike,
         size_half_pt: run.size_half_pt.filter(|s| *s > 0 && *s <= MAX_HALF_POINTS),
+        // The variant's PostScript name when the run has one (PD-368), else the font name.
         font: run
-            .font
+            .font_face
             .as_deref()
-            .map(str::trim)
-            .filter(|f| !f.is_empty() && f.len() <= MAX_FONT_NAME_BYTES)
-            .map(str::to_string),
+            .and_then(crate::font_face)
+            .or_else(|| {
+                run.font
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|f| !f.is_empty() && f.len() <= MAX_FONT_NAME_BYTES)
+                    .map(str::to_string)
+            }),
         color: run.color.as_deref().and_then(parse_rgb),
         highlight: run.highlight.as_deref().and_then(parse_rgb),
         script: CharLook::script_code(run.script),

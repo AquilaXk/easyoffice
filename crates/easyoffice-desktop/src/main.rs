@@ -12,6 +12,7 @@ mod doc_hwp;
 mod doc_pdf;
 mod doc_pdf_marks;
 mod font_catalog;
+mod font_styles;
 // Linux webview runtime fixes (PD-125); other OSes compile it only for its decision-logic tests.
 #[cfg(any(target_os = "linux", test))]
 mod linux_runtime;
@@ -488,6 +489,7 @@ fn main() {
             pdf_edit_job::pdf_edit_save,
             font_catalog::list_system_fonts,
             font_catalog::read_system_font,
+            font_styles::list_font_styles,
             update_check::get_update_notice,
             update_check::set_update_check,
             update_check::open_release_page,
@@ -702,7 +704,7 @@ mod tests {
         );
         assert_eq!(value["windows"], serde_json::json!(["main", "doc-*"]));
         assert_eq!(value["local"], serde_json::json!(true));
-        assert_eq!(app_commands::APP_COMMANDS.len(), 33);
+        assert_eq!(app_commands::APP_COMMANDS.len(), 34);
     }
 
     #[test]

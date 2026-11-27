@@ -67,6 +67,7 @@ mod pptx_theme_color;
 mod rich_char_spacing;
 mod rich_defaults;
 pub mod rich_document;
+mod rich_font_face;
 mod rich_image;
 mod rich_image_probe;
 mod rich_image_writers;
@@ -156,6 +157,7 @@ pub use rich_document::{
     MAX_LINE_SPACING_TWIPS, MAX_PAGE_FRAME_PARAGRAPHS, MAX_PAGE_MARGIN_TWIPS,
     MAX_PARA_SPACING_TWIPS, MAX_TOC_LEVEL, MAX_TOC_PAGE, TOC_BOOKMARK_PREFIX,
 };
+pub use rich_font_face::{font_face, MAX_FONT_FACE_BYTES};
 pub use rich_image::{
     check_document_images, ImageBudget, RichImage, IMAGE_PLACEHOLDER_TEXT, MAX_ALT_TEXT_BYTES,
     MAX_IMAGES_PER_DOCUMENT, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_TOTAL_IMAGE_BYTES,

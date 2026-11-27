@@ -96,6 +96,7 @@ pub(crate) fn write_runs_json(out: &mut String, runs: &[RichRun]) {
         }
         for (value, key) in [
             (&r.font, "font"),
+            (&r.font_face, "fontFace"),
             (&r.color, "color"),
             (&r.highlight, "highlight"),
         ] {
@@ -980,6 +981,8 @@ impl EasyOfficeIpcRouter {
     }
 }
 
+#[cfg(test)]
+mod font_face_tests;
 #[cfg(test)]
 mod page_break_tests;
 #[cfg(test)]

@@ -607,7 +607,7 @@ fn tiny_png() -> Vec<u8> {
 }
 
 /// The `[...]` array of the `"blocks"` field of a decode response.
-fn blocks_array(json: &str) -> &str {
+pub(super) fn blocks_array(json: &str) -> &str {
     let start = json.find("\"blocks\":").unwrap() + "\"blocks\":".len();
     let (mut depth, mut in_str, mut esc) = (0usize, false, false);
     for (i, c) in json[start..].char_indices() {
