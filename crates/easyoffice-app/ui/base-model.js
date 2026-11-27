@@ -33,6 +33,7 @@
   const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/, MONTH_RE = /^(\d{4})-(0[1-9]|1[0-2])$/;
   const CTRL_OR_WS_RE = /[\u0000-\u001f\u007f\s]/;
   const FORMULA_CACHE = new Map();
+  const seqAfterIds = (re, tables, itemsOf) => 1 + tables.reduce((top, t) => itemsOf(t).reduce((m, item) => Math.max(m, Number(re.exec(item.id)?.[1] ?? 0)), top), 0);
 
   const fail = (error) => ({ ok: false, error });
   const cmpCode = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -929,7 +930,7 @@
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || hasForbiddenKeysDeep(parsed, 0)) return fail("허용되지 않는 상태 형식입니다.");
     if (!Array.isArray(parsed.tables) || !parsed.tables.length || parsed.tables.length > MAX_TABLES) return fail(`테이블 수는 1~${MAX_TABLES}개 범위여야 합니다.`);
-    // The record counter below moves past the largest `rec-N` id the file holds (at most 15 digits), so a new record takes no taken id.
+    // Each counter below moves past the largest `tbl-N`, `fld-N` or `rec-N` id the file holds (15 digits at most, so a long id cannot leave the exact integers), so a new table, field or record takes no taken id.
     const tables = [];
     for (let t = 0; t < parsed.tables.length; t += 1) {
       const rt = parsed.tables[t];
@@ -960,8 +961,8 @@
     }
     const nextState = {
       version: 1, activeTableId: tables.some((t) => t.id === parsed.activeTableId) ? String(parsed.activeTableId) : tables[0].id,
-      nextTableSeq: Math.max(tables.length + 1, Number(parsed.nextTableSeq) || tables.length + 1),
-      nextFieldSeq: Math.max(1, Number(parsed.nextFieldSeq) || 1), nextRecordSeq: Math.max(1, Number(parsed.nextRecordSeq) || 1, 1 + tables.reduce((top, t) => t.records.reduce((m, r) => Math.max(m, Number(/^rec-([0-9]{1,15})$/.exec(r.id)?.[1] ?? 0)), top), 0)), tables,
+      nextTableSeq: Math.max(tables.length + 1, Number(parsed.nextTableSeq) || tables.length + 1, seqAfterIds(/^tbl-([0-9]{1,15})$/, tables, (t) => [t])),
+      nextFieldSeq: Math.max(1, Number(parsed.nextFieldSeq) || 1, seqAfterIds(/^fld-([0-9]{1,15})$/, tables, (t) => t.fields)), nextRecordSeq: Math.max(1, Number(parsed.nextRecordSeq) || 1, seqAfterIds(/^rec-([0-9]{1,15})$/, tables, (t) => t.records)), tables,
     };
     const linked = checkStateLinks(tables);
     if (!linked.ok) return linked;
