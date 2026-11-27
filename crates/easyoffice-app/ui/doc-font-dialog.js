@@ -90,7 +90,7 @@
       els.family.appendChild(opt);
     }
     const family = typeof state.font === "string" && state.font !== MIXED ? state.font : "";
-    if (family && !Array.from(els.family.options).some((o) => o.value === family)) {
+    if (family && !Array.from(els.family.querySelectorAll("option")).some((o) => o.value === family)) {
       const opt = document.createElement("option");
       opt.value = family;
       opt.textContent = family;
@@ -146,7 +146,8 @@
   function apply() {
     const { els, initial, runs } = current;
     const patch = {};
-    if (els.family.value && els.family.value !== initial.family) patch.font = els.family.value;
+    // Another font drops the variant, as the style bar's font list does (`setFont`, PD-368).
+    if (els.family.value && els.family.value !== initial.family) Object.assign(patch, { font: els.family.value, face: null });
     if (els.style.value !== (initial.style || "regular")) {
       const style = STYLE_OF[els.style.value];
       patch.bold = style.bold ? true : null;

@@ -11,11 +11,11 @@ const byId = (h, id) => h.document.getElementById(id);
 const fire = (el, type = "change") => el.dispatchEvent({ type, target: el, bubbles: true });
 const spacingRuns = (h) => saved(h).flatMap((b) => b.runs || []).filter((r) => r.letterSpacingTwips);
 
-async function openDialog(h, block) {
+async function openDialog(h, block, { whole = false } = {}) {
   // The first character, whether the block still holds one text node or has been split into runs.
   const first = block.childNodes[0];
   const node = first.nodeType === 3 ? first : first.childNodes[0];
-  h.selection.addRange(rangeOf(node, 0, node, 1));
+  h.selection.addRange(rangeOf(node, 0, node, whole ? node.textContent.length : 1));
   h.document.dispatchEvent({ type: "selectionchange" });
   await flushAsyncTurns(10);
   h.userClick(h.document.querySelector('.md-item[data-studio-menu-cmd="font-dialog"]'));
@@ -102,4 +102,27 @@ test("확인 applies only what changed on the 글꼴 tab", async () => {
   assert.equal(run.italic, true);
   assert.equal(run.strike, true);
   assert.equal(run.letterSpacingTwips, undefined, "the spacing was not touched");
+});
+
+test("changing the font of a run that has a variant drops the variant (PD-368)", async () => {
+  const h = await createRunHarness([p("가나다")]);
+  const [a] = h.blocks;
+  const text = a.childNodes[0];
+  h.runs.applyFormat(h.editor, { startContainer: text, startOffset: 0, endContainer: text, endOffset: 3 }, { font: "Helvetica Neue Light", face: "HelveticaNeue-Light" });
+  const run = () => h.editor.querySelector(".eo-run");
+  assert.equal(run().dataset.eoFace, "HelveticaNeue-Light");
+  await openDialog(h, a, { whole: true });
+  const family = byId(h, "doc-font-family");
+  const option = h.document.createElement("option");
+  option.value = "Arial";
+  option.textContent = "Arial";
+  family.appendChild(option);
+  family.value = "Arial";
+  fire(family);
+  h.userClick(byId(h, "btn-doc-font-apply"));
+  assert.equal(run().dataset.eoFont, "Arial");
+  assert.equal(run().dataset.eoFace, undefined, "the old face is gone");
+  assert.equal(run().style.fontFamily, '"Arial"');
+  const saved1 = saved(h).flatMap((b) => b.runs || [])[0];
+  assert.deepEqual([saved1.font, saved1.fontFace], ["Arial", undefined]);
 });

@@ -154,6 +154,18 @@ test("a shell answer that is not what it should be, or a failing shell, leaves �
   }
 });
 
+test("the 문자 간격 field of a large size shows the value the model keeps, not the one it dropped", async () => {
+  const { h, editor, run, select } = await pagesHarness({ run: { text: "큰 글자", sizeHalfPt: 4000 } });
+  const field = h.document.getElementById("pages-insp-spacing");
+  await select();
+  field.value = "500";
+  field.dispatchEvent({ type: "change", target: field, bubbles: true });
+  await flushAsyncTurns(8);
+  assert.equal(run().dataset.eoSpacing, "31680", "500% of 2000 pt is cut to the model's largest spacing");
+  assert.equal(field.value, "79", "and the field shows that as a percent of the size");
+  assert.ok(editor.querySelector("[data-eo-spacing]"));
+});
+
 test("at most 64 variants of an answer are shown", async () => {
   const many = {
     family: "Many",

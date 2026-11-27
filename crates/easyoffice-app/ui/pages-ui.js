@@ -117,6 +117,7 @@
     // A value outside the field's range (the `min` and `max` of the input) is cut to it and shown cut, as the official app
     // does; text that is not a number changes nothing and the field goes back to the selection's value.
     const CHAR_SPACING_PERCENT = [-50, 500];
+    const MAX_SPACING_TWIPS = 31680; // the model's largest letter spacing (`doc-runs.js`)
 
     function applyCharSpacing(el) {
       const runs = deps.getDocRuns?.();
@@ -127,8 +128,10 @@
       }
       const [min, max] = CHAR_SPACING_PERCENT;
       const clamped = Math.min(Math.max(Math.round(percent), min), max);
-      el.value = String(clamped);
-      const twips = Math.round((clamped / 100) * sizeHalfPt(runs.getState?.()) * 10);
+      // A large size makes even the range's end more twips than the model keeps: cut to that too and show what applies.
+      const size = sizeHalfPt(runs.getState?.());
+      const twips = Math.max(-MAX_SPACING_TWIPS, Math.min(MAX_SPACING_TWIPS, Math.round((clamped / 100) * size * 10)));
+      el.value = String(Math.round((twips * 100) / (size * 10)));
       runs.applyPatch?.({ spacing: twips });
       syncInspectorValues();
     }
