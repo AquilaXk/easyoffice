@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
 
 // The copilot's pointer on a slide and on a range of paragraphs (PD-304), in a real WebKit with real layout. The model's
 // answers are a fixture: the page's `run_smart_assistant` calls for `copilot_run` and `copilot_list_models` are answered
@@ -6,6 +8,8 @@ import assert from "node:assert/strict";
 
 const PANEL_MODEL = "#btn-copilot-model";
 const ACCEPT = '#copilot-thread button[data-copilot-action="accept"]';
+const KEEP = '#copilot-thread button[data-copilot-action="keep"]';
+const REVIEW_BUTTONS = `${ACCEPT}, ${KEEP}`;
 const CURSOR = "#eo-copilot-cursor-layer";
 const FULL_RUN_MS = 25000;
 
@@ -20,7 +24,10 @@ async function fakeProvider(page, answers) {
   });
 }
 
-/** Opens the panel, picks a local provider (no key needed) and sends `prompt`; resolves when 수락 is on screen. */
+/**
+ * Opens the panel, picks a local provider (no key needed) and sends `prompt`; resolves when the answer's buttons are on screen:
+ * 바꾸기 for an edit of what is there (previewed), 유지 for new content (already typed into the document as a draft, PD-385).
+ */
 export async function askCopilot(page, prompt, answers) {
   if (answers) await fakeProvider(page, answers);
   if (!(await page.isVisible(PANEL_MODEL))) await page.click("#btn-copilot-toggle");
@@ -31,16 +38,22 @@ export async function askCopilot(page, prompt, answers) {
   }
   await page.fill("#copilot-input", prompt);
   await page.click("#btn-copilot-send");
-  await page.waitForSelector(ACCEPT);
+  await page.waitForSelector(REVIEW_BUTTONS);
 }
 
+/** 바꾸기 for a previewed edit; a draft is being typed in already. Resolves once the pointer shows. */
 export async function acceptChange(page) {
-  await page.click(ACCEPT);
+  if (await page.$(ACCEPT)) await page.click(ACCEPT);
   await page.waitForSelector(`${CURSOR}:not([hidden]) .eo-copilot-label`);
 }
 
 export const finishPlay = (page) => page.waitForSelector(CURSOR, { state: "detached", timeout: FULL_RUN_MS });
-export const undoLast = (page) => page.click("#copilot-thread .eo-copilot-undo-btn >> nth=-1");
+
+/** 실행 취소 of the latest answer (a draft is kept first: the chip comes after the decision). */
+export async function undoLast(page) {
+  if (await page.$(KEEP)) await page.click(KEEP);
+  await page.click("#copilot-thread .eo-copilot-undo-btn >> nth=-1");
+}
 
 const boxOf = (page, selector) => page.$eval(selector, (el) => {
   const r = el.getBoundingClientRect();
@@ -54,7 +67,7 @@ export const copilotSlideSteps = [
   ["the pointer draws a text box over the stage, selects it where it really is, types into it, and one undo removes it", async (page) => {
     const text = "포인터가 그린 글상자에 쓰는 내용";
     await askCopilot(page, "글상자를 넣어 주세요", [[{ op: "slide.add_element", element: textbox(text) }]]);
-    assert.equal(await page.locator("#slide-canvas-layer .slide-el").count(), 0, "nothing is on the slide before 수락");
+    assert.equal(await page.locator(ACCEPT).count(), 0, "new content has no 바꾸기: it is typed in as a draft");
     await acceptChange(page);
     assert.equal(await page.textContent(`${CURSOR} .eo-copilot-label`), "코파일럿");
     // The box stands where the answer says, as a share of the stage, and the selection is drawn over exactly that box.
@@ -86,6 +99,7 @@ export const copilotSlideSteps = [
     await askCopilot(page, "넣어 주세요", answers);
     await acceptChange(page);
     await finishPlay(page);
+    await page.click(KEEP);
     await askCopilot(page, "오른쪽 아래로 옮겨 주세요");
     const before = await boxOf(page, "#slide-canvas-layer .slide-el");
     await acceptChange(page);
@@ -120,14 +134,51 @@ export const copilotSlideSteps = [
 const PARAGRAPHS = ["첫째 문단입니다", "둘째 문단은 바뀔 범위의 처음입니다", "셋째 문단은 바뀔 범위의 끝입니다", "넷째 문단입니다"];
 const paragraphTexts = (page) => page.$$eval("#doc-editor > p:not(.manuscript-notice):not(.eo-copilot-ghost)", (nodes) => nodes.map((p) => p.textContent));
 
+const buttonLabels = (page) => page.$$eval("#copilot-thread .eo-copilot-review-btn", (nodes) => nodes.map((b) => b.textContent.trim()));
+// The panel's button states are kept as screenshots in the capture directory (PD-385).
+const shot = (page, name) => page.locator("#eo-copilot-shell").screenshot({ path: path.join(process.argv[2] || os.tmpdir(), `copilot-edit-${name}.png`) });
+const seedParagraphs = (page) => page.evaluate((texts) => {
+  document.getElementById("doc-editor").innerHTML = texts.map((t) => `<p>${t}</p>`).join("");
+}, PARAGRAPHS);
+
 export const copilotDocSteps = [
+  ["an edit of what is there waits as 바꾸기 / 아래에 삽입 / 버리기, and 아래에 삽입 keeps the original paragraph", async (page) => {
+    await seedParagraphs(page);
+    await askCopilot(page, "둘째 문단을 다시 써 주세요", [[{ op: "doc.replace_paragraphs", replacements: [{ index: 1, text: "다시 쓴 둘째 문단" }] }]]);
+    assert.deepEqual(await buttonLabels(page), ["바꾸기", "아래에 삽입", "버리기"]);
+    assert.deepEqual(await paragraphTexts(page), PARAGRAPHS, "the document is untouched until a button is pressed");
+    await shot(page, "review-buttons");
+    await page.click('#copilot-thread button[data-copilot-action="insert-below"]');
+    await page.waitForFunction((n) => document.querySelectorAll("#doc-editor > p:not(.manuscript-notice)").length === n, PARAGRAPHS.length + 1);
+    assert.deepEqual(await paragraphTexts(page), [PARAGRAPHS[0], PARAGRAPHS[1], "다시 쓴 둘째 문단", PARAGRAPHS[2], PARAGRAPHS[3]]);
+    await shot(page, "inserted-below");
+    await page.click("#copilot-thread .eo-copilot-undo-btn >> nth=-1");
+    await page.waitForFunction((n) => document.querySelectorAll("#doc-editor > p:not(.manuscript-notice)").length === n, PARAGRAPHS.length);
+    assert.deepEqual(await paragraphTexts(page), PARAGRAPHS);
+  }],
+
+  ["new content is typed in as a draft with 유지 / 버리기, and 버리기 puts the document back", async (page) => {
+    await seedParagraphs(page);
+    await askCopilot(page, "문단을 추가해 주세요", [[{ op: "doc.append", text: "새로 덧붙인 문단" }]]);
+    assert.equal(await page.locator(ACCEPT).count(), 0, "no 바꾸기 and no preview for new content");
+    await finishPlay(page);
+    assert.deepEqual(await paragraphTexts(page), [...PARAGRAPHS, "새로 덧붙인 문단"]);
+    assert.deepEqual(await buttonLabels(page), ["유지", "버리기"]);
+    await shot(page, "draft-buttons");
+    await page.click('#copilot-thread button[data-copilot-action="discard"]');
+    await page.waitForFunction((n) => document.querySelectorAll("#doc-editor > p:not(.manuscript-notice)").length === n, PARAGRAPHS.length);
+    assert.deepEqual(await paragraphTexts(page), PARAGRAPHS);
+    assert.match(await page.textContent("#copilot-thread"), /버림/);
+    await shot(page, "draft-discarded");
+  }],
+
   ["the pointer selects a range of paragraphs across their real lines before it types the replacement", async (page) => {
     await page.evaluate((texts) => {
       document.getElementById("doc-editor").innerHTML = texts.map((t) => `<p>${t}</p>`).join("");
     }, PARAGRAPHS);
     const op = { op: "doc.replace_paragraphs", startIndex: 1, endIndex: 2, blocks: [{ text: "새로 쓴 둘째 문단" }, { text: "새로 쓴 셋째 문단" }] };
     await askCopilot(page, "둘째와 셋째 문단을 바꿔 주세요", [[op]]);
-    assert.deepEqual(await paragraphTexts(page), PARAGRAPHS, "the document is untouched before 수락");
+    assert.deepEqual(await paragraphTexts(page), PARAGRAPHS, "the document is untouched before 바꾸기");
     await acceptChange(page);
     // While the pointer drags, the selection boxes cover both old paragraphs: two lines at different heights.
     await page.waitForFunction(() => {
