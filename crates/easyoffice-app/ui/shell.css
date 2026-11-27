@@ -218,7 +218,8 @@
 #doc-font-dialog .dialog-font-colors .custom-select[data-select-id="doc-font-underline-style"] { grid-area: us; }
 #doc-font-dialog .dialog-font-colors .custom-select[data-select-id="doc-font-emphasis"] { grid-area: es; }
 #doc-font-dialog .dialog-font-colors > .custom-select, #doc-font-dialog .dialog-font-colors > .dialog-color-host { justify-self: stretch; }
-#doc-font-dialog .dialog-font-colors .custom-select-trigger, #doc-font-dialog .dialog-font-colors .dialog-swatch { width: 100%; box-sizing: border-box; }
+.tool-dialog .dialog-font-colors .custom-select-trigger { width: 100%; box-sizing: border-box; }
+#doc-font-dialog .dialog-font-colors .dialog-swatch { width: 100%; box-sizing: border-box; }
 #doc-font-dialog .dialog-font-colors .dialog-swatch { justify-content: flex-start; }
 #doc-font-dialog .dialog-font-colors .dialog-swatch > :last-child { margin-left: auto; }
 #doc-font-dialog .dialog-effects { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
