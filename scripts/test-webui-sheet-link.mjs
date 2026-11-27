@@ -94,7 +94,7 @@ test("the 삽입 menu opens the dialog on the active cell with the reference edi
   const dialog = t.byId("sheet-link-dialog");
   assert.equal(dialog.open, true);
   assert.equal(t.byId("sheet-link-dialog-title").textContent, "하이퍼링크");
-  assert.deepEqual([...dialog.querySelectorAll("label")].map((l) => l.textContent), ["표시할 문자열", "웹 주소", "시트", "셀 참조"]);
+  assert.deepEqual([...dialog.querySelectorAll("label")].map((l) => l.textContent), ["표시할 텍스트", "웹 주소", "시트", "셀 참조"]);
   assert.deepEqual([...dialog.querySelectorAll(".dialog-tab")].map((b) => b.textContent), ["웹 주소", "현재 문서"]);
   assert.equal(t.byId("btn-sheet-link-apply").textContent, "넣기");
   assert.equal(t.byId("btn-sheet-link-remove").hidden, true);

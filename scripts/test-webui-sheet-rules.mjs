@@ -617,8 +617,8 @@ const DV_VISIBLE = {
   date: ["조건", "값"],
   time: ["조건", "값"],
   textLength: ["조건", "값"],
-  list: ["목록", "목록 화살표 표시"],
-  listMultiple: ["목록", "목록 화살표 표시"],
+  list: ["원본", "목록 화살표 표시"],
+  listMultiple: ["원본", "목록 화살표 표시"],
   checkbox: ["선택 값", "해제 값"],
   custom: ["값"],
 };

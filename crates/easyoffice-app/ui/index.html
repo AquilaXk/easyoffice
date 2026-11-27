@@ -291,7 +291,7 @@
                   <button type="button" class="md-item" role="menuitem" data-sheet-look="border-bottom" data-palette-title="테두리 아래쪽" tabindex="-1"><span class="md-label">아래쪽</span></button>
                   <button type="button" class="md-item" role="menuitem" data-sheet-look="border-left" data-palette-title="테두리 왼쪽" tabindex="-1"><span class="md-label">왼쪽</span></button>
                   <button type="button" class="md-item" role="menuitem" data-sheet-look="border-right" data-palette-title="테두리 오른쪽" tabindex="-1"><span class="md-label">오른쪽</span></button>
-                  <button type="button" class="md-item" role="menuitem" data-sheet-look="border-none" data-palette-title="테두리 없음" tabindex="-1"><span class="md-label">없음</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-look="border-none" data-palette-title="테두리 없음" tabindex="-1"><span class="md-label">테두리 없음</span></button>
                   <div class="md-sep"></div>
                   <button type="button" class="md-item" role="menuitemradio" aria-checked="false" data-sheet-look="line-thin" data-palette-title="테두리 가는 실선" tabindex="-1"><span class="md-label">가는 실선</span></button>
                   <button type="button" class="md-item" role="menuitemradio" aria-checked="false" data-sheet-look="line-thick" data-palette-title="테두리 굵은 실선" tabindex="-1"><span class="md-label">굵은 실선</span></button>
@@ -433,8 +433,8 @@
           <div class="menu-item" data-menu="slide" data-kinds="SLIDE">
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="layout">슬라이드</button>
             <div class="menu-dropdown" role="menu">
-              <div class="md-item" data-studio-menu-cmd="slide-mod-master" role="menuitem" tabindex="-1"><span class="md-label">마스터 레이아웃</span></div>
-              <div class="md-item" data-studio-menu-cmd="slide-mod-snap" role="menuitem" tabindex="-1"><span class="md-label">스마트 정렬 가이드</span></div>
+              <div class="md-item" data-studio-menu-cmd="slide-mod-master" role="menuitem" tabindex="-1"><span class="md-label">슬라이드 마스터</span></div>
+              <div class="md-item" data-studio-menu-cmd="slide-mod-snap" role="menuitem" tabindex="-1"><span class="md-label">스마트 가이드</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="layout-orientation" role="menuitem" tabindex="-1"><span class="md-label">용지 방향</span></div>
             </div>
@@ -1696,7 +1696,7 @@
       <div class="dialog-wrap dialog-hyperlink">
         <div class="dialog-title"><span id="sheet-link-dialog-title">하이퍼링크</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
         <div class="dialog-body dialog-hyperlink-body">
-          <div class="dialog-row"><label class="dialog-label" for="sheet-link-text">표시할 문자열</label><input id="sheet-link-text" class="dialog-text-input" type="text" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-link-text">표시할 텍스트</label><input id="sheet-link-text" class="dialog-text-input" type="text" autocomplete="off" spellcheck="false" /></div>
           <fieldset class="dialog-hyperlink-target">
             <legend>연결 대상</legend>
             <div class="dialog-tabs" role="tablist" aria-label="연결 대상">
@@ -2050,9 +2050,9 @@
           <div class="dialog-row" data-cf-kinds="whole decimal date time textLength custom"><label class="dialog-label" for="sheet-dv-a">값</label><input id="sheet-dv-a" type="text" class="dialog-text-input" autocomplete="off" aria-label="값" /><input id="sheet-dv-b" type="text" class="dialog-text-input" autocomplete="off" aria-label="끝 값" /></div>
           <div class="dialog-row" data-cf-kinds="checkbox"><label class="dialog-label" for="sheet-dv-on">선택 값</label><input id="sheet-dv-on" type="text" class="dialog-text-input" autocomplete="off" maxlength="255" placeholder="TRUE" /></div>
           <div class="dialog-row" data-cf-kinds="checkbox"><label class="dialog-label" for="sheet-dv-off">해제 값</label><input id="sheet-dv-off" type="text" class="dialog-text-input" autocomplete="off" maxlength="255" placeholder="FALSE" /></div>
-          <div class="dialog-row" data-cf-kinds="list listMultiple"><label class="dialog-label" for="sheet-dv-list">목록</label><input id="sheet-dv-list" type="text" class="dialog-text-input" autocomplete="off" aria-label="목록 항목 또는 범위" /></div>
-          <div class="dialog-row"><label class="dialog-label">옵션</label><label class="dialog-checkbox"><input id="sheet-dv-blank" type="checkbox" /> 빈 값 허용</label><label class="dialog-checkbox" data-cf-kinds="list listMultiple"><input id="sheet-dv-drop" type="checkbox" /> 목록 화살표 표시</label></div>
-          <div class="dialog-row"><label class="dialog-label" for="sheet-dv-alert-select">경고</label><select id="sheet-dv-alert-select" class="sb-combo dialog-select"><option value="stop">중지</option><option value="warning">경고</option><option value="information">정보</option></select><label class="dialog-checkbox"><input id="sheet-dv-show-error" type="checkbox" /> 오류 메시지 표시</label></div>
+          <div class="dialog-row" data-cf-kinds="list listMultiple"><label class="dialog-label" for="sheet-dv-list">원본</label><input id="sheet-dv-list" type="text" class="dialog-text-input" autocomplete="off" aria-label="목록 항목 또는 범위" /></div>
+          <div class="dialog-row"><label class="dialog-label">옵션</label><label class="dialog-checkbox"><input id="sheet-dv-blank" type="checkbox" /> 공백 무시</label><label class="dialog-checkbox" data-cf-kinds="list listMultiple"><input id="sheet-dv-drop" type="checkbox" /> 목록 화살표 표시</label></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-dv-alert-select">스타일</label><select id="sheet-dv-alert-select" class="sb-combo dialog-select"><option value="stop">중지</option><option value="warning">경고</option><option value="information">정보</option></select><label class="dialog-checkbox"><input id="sheet-dv-show-error" type="checkbox" /> 오류 메시지 표시</label></div>
           <div class="dialog-row"><label class="dialog-label" for="sheet-dv-err-title">제목</label><input id="sheet-dv-err-title" type="text" class="dialog-text-input" autocomplete="off" maxlength="32" /></div>
           <div class="dialog-row"><label class="dialog-label" for="sheet-dv-err">메시지</label><input id="sheet-dv-err" type="text" class="dialog-text-input" autocomplete="off" maxlength="255" /></div>
           <div class="dialog-row"><label class="dialog-label">안내</label><label class="dialog-checkbox"><input id="sheet-dv-show-prompt" type="checkbox" /> 셀 선택 시 안내 표시</label></div>
