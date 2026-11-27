@@ -305,8 +305,14 @@ fn a_renamed_or_deleted_sheet_changes_the_names_that_point_at_it() {
     assert_eq!(renamed[0].refers_to, "'My Data'!$A$1:$A$3");
     assert_eq!(renamed[1].scope.as_deref(), Some("My Data"));
     assert_eq!(renamed[2], defs[2]);
-    let deleted =
-        crate::follow_sheet_change_names(&defs, SheetChange::Delete { name: "Data" }).unwrap();
+    let deleted = crate::follow_sheet_change_names(
+        &defs,
+        SheetChange::Delete {
+            name: "Data",
+            tab_order: &["Data"],
+        },
+    )
+    .unwrap();
     assert_eq!(deleted.len(), 2);
     assert_eq!(deleted[0].refers_to, "#REF!");
     assert!(crate::follow_sheet_change_names(

@@ -77,7 +77,10 @@ mod tests {
         assert_eq!(rules.dv[1].a, "Old!A1,b");
         assert!(!follow_sheet_change(&mut rules, rename));
 
-        let gone = SheetChange::Delete { name: "새 이름" };
+        let gone = SheetChange::Delete {
+            name: "새 이름",
+            tab_order: &["새 이름"],
+        };
         assert!(follow_sheet_change(&mut rules, gone));
         assert!(matches!(&rules.cf[0].kind, CfKind::CellIs { a, .. } if a == "=#REF!*2"));
         assert_eq!(rules.dv[0].a, "=#REF!");

@@ -101,6 +101,50 @@ fn a_deletion_answers_ref_errors() {
 }
 
 #[test]
+fn deleting_the_end_of_a_3d_span_moves_it_to_the_neighbor_in_tab_order() {
+    // The session holds the sheets in tab order: Jan Feb Mar Apr Sum.
+    let id = open_with(
+        &["Jan", "Feb", "Mar", "Apr", "Sum"],
+        &[
+            ("Sum!A1", "=SUM(Jan:Apr!A1)"),
+            ("Sum!A2", "=SUM(Jan:Feb!A1)"),
+            ("Sum!A3", "=SUM(Feb:Feb!A1)"),
+        ],
+    );
+    let mut got = texts(&call(&refs(&id, "\"op\":\"delete\",\"sheet\":\"Jan\"")));
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            ("Sum!A1".to_string(), "=SUM(Feb:Apr!A1)".to_string()),
+            ("Sum!A2".to_string(), "=SUM(Feb!A1)".to_string()),
+        ]
+    );
+    let mut got = texts(&call(&refs(&id, "\"op\":\"delete\",\"sheet\":\"Apr\"")));
+    got.sort();
+    assert_eq!(
+        got,
+        vec![("Sum!A1".to_string(), "=SUM(Jan:Mar!A1)".to_string())]
+    );
+    let got = texts(&call(&refs(&id, "\"op\":\"delete\",\"sheet\":\"Feb\"")));
+    assert!(got.contains(&("Sum!A3".to_string(), "=SUM(#REF!)".to_string())));
+}
+
+#[test]
+fn a_deletion_answers_the_rules_that_name_a_span_end() {
+    let id = open_with(&["Jan", "Feb", "Mar", "T"], &[]);
+    let res = call(&refs(
+        &id,
+        concat!(
+            "\"op\":\"delete\",\"sheet\":\"Mar\",",
+            "\"rules\":{\"T\":{\"cf\":[{\"r\":\"A1:A9\",\"p\":1,\"t\":\"cellIs\",\"op\":\"greaterThan\",\"a\":\"=SUM(Jan:Mar!$B$1)\"}],\"dv\":[]}}"
+        ),
+    ));
+    let rules = field(&res, "rules").to_json_string();
+    assert!(rules.contains("=SUM(Jan:Feb!$B$1)"), "{rules}");
+}
+
+#[test]
 fn hostile_requests_change_nothing() {
     let id = open_with(&["S", "T"], &[("T!A1", "=S!A1")]);
     let long = "가".repeat(32);

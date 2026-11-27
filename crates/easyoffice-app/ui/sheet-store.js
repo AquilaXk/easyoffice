@@ -201,8 +201,26 @@
       return next;
     }
 
+    // The sheets in tab order. The engine resolves a 3D span (`Sheet1:Sheet3!A1`) and a deleted end of
+    // one by this order, so the store's key order (which a name like "2024" reorders) cannot stand in.
+    function orderedSheetNames(sheetsMap) {
+      const keys = Object.keys(sheetsMap || {});
+      const known = new Set(keys);
+      const seen = new Set();
+      const out = [];
+      for (const name of host.__EASYOFFICE_SHEET_TAB_STRIP__?.getOrder?.() || []) {
+        if (known.has(name) && !seen.has(name)) {
+          out.push(name);
+          seen.add(name);
+        }
+      }
+      for (const key of keys) if (!seen.has(key)) out.push(key);
+      return out;
+    }
+
+    // The order is part of the key: moving a tab opens a session with the sheets in the new order.
     function sheetSetKey(names) {
-      return names.slice().sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join("\u0000");
+      return names.join("\u0000");
     }
 
     async function openSession(names, sheetKey) {
@@ -261,7 +279,7 @@
     }
 
     async function syncSessionOnce(sheetsMap) {
-      const names = Object.keys(sheetsMap || {});
+      const names = orderedSheetNames(sheetsMap);
       const sheetKey = sheetSetKey(names);
       if (session.id === null || session.sheetKey !== sheetKey) {
         await openSession(names, sheetKey);
@@ -581,7 +599,7 @@
     // change rewrites too many formulas, `error` with the engine's `message`).
     function runOnSession(sheetsMap, request, action, done) {
       return runSessionExclusive(async () => {
-        const names = Object.keys(sheetsMap || {});
+        const names = orderedSheetNames(sheetsMap);
         if (!session.enabled) return { ok: false, reason: "error" };
         if (session.refusedKey !== null && session.refusedKey === sheetSetKey(names)) {
           return { ok: false, reason: "limit" };
@@ -635,7 +653,7 @@
       return sessionCall({
         ...request,
         sessionAction: "linkTarget",
-        sheets: Object.keys(sheetsMap),
+        sheets: orderedSheetNames(sheetsMap),
         cells,
         ...namesField(),
         ...mergesField(sheetsMap),
@@ -650,7 +668,7 @@
     // size (the engine already dropped that session, so reopening it would only repeat the load).
     async function syncSession(sheetsMap) {
       return runSessionExclusive(async () => {
-        const names = Object.keys(sheetsMap || {});
+        const names = orderedSheetNames(sheetsMap);
         if (session.refusedKey !== null && session.refusedKey === sheetSetKey(names)) return null;
         for (let attempt = 0; attempt < 2; attempt += 1) {
           try {
@@ -815,7 +833,7 @@
       }
       const rpcPayload = JSON.stringify({
         sheet: defaultSheet,
-        sheets: Object.keys(sheetsMap),
+        sheets: orderedSheetNames(sheetsMap),
         targets: formulaTargets.map(({ sheet, cell }) => ({ sheet, cell })),
         cells,
         ...namesField(),

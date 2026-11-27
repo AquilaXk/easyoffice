@@ -31,10 +31,12 @@ pub(crate) enum SheetOp {
 }
 
 impl SheetOp {
-    pub(crate) fn change(&self) -> SheetChange<'_> {
+    /// The change with the session's sheets in tab order (a deleted end of a 3D span moves to
+    /// its neighbor in that order).
+    pub(crate) fn change<'a>(&'a self, tab_order: &'a [&'a str]) -> SheetChange<'a> {
         match self {
             Self::Rename { from, to } => SheetChange::Rename { from, to },
-            Self::Delete { name } => SheetChange::Delete { name },
+            Self::Delete { name } => SheetChange::Delete { name, tab_order },
         }
     }
 
@@ -71,7 +73,7 @@ fn parse_op(entries: &Entries) -> Result<SheetOp, EasyOfficeError> {
 /// `,"rules":{sheet: rules}`.
 fn followed_rules_json(
     entries: &Entries,
-    op: &SheetOp,
+    change: SheetChange<'_>,
     out: &mut String,
 ) -> Result<(), EasyOfficeError> {
     let Some(rules) = StrictJsonValue::get_field(entries, "rules") else {
@@ -81,7 +83,7 @@ fn followed_rules_json(
     let mut changed: Vec<(&str, SheetRules)> = Vec::new();
     for (name, value) in rules {
         let mut parsed = parse_rules(value)?;
-        if follow_sheet_change(&mut parsed, op.change()) {
+        if follow_sheet_change(&mut parsed, change) {
             changed.push((name, parsed));
         }
     }
@@ -108,10 +110,15 @@ impl EasyOfficeIpcRouter {
     ) -> Result<String, EasyOfficeError> {
         let id = session_id(entries)?;
         let op = parse_op(entries)?;
-        // The page's rules are read first, so a bad request fails before the session is asked.
+        let Some(tab_order) = crate::sheet_session::registry().sheet_names(id, owner, Instant::now())
+        else {
+            return Ok(EXPIRED.to_string());
+        };
+        let tab_order: Vec<&str> = tab_order.iter().map(String::as_str).collect();
+        let change = op.change(&tab_order);
         let mut rules = String::new();
-        followed_rules_json(entries, &op, &mut rules)?;
-        crate::sheet_links_json::followed_link_targets_json(entries, op.change(), &mut rules)?;
+        followed_rules_json(entries, change, &mut rules)?;
+        crate::sheet_links_json::followed_link_targets_json(entries, change, &mut rules)?;
         match crate::sheet_session::registry().sheet_refs(id, owner, &op, Instant::now())? {
             Applied::Done(mut json) => {
                 if !json.contains("\"refused\"") {

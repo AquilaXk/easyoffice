@@ -321,8 +321,15 @@ fn renamed(formula: &str, from: &str, to: &str) -> String {
 }
 
 fn after_delete(formula: &str, name: &str) -> String {
-    rewrite_sheet_names(formula, SheetChange::Delete { name })
-        .unwrap_or_else(|| formula.to_string())
+    let tab_order = [name];
+    rewrite_sheet_names(
+        formula,
+        SheetChange::Delete {
+            name,
+            tab_order: &tab_order,
+        },
+    )
+    .unwrap_or_else(|| formula.to_string())
 }
 
 #[test]
@@ -390,8 +397,15 @@ fn deleting_a_sheet_turns_its_references_into_ref_errors() {
 fn a_rewrite_that_changes_nothing_answers_none() {
     let rename = SheetChange::Rename { from: "A", to: "B" };
     assert_eq!(rewrite_sheet_names("=C!A1", rename), None);
+    assert_eq!(after_delete("=A1", "A"), "=A1");
     assert_eq!(
-        rewrite_sheet_names("=A1", SheetChange::Delete { name: "A" }),
+        rewrite_sheet_names(
+            "=A1",
+            SheetChange::Delete {
+                name: "A",
+                tab_order: &["A"]
+            }
+        ),
         None
     );
 }
@@ -432,7 +446,13 @@ fn a_structured_reference_is_left_as_written_by_an_edit_and_a_rename() {
         Some("=Sales[Q1]+'New sheet'!A1+Sales[[#This Row],[Old]]")
     );
     assert_eq!(
-        rewrite_sheet_names("=Sales[Old]", SheetChange::Delete { name: "Old" }),
+        rewrite_sheet_names(
+            "=Sales[Old]",
+            SheetChange::Delete {
+                name: "Old",
+                tab_order: &["Old"]
+            }
+        ),
         None
     );
 }

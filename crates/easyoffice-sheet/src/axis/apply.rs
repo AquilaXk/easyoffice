@@ -210,7 +210,8 @@ impl WorkbookEngine {
 impl WorkbookEngine {
     /// The new text of every formula that names the sheet `change` renames or deletes, as sheet
     /// index, cell and text. The workbook itself does not change (the caller renames or removes
-    /// the sheet). The formulas of a deleted sheet go with it and are left out. Fails when the
+    /// the sheet). The formulas of a deleted sheet go with it and are left out. A deletion follows
+    /// the workbook's own tab order, whatever `tab_order` the change carries. Fails when the
     /// scan outruns `budget` (time or the number of formulas it changes).
     pub fn plan_sheet_rewrites(
         &self,
@@ -220,8 +221,16 @@ impl WorkbookEngine {
         let started = Instant::now();
         let mut plan = Vec::new();
         let mut scanned = 0usize;
+        let tab_order: Vec<&str> = self.sheets().iter().map(|s| s.name.as_str()).collect();
+        let change = match change {
+            SheetChange::Delete { name, .. } => SheetChange::Delete {
+                name,
+                tab_order: &tab_order,
+            },
+            rename => rename,
+        };
         for (si, engine) in self.sheets().iter().enumerate() {
-            let deleted = matches!(change, SheetChange::Delete { name } if engine.name.eq_ignore_ascii_case(name));
+            let deleted = matches!(change, SheetChange::Delete { name, .. } if engine.name.eq_ignore_ascii_case(name));
             if deleted {
                 continue;
             }

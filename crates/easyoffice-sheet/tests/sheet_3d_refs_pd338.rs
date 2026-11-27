@@ -411,19 +411,27 @@ fn recalc_session_batch_dag_and_axis_sheet_rewrites() {
         .as_deref(),
         Some("=SUM('Sheet 1:끝''시트'!A1)")
     );
+    // Deleting the last sheet of a span moves its end to the previous sheet (Excel)
+    let tabs = ["Sheet1", "Sheet2", "Sheet3", "Summary"];
     assert_eq!(
         rewrite_sheet_names(
             "=SUM(Sheet1:Sheet3!A1:B2)",
-            SheetChange::Delete { name: "Sheet3" }
+            SheetChange::Delete {
+                name: "Sheet3",
+                tab_order: &tabs
+            }
         )
         .as_deref(),
-        Some("=SUM(#REF!)")
+        Some("=SUM(Sheet1:Sheet2!A1:B2)")
     );
     // Deleting an interior sheet leaves the outer span intact
     assert_eq!(
         rewrite_sheet_names(
             "=SUM(Sheet1:Sheet3!A1:B2)",
-            SheetChange::Delete { name: "Sheet2" }
+            SheetChange::Delete {
+                name: "Sheet2",
+                tab_order: &tabs
+            }
         ),
         None
     );

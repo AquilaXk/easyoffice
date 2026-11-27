@@ -573,6 +573,13 @@ impl Registry {
         Ok(Applied::Done(json))
     }
 
+    /// The session's sheet names in tab order, or `None` when the session is gone.
+    pub(crate) fn sheet_names(&self, id: &str, owner: &str, now: Instant) -> Option<Vec<String>> {
+        let handle = self.checkout(id, owner, now)?;
+        let session = handle.lock().ok()?;
+        Some(session.sheet_names().map(str::to_string).collect())
+    }
+
     /// The formula texts a rename or deletion of a sheet rewrites (see `sheet_refs_ipc`). The
     /// session is not changed.
     pub(crate) fn sheet_refs(
@@ -590,7 +597,9 @@ impl Registry {
             return Ok(Applied::Expired);
         };
         check_sheet_op(&session, op)?;
-        let plan = match session.plan_sheet_rewrites(op.change(), AxisBudget::default()) {
+        let tab_order: Vec<&str> = session.sheet_names().collect();
+        let change = op.change(&tab_order);
+        let plan = match session.plan_sheet_rewrites(change, AxisBudget::default()) {
             Ok(plan) => plan,
             Err(RecalcError::Invalid(EasyOfficeError::ResourceBudgetExceeded(_))) => {
                 return Ok(Applied::Done(REFUSED_STRUCTURE.to_string()));
@@ -619,7 +628,7 @@ impl Registry {
         }
         out.push(']');
         if let Some(followed) =
-            easyoffice_sheet::follow_sheet_change_names(session.workbook().names(), op.change())
+            easyoffice_sheet::follow_sheet_change_names(session.workbook().names(), change)
         {
             out.push_str(&EasyOfficeIpcRouter::names_answer_field(&followed));
         }

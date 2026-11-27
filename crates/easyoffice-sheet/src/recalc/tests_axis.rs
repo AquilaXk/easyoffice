@@ -360,7 +360,13 @@ fn deleting_a_sheet_plans_ref_errors_and_skips_its_own_formulas() {
         ],
     );
     let plan = s
-        .plan_sheet_rewrites(SheetChange::Delete { name: "Gone" }, AxisBudget::default())
+        .plan_sheet_rewrites(
+            SheetChange::Delete {
+                name: "Gone",
+                tab_order: &[],
+            },
+            AxisBudget::default(),
+        )
         .unwrap();
     assert_eq!(plan.len(), 1);
     let (si, coord, text) = &plan[0];

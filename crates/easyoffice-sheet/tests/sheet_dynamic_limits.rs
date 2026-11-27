@@ -143,7 +143,13 @@ fn a_sheet_rename_follows_a_spill_range_reference() {
         renamed.as_deref(),
         Some("SUM('My Data'!B2#)+SUM('My Data'!C3#)")
     );
-    let deleted = rewrite_sheet_names("SUM(Sheet1!B2#)", SheetChange::Delete { name: "Sheet1" });
+    let deleted = rewrite_sheet_names(
+        "SUM(Sheet1!B2#)",
+        SheetChange::Delete {
+            name: "Sheet1",
+            tab_order: &["Sheet1"],
+        },
+    );
     assert!(deleted.unwrap().contains("#REF!"));
 }
 

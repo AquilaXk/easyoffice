@@ -48,7 +48,7 @@ pub fn follow_sheet_change_names(
     for def in defs {
         let mut def = def.clone();
         match (change, def.scope.as_deref()) {
-            (SheetChange::Delete { name }, Some(scope)) if same(scope, name) => {
+            (SheetChange::Delete { name, .. }, Some(scope)) if same(scope, name) => {
                 changed = true;
                 continue;
             }

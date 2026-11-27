@@ -145,7 +145,13 @@ mod tests {
             },
         );
         assert_eq!(rename, vec![pair("#Old!B5", "#'새 이름'!B5")]);
-        let gone = follow_sheet_change_links(targets, SheetChange::Delete { name: "Old" });
+        let gone = follow_sheet_change_links(
+            targets,
+            SheetChange::Delete {
+                name: "Old",
+                tab_order: &["Old"],
+            },
+        );
         assert_eq!(gone, vec![pair("#Old!B5", "##REF!")]);
     }
 }
