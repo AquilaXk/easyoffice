@@ -342,7 +342,7 @@
         [unitLabel, String(unitValue)],
       ];
       // The word-count dialog of the Word program lists only counts, so DOC leaves out the sentence count and the reading time.
-      if (isWordDoc(mod)) return [...counts, [pageLabel, String(pageValue)]];
+      if (isWordDoc(mod)) return [...counts.slice(0, 3), ["단락 수", String(unitValue)], ["페이지 수", String(pageValue)]];
       const sentences = Number(smartRes?.sentenceCount ?? (trimmed ? trimmed.split(/[.!?。\n]+/).filter((s) => s.trim()).length : 0));
       const readSeconds = words > 0 ? Math.max(1, Math.ceil((words / 220) * 60)) : 0;
       return [

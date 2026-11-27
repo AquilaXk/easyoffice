@@ -888,7 +888,7 @@ test("regression guards: single-pass mailmerge before footer, h4 stats, multi-ta
   const dts = Array.from(document.querySelectorAll("#doc-stats-grid dt"));
   const dds = Array.from(document.querySelectorAll("#doc-stats-grid dd"));
   dts.forEach((dt, i) => { statsPairs[dt.textContent] = dds[i]?.textContent; });
-  assert.equal(Number(statsPairs["문단 수"]), 3, "h4 + bodyP + tokenP = 3 (excludes footer and hwp-manuscript-preview)");
+  assert.equal(Number(statsPairs["단락 수"]), 3, "h4 + bodyP + tokenP = 3 (excludes footer and hwp-manuscript-preview)");
   document.getElementById("doc-stats-dialog")?.close?.();
 
   // 3. Multi-table sort acts on focused table (not #doc-table-body) & keeps error feedback outside tables
