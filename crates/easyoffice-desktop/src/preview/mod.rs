@@ -267,32 +267,19 @@ fn load_preview_after(
     state: &PreviewState,
     id: &str,
     path: &Path,
-    ready: impl FnOnce(),
+    ready: impl FnOnce() + Send + 'static,
     render: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, RenderError> + Send + 'static,
 ) -> Option<Arc<Thumbnail>> {
     if crate::pages_bundle_dir::is_pages_bundle_dir(path) {
-        let meta = std::fs::symlink_metadata(path).ok()?;
-        let stamp = FileStamp::of(&meta);
+        // The stamp covers every file inside, from metadata alone; a bundle that cannot be walked has no picture.
+        let bundle = crate::pages_bundle_dir::bundle_stamp(path).ok()?;
+        let stamp = FileStamp::new(bundle.modified, bundle.bytes);
         if let Some(hit) = state.cached(id, &stamp) {
             return hit;
         }
-        let max_bytes = Source::of(path)?.max_file_bytes() as usize;
-        let found = match crate::pages_bundle_dir::read_pages_bundle_as_zip(path, max_bytes) {
-            Err(_) => None,
-            Ok((bytes, _)) => {
-                let len = bytes.len() as u64;
-                match preview_from_source(
-                    state,
-                    std::io::Cursor::new(bytes),
-                    path,
-                    len,
-                    ready,
-                    render,
-                ) {
-                    PreviewOutcome::Cache(found) => found,
-                    PreviewOutcome::SkipCache => return None,
-                }
-            }
+        let found = match preview_from_bundle(state, path, ready, render) {
+            PreviewOutcome::Cache(found) => found,
+            PreviewOutcome::SkipCache => return None,
         };
         state.remember(id, stamp, found.clone());
         return found;
@@ -340,6 +327,46 @@ fn read_document<R: Read + Seek>(
     }
     document.truncate(limit);
     Ok(source::whole_lines(document))
+}
+
+/// The picture of a `.pages` folder bundle. The folder is read and packed on the bounded worker,
+/// after it holds a render permit (a request that finds none free reads nothing: up to 50 MiB of
+/// files per request would otherwise pile up), and the picture inside it or the drawn first page
+/// is taken there. `ready` runs on the worker before the page is drawn.
+fn preview_from_bundle(
+    state: &PreviewState,
+    path: &Path,
+    ready: impl FnOnce() + Send + 'static,
+    render: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, RenderError> + Send + 'static,
+) -> PreviewOutcome {
+    let Some(kind) = Source::of(path) else {
+        return PreviewOutcome::Cache(None);
+    };
+    let (bundle, limits) = (path.to_path_buf(), state.limits);
+    let worked = bounded::run(&state.gate, limits.permit_wait, limits.deadline, move || {
+        let max_bytes = kind.max_file_bytes() as usize;
+        let (zipped, _) = crate::pages_bundle_dir::read_pages_bundle_as_zip(&bundle, max_bytes)
+            .map_err(|_| RenderError::Unreadable)?;
+        let size = zipped.len() as u64;
+        let mut source = std::io::Cursor::new(zipped);
+        if let Some(embedded) = extract_thumbnail(&mut source) {
+            return Ok(embedded);
+        }
+        ready();
+        let png = render(read_document(&mut source, size, kind)?)?;
+        if png.len() > MAX_RENDERED_PNG_BYTES || sniff_image(&png) != Some("image/png") {
+            return Err(RenderError::TooLarge);
+        }
+        Ok(Thumbnail {
+            mime: "image/png",
+            bytes: png,
+        })
+    });
+    match worked {
+        Ok(found) => PreviewOutcome::Cache(Some(Arc::new(found))),
+        Err(RenderError::Busy | RenderError::TimedOut) => PreviewOutcome::SkipCache,
+        Err(_) => PreviewOutcome::Cache(None),
+    }
 }
 
 /// The first page of a document within the size limit of its kind, drawn by the bounded worker. The
@@ -427,6 +454,8 @@ fn draw_first_page<R: Read + Seek + Send + 'static>(
 
 #[cfg(test)]
 mod card_tests;
+#[cfg(test)]
+mod pages_bundle_tests;
 #[cfg(test)]
 mod render_tests;
 #[cfg(test)]

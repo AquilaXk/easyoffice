@@ -22,7 +22,6 @@ impl FileStamp {
         }
     }
 
-    #[cfg(test)]
     pub fn new(modified: Option<SystemTime>, len: u64) -> Self {
         Self { modified, len }
     }

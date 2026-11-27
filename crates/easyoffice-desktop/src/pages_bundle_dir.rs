@@ -9,6 +9,7 @@ use easyoffice_formats::{EasyOfficeError, ZipArchiveCodec};
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
+use std::time::SystemTime;
 
 /// Maximum relative directory depth inside a `.pages/` bundle (e.g. `a/b/c/file` is depth 4).
 pub const MAX_BUNDLE_DEPTH: usize = 4;
@@ -78,14 +79,24 @@ pub(crate) fn validate_entry_name(name: &str) -> io::Result<()> {
     }
 }
 
+/// Counts of what a walk has met, against [`MAX_BUNDLE_FILES`] and [`MAX_BUNDLE_DIRS`].
+#[derive(Default)]
 struct WalkState {
-    max_bytes: usize,
-    total_read: usize,
     dir_count: usize,
-    entries: Vec<(String, Vec<u8>)>,
+    file_count: usize,
 }
 
-fn walk_dir(dir: &Path, prefix: &str, depth: usize, state: &mut WalkState) -> io::Result<()> {
+/// Called for every directory and regular file of the bundle (`path`, its path relative to the
+/// bundle, its `symlink_metadata`), after the walk has checked the entry's kind, name and depth.
+type OnEntry<'a> = dyn FnMut(&Path, &str, &fs::Metadata) -> io::Result<()> + 'a;
+
+fn walk_dir(
+    dir: &Path,
+    prefix: &str,
+    depth: usize,
+    state: &mut WalkState,
+    on_entry: &mut OnEntry<'_>,
+) -> io::Result<()> {
     let mut children: Vec<fs::DirEntry> = fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
     children.sort_by_key(|a| a.file_name());
 
@@ -136,19 +147,53 @@ fn walk_dir(dir: &Path, prefix: &str, depth: usize, state: &mut WalkState) -> io
                 ));
             }
             state.dir_count += 1;
-            walk_dir(&path, &rel_path, next_depth, state)?;
+            on_entry(&path, &rel_path, &meta)?;
+            walk_dir(&path, &rel_path, next_depth, state, on_entry)?;
             continue;
         }
 
-        if state.entries.len() >= MAX_BUNDLE_FILES {
+        if state.file_count >= MAX_BUNDLE_FILES {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Pages 번들 파일 수가 허용 상한(2,048개)을 초과했습니다.",
             ));
         }
+        state.file_count += 1;
+        on_entry(&path, &rel_path, &meta)?;
+    }
+    Ok(())
+}
 
-        let remaining = state.max_bytes.saturating_sub(state.total_read);
-        let (file, opened_meta) = open_regular(&path)?;
+/// The bundle root under the bundle rules: a real directory, never a link.
+fn checked_root(dir: &Path) -> io::Result<(PathBuf, fs::Metadata)> {
+    let normalized = strip_trailing_separators(dir);
+    let root_meta = fs::symlink_metadata(&normalized)?;
+    if root_meta.file_type().is_symlink() || is_reparse_point(&root_meta) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "심볼릭 링크 번들은 허용되지 않습니다.",
+        ));
+    }
+    if !root_meta.file_type().is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Pages 번들 경로가 디렉터리가 아닙니다.",
+        ));
+    }
+    Ok((normalized, root_meta))
+}
+
+/// Reads the regular file at `path` into `entries` as `rel_path`, `total_read` counting against `max_bytes`.
+struct BundleReader {
+    max_bytes: usize,
+    total_read: usize,
+    entries: Vec<(String, Vec<u8>)>,
+}
+
+impl BundleReader {
+    fn read_file(&mut self, path: &Path, rel_path: &str) -> io::Result<()> {
+        let remaining = self.max_bytes.saturating_sub(self.total_read);
+        let (file, opened_meta) = open_regular(path)?;
         if opened_meta.len() > remaining as u64 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -167,10 +212,38 @@ fn walk_dir(dir: &Path, prefix: &str, depth: usize, state: &mut WalkState) -> io
                 "Pages 번들 누적 크기가 허용 상한을 초과했습니다.",
             ));
         }
-        state.total_read += bytes.len();
-        state.entries.push((rel_path, bytes));
+        self.total_read += bytes.len();
+        self.entries.push((rel_path.to_string(), bytes));
+        Ok(())
     }
-    Ok(())
+}
+
+/// What a cache of a bundle's picture is valid for: the newest time among the bundle's folders and
+/// files, and the bytes of all its files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BundleStamp {
+    pub modified: Option<SystemTime>,
+    pub bytes: u64,
+}
+
+/// The stamp of the bundle at `dir`, from the metadata of its entries alone (no file is opened), under
+/// the same bounds and refusals as [`read_pages_bundle_as_zip`]. A folder's own time moves when a
+/// file is added or removed and a file's when it is rewritten, so the root folder alone is no stamp.
+pub fn bundle_stamp(dir: &Path) -> io::Result<BundleStamp> {
+    let (normalized, root_meta) = checked_root(dir)?;
+    let mut stamp = BundleStamp {
+        modified: root_meta.modified().ok(),
+        bytes: 0,
+    };
+    let mut on_entry = |_: &Path, _: &str, meta: &fs::Metadata| {
+        stamp.modified = stamp.modified.max(meta.modified().ok());
+        if meta.is_file() {
+            stamp.bytes = stamp.bytes.saturating_add(meta.len());
+        }
+        Ok(())
+    };
+    walk_dir(&normalized, "", 0, &mut WalkState::default(), &mut on_entry)?;
+    Ok(stamp)
 }
 
 fn zip_pack_error(err: EasyOfficeError) -> io::Error {
@@ -187,37 +260,30 @@ pub fn read_pages_bundle_as_zip(
     dir: &Path,
     max_bytes: usize,
 ) -> io::Result<(Vec<u8>, fs::Metadata)> {
-    let normalized = strip_trailing_separators(dir);
-    let root_meta = fs::symlink_metadata(&normalized)?;
-    if root_meta.file_type().is_symlink() || is_reparse_point(&root_meta) {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "심볼릭 링크 번들은 허용되지 않습니다.",
-        ));
-    }
-    if !root_meta.file_type().is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Pages 번들 경로가 디렉터리가 아닙니다.",
-        ));
-    }
-
-    let mut state = WalkState {
+    let (normalized, root_meta) = checked_root(dir)?;
+    let mut reader = BundleReader {
         max_bytes,
         total_read: 0,
-        dir_count: 0,
         entries: Vec::new(),
     };
-    walk_dir(&normalized, "", 0, &mut state)?;
-    if state.entries.is_empty() {
+    let mut on_entry = |path: &Path, rel_path: &str, meta: &fs::Metadata| {
+        if meta.is_file() {
+            reader.read_file(path, rel_path)
+        } else {
+            Ok(())
+        }
+    };
+    walk_dir(&normalized, "", 0, &mut WalkState::default(), &mut on_entry)?;
+    let mut entries = reader.entries;
+    if entries.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "Pages 번들에 파일이 없습니다.",
         ));
     }
-    state.entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let zip_bytes = ZipArchiveCodec::pack(&state.entries).map_err(zip_pack_error)?;
+    let zip_bytes = ZipArchiveCodec::pack(&entries).map_err(zip_pack_error)?;
     if zip_bytes.len() > max_bytes {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
