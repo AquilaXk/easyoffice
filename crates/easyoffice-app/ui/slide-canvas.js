@@ -902,7 +902,7 @@
     function toggleSnap() {
       snapEnabled = !snapEnabled;
       hideSnapGuides();
-      say(snapEnabled ? "스마트 정렬 가이드: 켬" : "스마트 정렬 가이드: 끔");
+      say(snapEnabled ? "스마트 가이드: 켬" : "스마트 가이드: 끔");
       return snapEnabled;
     }
 

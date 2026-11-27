@@ -115,8 +115,8 @@
       { id: "sheet-mod-freeze", title: "틀 고정", shortcut: "⌃⌘L" },
     ],
     SLIDE: [
-      { id: "slide-mod-master", title: "마스터 레이아웃", shortcut: "⇧⌘M" },
-      { id: "slide-mod-snap", title: "스마트 정렬 가이드", shortcut: "⌘;" },
+      { id: "slide-mod-master", title: "슬라이드 마스터", shortcut: "⇧⌘M" },
+      { id: "slide-mod-snap", title: "스마트 가이드", shortcut: "⌘;" },
       { id: "slide-mod-transition", title: "전환 효과", shortcut: "⌥⌘T" },
       { id: "slide-mod-presenter", title: "발표자 보기", shortcut: "⌥⌘P" },
     ],

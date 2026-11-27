@@ -473,8 +473,8 @@ impl RibbonCommandRouter {
                             ("mod-freeze", "틀 고정", "Ctrl+Cmd+L"),
                         ],
                         OfficeModuleKind::Slide => [
-                            ("mod-master", "마스터 레이아웃", "Shift+Cmd+M"),
-                            ("mod-snap", "스마트 정렬 가이드", "Cmd+;"),
+                            ("mod-master", "슬라이드 마스터", "Shift+Cmd+M"),
+                            ("mod-snap", "스마트 가이드", "Cmd+;"),
                             ("mod-transition", "전환 효과", "Alt+Cmd+T"),
                             ("mod-presenter", "발표자 보기", "Alt+Cmd+P"),
                         ],
