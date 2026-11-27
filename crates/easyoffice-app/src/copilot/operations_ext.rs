@@ -846,8 +846,9 @@ mod tests {
 
     fn structure_json(raw: &str) -> String {
         let value = StrictJsonValue::parse(raw).unwrap();
-        let op = validate_extended_sheet_op("sheet.structure", value.as_object().unwrap(), "Sheet1")
-            .expect("a valid sheet.structure");
+        let op =
+            validate_extended_sheet_op("sheet.structure", value.as_object().unwrap(), "Sheet1")
+                .expect("a valid sheet.structure");
         let mut out = String::new();
         super::super::op_serialize::write_operation_json(&mut out, &op);
         out
@@ -882,10 +883,12 @@ mod tests {
     #[test]
     fn a_freeze_over_the_column_limit_is_refused() {
         let value = StrictJsonValue::parse(r#"{"action":"freeze","freezeCols":65}"#).unwrap();
-        assert!(
-            validate_extended_sheet_op("sheet.structure", value.as_object().unwrap(), "Sheet1")
-                .is_none()
-        );
+        assert!(validate_extended_sheet_op(
+            "sheet.structure",
+            value.as_object().unwrap(),
+            "Sheet1"
+        )
+        .is_none());
     }
 
     #[test]
