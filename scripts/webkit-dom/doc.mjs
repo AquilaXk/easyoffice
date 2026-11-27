@@ -96,7 +96,7 @@ export const docSteps = [
     });
   }],
 
-  // PD-365: the line-height of 최소, 고정 and 줄 사이 is a CSS length the browser really lays out.
+  // PD-366: the line-height of 최소, 고정 and 줄 사이 is a CSS length the browser really lays out.
   ["최소, 고정 and 줄 사이 line spacing lays the lines out at their lengths", async (page) => {
     await page.evaluate(() => {
       document.querySelector("#doc-editor").innerHTML = ["a", "b", "c", "d"].map((t) => `<p><span>${t}${"가".repeat(3)}<br>${t}${"나".repeat(3)}</span></p>`).join("");

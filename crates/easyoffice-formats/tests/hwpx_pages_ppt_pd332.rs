@@ -294,7 +294,7 @@ fn hwpx_reads_non_percent_line_spacing_with_checked_arithmetic() {
     let base_header = zip_text(&entries, "Contents/header.xml");
 
     let cases = [
-        // HWPUNIT values keep their rule and become twips (PD-365); a huge one is clamped.
+        // HWPUNIT values keep their rule and become twips (PD-366); a huge one is clamped.
         ("FIXED", "1800", Some(RichLineSpacing::Exact(360))),
         ("AT_LEAST", "2400", Some(RichLineSpacing::AtLeast(480))),
         ("BETWEEN_LINES", "600", Some(RichLineSpacing::Between(120))),
@@ -457,7 +457,7 @@ fn pages_write_adds_table_geometry_uuid_defaults_and_cell_image_loss_warning() {
 #[test]
 fn pages_reader_defaults_omitted_margins_keeps_explicit_zero_and_maps_point_line_spacing() {
     let mut b = DocBuilder::default();
-    // Modes of the line spacing message: 1 minimum, 2 exact (PD-365), amounts in points.
+    // Modes of the line spacing message: 1 minimum, 2 exact (PD-366), amounts in points.
     let spacing_min = cat(&[f_varint(1, 1), f_f32(2, 18.0)]);
     let spacing_exact = cat(&[f_varint(1, 2), f_f32(2, 3.0)]);
     let spacing_huge = cat(&[f_varint(1, 1), f_f32(2, 240.0)]);

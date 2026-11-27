@@ -108,7 +108,7 @@ const pickLine = (h, value) => {
   return box;
 };
 
-test("PD-365: 최소, 고정 and 줄 사이 line spacing is kept per paragraph, shown in the list and saved with its kind", async () => {
+test("PD-366: 최소, 고정 and 줄 사이 line spacing is kept per paragraph, shown in the list and saved with its kind", async () => {
   const h = await createRunHarness([p("가"), p("나"), p("다")]);
   const [a, b, c] = h.blocks;
   await selectAcross(h, a, a);
@@ -141,7 +141,7 @@ test("PD-365: 최소, 고정 and 줄 사이 line spacing is kept per paragraph, 
   assert.equal(saved(h)[0].lineSpacingPercent, 150);
 });
 
-test("PD-365: 줄 간격 옵션… opens the 단락 dialog with the paragraph's values and 확인 applies them", async () => {
+test("PD-366: 줄 간격 옵션… opens the 단락 dialog with the paragraph's values and 확인 applies them", async () => {
   const h = await createRunHarness([p("가")]);
   const [a] = h.blocks;
   await selectAcross(h, a, a);
@@ -184,7 +184,7 @@ test("PD-365: 줄 간격 옵션… opens the 단락 dialog with the paragraph's 
   assert.deepEqual([kind.value, value.value], ["oneHalf", ""], "Word has no 줄 사이: the dialog shows the equal multiple");
 });
 
-test("PD-365: a decoded 최소·고정·줄 사이 paragraph keeps its kind through open and save, and hostile kinds are ignored", async () => {
+test("PD-366: a decoded 최소·고정·줄 사이 paragraph keeps its kind through open and save, and hostile kinds are ignored", async () => {
   const h = await createRunHarness([p("가")]);
   const lineKinds = h.host.__EASYOFFICE_DOC_LINE_SPACING__;
   const spec = () => ({ style: {}, data: {} });

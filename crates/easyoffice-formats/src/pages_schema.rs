@@ -483,7 +483,7 @@ pub(crate) mod para_props {
 /// every layout. 확인: the published `.proto` of an MIT-licensed iWork reader names the modes
 /// `kRelativeLineSpacing = 0` (amount = multiple of single spacing), `kMinimumLineSpacing = 1`,
 /// `kExactLineSpacing = 2`, `kMaximumLineSpacing = 3` (no UI) and `kSpaceBetweenLineSpacing = 4`
-/// (amounts in points); see `THIRD_PARTY_NOTICES.md` and PD-365.
+/// (amounts in points); see `THIRD_PARTY_NOTICES.md` and PD-366.
 pub(crate) mod compact_para {
     pub const FIRST_LINE_INDENT: u32 = 6;
     pub const LEFT_INDENT: u32 = 7;

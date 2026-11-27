@@ -1,5 +1,5 @@
 //! Line spacing of a paragraph: the multiple the formats always shared plus the at-least, exact
-//! and between-lines rules the word processors offer next to it (PD-365).
+//! and between-lines rules the word processors offer next to it (PD-366).
 
 /// Largest line spacing multiple a document keeps, in percent of single spacing (1000 = 10 lines).
 pub const MAX_LINE_PERCENT: u16 = 1000;

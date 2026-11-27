@@ -1,4 +1,4 @@
-//! PD-365: the four line spacing kinds (multiple, at least, exact, between lines) survive
+//! PD-366: the four line spacing kinds (multiple, at least, exact, between lines) survive
 //! DOCX, ODT, RTF, HWPX and Pages; formats without a between-lines rule write the equal
 //! multiple; hostile values stay inside the model's bounds.
 

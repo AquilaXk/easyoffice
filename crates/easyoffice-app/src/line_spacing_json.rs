@@ -1,4 +1,4 @@
-//! A paragraph's line spacing in the open and save JSON (PD-365). A multiple keeps its original
+//! A paragraph's line spacing in the open and save JSON (PD-366). A multiple keeps its original
 //! key, `"lineSpacingPercent"` (1 to `MAX_LINE_PERCENT`). The other rules name their kind and give
 //! twips: `"lineSpacingKind":"atLeast"|"exact"|"between"` with `"lineSpacingTwips"`
 //! (`RichLineSpacing::kind_token`). A kind without twips, an unknown kind, a value out of bounds

@@ -555,7 +555,7 @@ test("The Pages format sidebar has the product's structure and its controls form
   await flushAsyncTurns(4);
   assert.equal(Number.parseFloat(para().style.marginTop) > 0, true, "단락 앞 spacing");
 
-  // 간격: the popup names the kind (줄, 최소, 고정, 줄 사이) and the field beside it takes lines or points (PD-365)
+  // 간격: the popup names the kind (줄, 최소, 고정, 줄 사이) and the field beside it takes lines or points (PD-366)
   const lineKind = byId("pages-insp-linekind");
   const lineAmount = byId("pages-insp-lineamount");
   assert.deepEqual([...lineKind.querySelectorAll("option")].map((o) => o.textContent), ["줄", "최소", "고정", "줄 사이"]);

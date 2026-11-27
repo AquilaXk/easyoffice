@@ -176,7 +176,7 @@ fn docx_and_odt_line_spacing_rounding_explicit_100_and_fixed_lengths() {
             _ => panic!("paragraph expected"),
         })
         .collect();
-    // PD-365: `exact` and `atLeast` keep their rule and their twips; a length past the Word
+    // PD-366: `exact` and `atLeast` keep their rule and their twips; a length past the Word
     // dialog's 1,584 pt is clamped, a multiple past 1000% or a negative one is dropped.
     assert_eq!(
         docx_spacings,
@@ -264,7 +264,7 @@ fn docx_and_odt_line_spacing_rounding_explicit_100_and_fixed_lengths() {
             _ => panic!("paragraph expected"),
         })
         .collect();
-    // PD-365: an absolute `fo:line-height` is the exact rule in twips (it used to be scaled to a percentage).
+    // PD-366: an absolute `fo:line-height` is the exact rule in twips (it used to be scaled to a percentage).
     assert_eq!(
         odt_spacings,
         vec![

@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // Line spacing kinds of a paragraph (PD-365): a multiple (줄, Word 배수) plus 최소 (at least), 고정 (exact)
+  // Line spacing kinds of a paragraph (PD-366): a multiple (줄, Word 배수) plus 최소 (at least), 고정 (exact)
   // and 줄 사이 (between lines). A multiple stays a unitless `line-height` with its percent in
   // `data-eo-line-spacing`. The other kinds keep `data-eo-line-kind` and `data-eo-line-twips` and show as
   // `line-height`: exact is that length, at least is the larger of one line and the length, between lines
