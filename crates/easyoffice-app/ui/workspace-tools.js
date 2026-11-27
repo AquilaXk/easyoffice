@@ -4,8 +4,8 @@
   const { restoreDomChildren } = host.__EASYOFFICE_SHEET_UTILS__;
   const savePayload = host.__EASYOFFICE_SAVE_PAYLOAD__;
   const desktopBridge = host.__EASYOFFICE_DESKTOP_BRIDGE__;
-  const LS_STEPS = [100, 108, 115, 130, 160, 180, 200, 300];
-  const LS_STEPS_REV = [300, 200, 180, 160, 130, 115, 108, 100];
+  const LS_STEPS = [100, 115, 150, 200, 250, 300];
+  const LS_STEPS_REV = [...LS_STEPS].reverse();
   const STUDIO_QUICK_REDIRECT = {
     palette: "btn-command-palette",
     "zoom-in": "btn-zoom-in", "zoom-out": "btn-zoom-out", "zoom-fit-page": "btn-zoom-fit-page", "zoom-fit-width": "btn-zoom-fit-width",

@@ -94,7 +94,7 @@
       const opt = (select.ownerDocument || host.document).createElement("option");
       opt.value = str;
       opt.dataset.custom = "true";
-      opt.textContent = special ? KIND_LABELS[special.kind] + " " + pt(special.twips) + " pt" : percent + " %";
+      opt.textContent = special ? KIND_LABELS[special.kind] + " " + pt(special.twips) + " pt" : String(percent / 100);
       const more = options.find((o) => o.value === OPTIONS_VALUE) || null;
       select.insertBefore(opt, (special ? null : options.find((o) => Number(o.value) > percent)) || more);
     }

@@ -498,7 +498,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(selectedBlock.style.lineHeight, "1.15", "line spacing is set on the selected paragraph");
   assert.equal(docEditor.style.lineHeight, "");
   userClick(document.getElementById("btn-ls-down"));
-  assert.equal(document.getElementById("doc-linespacing-select").value, "108");
+  assert.equal(document.getElementById("doc-linespacing-select").value, "100", "the steps follow the official list 1.0, 1.15, 1.5, 2.0, 2.5, 3.0");
 
   userClick(document.getElementById("btn-align-distribute"));
   assert.equal(document.getElementById("btn-align-distribute").classList.contains("active"), true);

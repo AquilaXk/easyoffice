@@ -405,7 +405,7 @@ test("the line spacing list keeps one custom value", async () => {
   const h = await createRunHarness([p("가"), p("나")]);
   const [a, b] = h.blocks;
   const box = h.document.getElementById("doc-linespacing-select");
-  const customs = () => Array.from(box.querySelectorAll("option")).filter((o) => !["100", "108", "115", "130", "160", "180", "200", "300", "options"].includes(o.value)).map((o) => o.value);
+  const customs = () => Array.from(box.querySelectorAll("option")).filter((o) => o.dataset.custom).map((o) => o.value);
   a.style.lineHeight = "1.25";
   b.style.lineHeight = "1.75";
   await selectAcross(h, a, a);
