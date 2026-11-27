@@ -5,17 +5,6 @@
 
 /** Dialog and control rules with a literal px in height, min-height, font-size, line-height, gap or padding, per stylesheet (selector, cut at 110 characters). */
 export const KNOWN_SIZE_VIOLATIONS = {
-  "base.css": [
-    "#pane-base .custom-select",
-    "#pane-base .custom-select-value",
-    "#pane-base .custom-select-sizer",
-    ".base-field-edit-btn",
-    ".base-row-delete-btn",
-    ".base-cell-input, .base-cell-select",
-    ".base-kanban-move-select",
-    ".base-cal-add-btn",
-    ".base-import-dialog .base-dlg-select.custom-select",
-  ],
   "board.css": [
     "#pane-board .custom-select",
     "#pane-board .custom-select-value",

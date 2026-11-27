@@ -22,7 +22,7 @@ const DESIGN_SYSTEM = readText(fileURLToPath(new URL("../docs/design-system.md",
 const TOKENS = ui("tokens.css");
 
 const SIZE_VIOLATION_COUNTS = {
-  "base.css": 9, "board.css": 8, "content.css": 2, "copilot.css": 6, "home.css": 4,
+  "board.css": 8, "content.css": 2, "copilot.css": 6, "home.css": 4,
 };
 const GLYPH_ARROW_COUNT = 8;
 const WIDGET_CLASS_COUNT = 24;
