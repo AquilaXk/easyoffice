@@ -253,12 +253,15 @@ impl Reader {
     fn resolve(&self, st: &CharState) -> CharFmt {
         // Index 0 of the color table is "auto" and stored as `None`.
         let color_at = |i: Option<usize>| i.and_then(|i| self.colors.get(i)).and_then(Clone::clone);
-        // A face the font table lacks or the default one is no name; an `\af` that is the `\f` face (Word writes `\af0` next
-        // to every `\f0`) is one font.
-        let face = |id: Option<i32>| {
-            self.fonts
-                .get(&id.filter(|f| *f != self.default_font)?)
-                .cloned()
+        // The default face is no font only when both `\f` and `\af` are it; next to another face it is a name like any other.
+        let default = self.default_font;
+        let both_default =
+            st.font.is_none_or(|f| f == default) && st.font_ea.is_none_or(|f| f == default);
+        let face = |id: Option<i32>| self.fonts.get(&id?).cloned();
+        let (latin, east) = if both_default {
+            (None, None)
+        } else {
+            (face(st.font), face(st.font_ea))
         };
         CharFmt {
             bold: st.bold,
@@ -274,7 +277,7 @@ impl Reader {
             letter_spacing_twips: st.spacing,
             advanced: st.advanced,
         }
-        .with_fonts(face(st.font), face(st.font_ea))
+        .with_fonts(latin, east)
     }
 
     fn emit(&mut self, text: &str) -> Result<(), EasyOfficeError> {

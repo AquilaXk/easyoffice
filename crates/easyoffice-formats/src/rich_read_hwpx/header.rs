@@ -154,7 +154,6 @@ impl HeaderBuilder {
                     attr(attrs, slot)
                         .as_deref()
                         .and_then(|id| table.get(id))
-                        .filter(|face| face.as_str() != DEFAULT_FONT_FACE)
                         .cloned()
                 };
                 let east = face("hangul", &self.header.fonts);
@@ -164,6 +163,14 @@ impl HeaderBuilder {
                     &self.header.latin_fonts
                 };
                 let latin = face("latin", latin_table);
+                // The default face is no font only when both slots are it; next to another face it is a name like any other.
+                let is_default =
+                    |f: &Option<String>| f.as_deref().is_none_or(|f| f == DEFAULT_FONT_FACE);
+                let (latin, east) = if is_default(&latin) && is_default(&east) {
+                    (None, None)
+                } else {
+                    (latin, east)
+                };
                 if let Some(f) = self.char_fmt_mut() {
                     f.set_fonts(latin, east);
                 }

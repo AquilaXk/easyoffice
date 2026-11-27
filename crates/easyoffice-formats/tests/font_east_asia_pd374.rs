@@ -226,8 +226,11 @@ fn hostile_rtf_and_odt_font_words_read_as_not_set() {
         )
     };
     for (body, expected) in [
-        ("\\f1\\af0 x", (Some("Batang"), None)),
-        ("\\f0\\af1 x", (Some("Batang"), None)), // the default face is no name, so the one named face is the font
+        // The default face is a name too once the other face is not it: the pair is kept.
+        ("\\f1\\af0 x", (Some("Batang"), Some("Arial"))),
+        ("\\f0\\af1 x", (Some("Arial"), Some("Batang"))),
+        ("\\f0\\af0 x", (None, None)),
+        ("\\f0 x", (None, None)),
         ("\\f1\\af1 x", (Some("Batang"), None)),
         ("\\f1\\af99 x", (Some("Batang"), None)),
         ("\\af-5\\f1 x", (Some("Batang"), None)),
@@ -237,5 +240,29 @@ fn hostile_rtf_and_odt_font_words_read_as_not_set() {
         let doc = decode(rtf(body).as_bytes(), "h.rtf");
         let (font, east) = fonts_of(&doc, "x");
         assert_eq!((font.as_deref(), east.as_deref()), expected, "{body}");
+    }
+}
+
+#[test]
+fn a_latin_font_with_the_default_hangul_face_keeps_both_through_hwpx_and_rtf_twice() {
+    // `함초롬바탕` is the HWPX writer's default face: it must not read back as "no East Asian font" and fold into the Latin one.
+    let doc = document(vec![run("둘", Some("Arial"), Some("함초롬바탕"))]);
+    for (fmt, name) in [
+        (DocumentFormat::Hwpx, "a.hwpx"),
+        (DocumentFormat::Rtf, "a.rtf"),
+    ] {
+        let first = UniversalFormatConverter::encode_rich(&doc, fmt, None).unwrap();
+        let once = decode(&first, name);
+        assert_eq!(
+            fonts_of(&once, "둘"),
+            (Some("Arial".into()), Some("함초롬바탕".into())),
+            "{name}"
+        );
+        let second = UniversalFormatConverter::encode_rich(&once, fmt, None).unwrap();
+        assert_eq!(
+            fonts_of(&decode(&second, name), "둘"),
+            (Some("Arial".into()), Some("함초롬바탕".into())),
+            "{name} twice"
+        );
     }
 }
