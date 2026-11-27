@@ -267,8 +267,8 @@ pub(crate) fn index_returns_line(args: &[Expr]) -> bool {
         matches!(e.peeled(), Expr::Missing) || matches!(e.peeled(), Expr::Number(n) if *n == 0.0)
     };
     match args {
-        [array, row] => arrayish(array) && !matches!(row.peeled(), Expr::Missing),
-        [_, row, col] | [_, row, col, _] => zero(row) || zero(col),
+        [array, row] => (arrayish(array) && !matches!(row.peeled(), Expr::Missing)) || arrayish(row),
+        [_, row, col] | [_, row, col, _] => zero(row) || zero(col) || arrayish(row) || arrayish(col),
         _ => false,
     }
 }

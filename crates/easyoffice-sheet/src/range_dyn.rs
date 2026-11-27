@@ -24,6 +24,14 @@ impl SheetEngine {
         if !(2..=4).contains(&args.len()) {
             return Err(FormulaError::Value);
         }
+        // An array of rows or columns picks several cells: not one reference, so the array path
+        // (`fn_index_grid`) answers.
+        if args[1..args.len().min(3)]
+            .iter()
+            .any(|a| !matches!(a.peeled(), Expr::Var(_)) && crate::array_class::arrayish(a))
+        {
+            return Ok(None);
+        }
         if let Some(arg) = args.get(3).filter(|a| !matches!(a.peeled(), Expr::Missing)) {
             let area = self.eval_arg_num(arg, ctx, depth + 1)?.trunc();
             if area < 1.0 {

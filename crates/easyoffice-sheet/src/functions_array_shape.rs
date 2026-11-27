@@ -741,6 +741,9 @@ impl SheetEngine {
             }
         }
         let grid = self.shape_grid(&args[0], env, ctx, depth)?;
+        if (1..args.len().min(3)).any(|i| crate::array_class::arrayish(&args[i])) {
+            return self.index_items(&grid, args, env, ctx, depth);
+        }
         let mut number = |i: usize| -> Result<Option<i64>, FormulaError> {
             match args.get(i) {
                 None | Some(Expr::Missing) => Ok(None),
@@ -764,6 +767,64 @@ impl SheetEngine {
         };
         let (rows, cols) = (line(row, grid.rows)?, line(col, grid.cols)?);
         Ok(Val::grid(slice(ctx, &grid, rows, cols)?))
+    }
+
+    /// `INDEX` whose `row_num` or `column_num` is an array: one result per item, the two arrays
+    /// paired up the way an operator pairs them (a one-row or one-column array repeats). An item
+    /// that is negative is `#VALUE!`, one past the range `#REF!`; an item `0` (a whole line) of a
+    /// side with more than one element would put an array in a cell, so it is `#VALUE!`.
+    fn index_items(
+        &self,
+        grid: &Grid,
+        args: &[Expr],
+        env: &Env,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> ValResult {
+        let mut numbers = Vec::with_capacity(2);
+        for i in 1..3 {
+            numbers.push(match args.get(i) {
+                None | Some(Expr::Missing) => None,
+                Some(arg) => Some(self.shape_grid(arg, env, ctx, depth)?),
+            });
+        }
+        let present: Vec<&Grid> = numbers.iter().flatten().map(|g| g.as_ref()).collect();
+        let (rows, cols) = crate::array_eval::broadcast_dims(&present);
+        let single_row = args.len() == 2 && grid.rows == 1;
+        let item = |g: &Option<Arc<Grid>>, r: usize, c: usize| -> Result<Option<i64>, FormulaError> {
+            let Some(g) = g else { return Ok(None) };
+            let n = match crate::array_eval::broadcast_at(g, r, c) {
+                V::Error(e) => return Err(e),
+                V::Empty => 0.0,
+                other => other.as_number().ok_or(FormulaError::Value)?.trunc(),
+            };
+            if n < 0.0 {
+                return Err(FormulaError::Value);
+            }
+            Ok(Some(n as i64))
+        };
+        let pick = |n: Option<i64>, len: usize| match n.unwrap_or(0) {
+            0 if len == 1 => Ok(0),
+            0 => Err(FormulaError::Value),
+            n if n as usize <= len => Ok(n as usize - 1),
+            _ => Err(FormulaError::Ref),
+        };
+        let at = |r: usize, c: usize| -> Result<(usize, usize), FormulaError> {
+            let (mut row, mut col) = (item(&numbers[0], r, c)?, item(&numbers[1], r, c)?);
+            if single_row {
+                (row, col) = (None, row);
+            }
+            Ok((pick(row, grid.rows)?, pick(col, grid.cols)?))
+        };
+        Ok(Val::grid(Grid::build_with_links_checked(
+            ctx,
+            rows,
+            cols,
+            |r, c| match at(r, c) {
+                Ok((rr, cc)) => (grid.get(rr, cc).clone(), grid.link_id(rr, cc)),
+                Err(e) => (V::Error(e), 0),
+            },
+        )?))
     }
 
     /// `ISOMITTED(parameter)`: whether the call left a `LAMBDA` parameter out.

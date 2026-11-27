@@ -27,7 +27,7 @@ pub(crate) fn single(val: Val) -> Result<V, FormulaError> {
 
 /// The element of `grid` at `(r, c)` when it stands for a `rows` by `cols` result: a one-row or
 /// one-column grid repeats along that side and a missing element is `#N/A`.
-fn broadcast_at(grid: &Grid, r: usize, c: usize) -> V {
+pub(crate) fn broadcast_at(grid: &Grid, r: usize, c: usize) -> V {
     let r = if grid.rows == 1 { 0 } else { r };
     let c = if grid.cols == 1 { 0 } else { c };
     if r < grid.rows && c < grid.cols {
@@ -37,7 +37,7 @@ fn broadcast_at(grid: &Grid, r: usize, c: usize) -> V {
     }
 }
 
-fn broadcast_dims(grids: &[&Grid]) -> (usize, usize) {
+pub(crate) fn broadcast_dims(grids: &[&Grid]) -> (usize, usize) {
     let side = |f: fn(&Grid) -> usize| grids.iter().map(|g| f(g)).fold(1usize, usize::max);
     (side(|g| g.rows), side(|g| g.cols))
 }
