@@ -763,7 +763,7 @@ pub fn validate_tool_calls(
                 CopilotModule::Doc | CopilotModule::Hwp,
             ) if allow_doc_read => {
                 let start = opt_usize(obj, "startIndex").unwrap_or(0);
-                let end = opt_usize(obj, "endIndex").unwrap_or(start + 19);
+                let end = opt_usize(obj, "endIndex").unwrap_or(start.saturating_add(19));
                 if start <= end && start < MAX_DOC_PARAGRAPHS && end.saturating_sub(start) < 200 {
                     out.push(CopilotToolCall::ReadDocBlocks {
                         start_index: start,
@@ -806,4 +806,40 @@ pub fn validate_tool_calls(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn doc_request_with_unread_blocks() -> CopilotRunRequest {
+        let raw = r#"{"action":"copilot_run","mode":"edit","module":"DOC","prompt":"점검","selection":{"range":"","paragraphIndex":0},"provider":{"kind":"openai","baseUrl":"https://93.184.216.34/v1","model":"gpt-4o"},"context":{"doc":{"paragraphs":["첫 문단"],"omittedParagraphs":5}}}"#;
+        let obj = StrictJsonValue::parse(raw).unwrap();
+        super::super::types::parse_run_request(obj.as_object().unwrap()).unwrap()
+    }
+
+    fn read_calls(args: &str) -> Vec<CopilotToolCall> {
+        let items = StrictJsonValue::parse(&format!(r#"[{{"name":"read_doc_blocks",{args}}}]"#)).unwrap();
+        validate_tool_calls(
+            &doc_request_with_unread_blocks(),
+            items.as_array().unwrap(),
+        )
+    }
+
+    #[test]
+    fn a_read_without_an_end_index_covers_twenty_paragraphs() {
+        assert_eq!(
+            read_calls(r#""startIndex":10"#),
+            vec![CopilotToolCall::ReadDocBlocks {
+                start_index: 10,
+                end_index: 29
+            }]
+        );
+    }
+
+    #[test]
+    fn a_start_index_at_the_integer_limit_is_refused_instead_of_overflowing() {
+        assert!(read_calls(&format!(r#""startIndex":{}"#, u64::MAX)).is_empty());
+        assert!(read_calls(&format!(r#""startIndex":{},"endIndex":{}"#, u64::MAX, u64::MAX)).is_empty());
+    }
 }
