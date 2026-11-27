@@ -144,7 +144,7 @@ test("workflow job dependency and release-guard trigger contracts hold", () => {
   for (const job of ciJobs) {
     const name = job.match(/^ {2}([\w-]+):/)[1];
     if (name === "sonar") {
-      assert.match(job, /^\s{4}needs:\s*\[checks,\s*checks-rust\]/m, "ci.yml sonar must wait on checks and checks-rust");
+      assert.match(job, /^\s{4}needs:\s*\[checks,\s*checks-rust,\s*node-tests\]/m, "ci.yml sonar must wait on checks, checks-rust and node-tests");
     } else {
       assert.doesNotMatch(job, /^\s{4}needs:/m, `ci.yml job '${name}' must run in parallel without needs:`);
     }
@@ -239,4 +239,44 @@ test("workflow and job-level env blocks do not reference step-only contexts (run
       }
     }
   }
+});
+
+test("the Node suites run as shards of the whole test glob and reach sonar as one report (PD-369)", () => {
+  const ci = readText(path.join(REPO, ".github/workflows/ci.yml"));
+  const jobs = ci.slice(ci.indexOf("\njobs:\n") + 1).split(/\n(?= {2}[a-z][\w-]*:\s*(?:#.*)?\n)/).slice(1);
+  const jobText = (name) => jobs.find((job) => job.startsWith(`  ${name}:`));
+  const nodeTests = jobText("node-tests");
+  assert.ok(nodeTests, "ci.yml defines node-tests");
+
+  const matrix = nodeTests.match(/^\s{8}shard:\s*\[([\d,\s]+)\]/m);
+  assert.ok(matrix, "node-tests lists its shard numbers");
+  const shards = matrix[1].split(",").map((n) => Number(n.trim()));
+  const count = shards.length;
+  assert.ok(count >= 2, "the suites are split");
+  assert.deepEqual(shards, Array.from({ length: count }, (_, i) => i + 1), "the shards are numbered 1..n");
+  assert.match(nodeTests, /^\s{6}fail-fast:\s*false/m, "one failing shard does not hide the result of the others");
+
+  // The shard and its total, the lcov file and the artifact name all follow the matrix value.
+  assert.match(nodeTests, new RegExp(`--test-shard=\\$\\{\\{ matrix\\.shard \\}\\}/${count}\\b`), "the total of --test-shard is the matrix size");
+  assert.match(nodeTests, /name: node-tests \(\$\{\{ matrix\.shard \}\}\/\d+\)/);
+  assert.ok(nodeTests.includes(`name: node-tests (\${{ matrix.shard }}/${count})`), "the job name shows the total");
+  assert.match(nodeTests, /--test-reporter=lcov --test-reporter-destination=coverage\/js-\$\{\{ matrix\.shard \}\}\.lcov/);
+  assert.match(nodeTests, /name: js-coverage-lcov-\$\{\{ matrix\.shard \}\}\n\s+path: coverage\/js-\$\{\{ matrix\.shard \}\}\.lcov/);
+  assert.match(nodeTests, /"scripts\/test-\*\.mjs"/, "every test file is offered to the sharding");
+
+  // The job that merges reads one file per shard and nothing else.
+  const sonar = jobText("sonar");
+  const merge = sonar.match(/node scripts\/merge-lcov\.mjs coverage\/js\.lcov((?: coverage\/js-\d+\.lcov)+)/);
+  assert.ok(merge, "sonar merges the shard reports into coverage/js.lcov");
+  assert.deepEqual(
+    merge[1].trim().split(" "),
+    shards.map((n) => `coverage/js-${n}.lcov`),
+    "sonar merges exactly the reports of the shards",
+  );
+  assert.match(sonar, /pattern:\s*js-coverage-lcov-\*\n\s+merge-multiple:\s*true/);
+  assert.match(readText(path.join(REPO, "sonar-project.properties")), /^sonar\.javascript\.lcov\.reportPaths=coverage\/js\.lcov$/m);
+
+  // The limit stays at least 1.5 times the expected shard time (about 7 min, PD-369).
+  const limit = Number(nodeTests.match(/^\s{4}timeout-minutes:\s+(\d+)/m)[1]);
+  assert.ok(limit >= 1.5 * 7 && limit <= 30, `node-tests timeout ${limit}m`);
 });

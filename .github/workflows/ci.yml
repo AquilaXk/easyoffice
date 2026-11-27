@@ -23,13 +23,13 @@ env:
 # and webview (PD-074, PD-094).
 
 jobs:
-  # Platform-independent JS/hygiene gates run once on Ubuntu while Rust engine gates (`checks-rust`)
-  # run in parallel, cutting wall-clock feedback time for Rust lints and tests from ~22m to ~6m.
+  # Platform-independent hygiene gates run once on Ubuntu while Rust engine gates (`checks-rust`) and the
+  # sharded Node suites (`node-tests`) run in parallel, cutting wall-clock feedback time (PD-369).
   checks:
     name: checks
     runs-on: ubuntu-latest
-    # 13-18 min for Node coverage suites; 30m leaves room as suites grow.
-    timeout-minutes: 30
+    # About 3 min of guards and pin verifications; 15m is five times that.
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -66,25 +66,50 @@ jobs:
           node scripts/verify-rhwp-core.mjs
           node scripts/verify-fonts.mjs
 
-      # Every scripts/test-*.mjs suite (guards, hwp-studio and the WebUI behavioral and security suites) runs
-      # once; the lcov report covers the WebUI scripts, the editor overlay sources and the guard scripts.
-      - name: Run Node test suites with coverage
+  # Every scripts/test-*.mjs suite (guards, hwp-studio and the WebUI behavioral and security suites) runs
+  # once, split over three runners: `--test-shard=i/3` takes every third file of the sorted list, so each
+  # shard gets the same mix of heavy WebUI files. Each shard writes its own lcov report over the WebUI
+  # scripts, the editor overlay sources and the guard scripts; the `sonar` job merges the three (PD-369).
+  # The Node suites were 29+ min on one 4-vCPU runner and hit the old 30m limit twice in a row. A shard
+  # takes about 7 min, so 20m is nearly three times that.
+  node-tests:
+    name: node-tests (${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: ./.github/actions/setup-node-ci
+        with:
+          node-version: "22"
+
+      - name: Run Node test suites with coverage (shard ${{ matrix.shard }}/3)
         run: |
           mkdir -p coverage
           node --test --experimental-test-coverage \
+            --test-shard=${{ matrix.shard }}/3 \
             --test-coverage-include="crates/easyoffice-app/ui/*.js" \
             --test-coverage-include="apps/hwp-studio/src/**/*.ts" \
             --test-coverage-include="scripts/*.mjs" \
             --test-coverage-exclude="scripts/test-*.mjs" \
             --test-reporter=spec --test-reporter-destination=stdout \
-            --test-reporter=lcov --test-reporter-destination=coverage/js.lcov \
+            --test-reporter=lcov --test-reporter-destination=coverage/js-${{ matrix.shard }}.lcov \
             "scripts/test-*.mjs"
 
-      - name: Upload the JavaScript coverage report
+      - name: Upload the JavaScript coverage report of the shard
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: js-coverage-lcov
-          path: coverage/js.lcov
+          name: js-coverage-lcov-${{ matrix.shard }}
+          path: coverage/js-${{ matrix.shard }}.lcov
           retention-days: 7
           if-no-files-found: error
 
@@ -138,11 +163,11 @@ jobs:
       - name: Run Rust engine self-test
         run: cargo run -p easyoffice-app -- --self-test
 
-  # Static analysis runs in parallel with the OS jobs, after the coverage report exists. A missing
+  # Static analysis runs in parallel with the OS jobs, after the coverage reports exist. A missing
   # token (fork pull requests) skips the scan; an analysis failure fails the run.
   sonar:
     name: sonar
-    needs: [checks, checks-rust]
+    needs: [checks, checks-rust, node-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -155,12 +180,24 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Download the JavaScript coverage report
+      - name: Setup Node.js for the coverage merge
+        if: env.SONAR_TOKEN != ''
+        uses: ./.github/actions/setup-node-ci
+        with:
+          node-version: "22"
+
+      - name: Download the JavaScript coverage reports of the three Node shards
         if: env.SONAR_TOKEN != ''
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
-          name: js-coverage-lcov
+          pattern: js-coverage-lcov-*
+          merge-multiple: true
           path: coverage
+
+      # sonar-project.properties reads the single coverage/js.lcov.
+      - name: Merge the shard reports into coverage/js.lcov
+        if: env.SONAR_TOKEN != ''
+        run: node scripts/merge-lcov.mjs coverage/js.lcov coverage/js-1.lcov coverage/js-2.lcov coverage/js-3.lcov
 
       - name: Run the static analysis scan
         if: env.SONAR_TOKEN != ''
