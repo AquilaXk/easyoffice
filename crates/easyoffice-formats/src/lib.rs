@@ -66,6 +66,7 @@ mod pptx_theme_cache;
 mod pptx_theme_color;
 mod rich_char_adv;
 mod rich_char_fx;
+mod rich_char_fx_hwpx;
 mod rich_char_open_type;
 mod rich_char_spacing;
 mod rich_defaults;

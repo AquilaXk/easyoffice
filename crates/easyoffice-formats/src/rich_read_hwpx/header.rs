@@ -12,7 +12,7 @@ use crate::rich_list_writers::HwpxNumberingReader;
 use crate::rich_table_style::{CellFill, TableCellBorders};
 use crate::rich_xml::CharFmt;
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
-use crate::{CharAdvanced, EasyOfficeError, RichLineSpacing, RichScript};
+use crate::{CharAdvanced, EasyOfficeError, RichLineSpacing, RichScript, TextFx};
 
 #[derive(Default, Clone)]
 pub(super) struct ParaShape {
@@ -66,6 +66,8 @@ fn parse_line_spacing(attrs: &Attrs<'_>) -> Option<RichLineSpacing> {
 
 /// Base character format of a `hh:charPr` element (size, text and shade colours).
 fn char_fmt_from_attrs(attrs: &Attrs<'_>) -> CharFmt {
+    let mut fx = TextFx::default();
+    fx.read_hwpx_sym_mark(attr(attrs, "symMark").as_deref());
     CharFmt {
         size_half_pt: attr(attrs, "height")
             .as_deref()
@@ -82,6 +84,7 @@ fn char_fmt_from_attrs(attrs: &Attrs<'_>) -> CharFmt {
             .and_then(normalize_hex_color),
         advanced: CharAdvanced {
             kerning_half_pt: CharAdvanced::hwpx_kerning(attr(attrs, "useKerning").as_deref()),
+            fx,
             ..CharAdvanced::default()
         },
         ..CharFmt::default()
@@ -212,7 +215,7 @@ impl HeaderBuilder {
             }
             "hh:underline" => {
                 if let Some(f) = self.char_fmt_mut() {
-                    f.underline = attr(attrs, "type").is_some_and(|t| t != "NONE");
+                    f.underline = f.advanced.fx.read_hwpx_underline(attrs, f.color.as_deref());
                 }
             }
             "hh:strikeout" => {
