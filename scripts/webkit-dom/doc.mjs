@@ -157,7 +157,7 @@ export const docSteps = [
     assert.deepEqual(runs.filter((r) => r.scalePercent).map((r) => [r.text, r.scalePercent, r.positionHalfPt, r.kerningHalfPt]), [["다라", 150, 8, 24]]);
   }],
 
-  // PD-375: 글꼴 > 고급 > OpenType 기능 and the 줄 눈금에 맞춤 box reach the run, its computed style in the real WebKit and the save JSON;
+  // PD-376: 글꼴 > 고급 > OpenType 기능 and the 줄 눈금에 맞춤 box reach the run, its computed style in the real WebKit and the save JSON;
   // the 배율 field has its presets and the unit sits inside the value field.
   ["글꼴 대화상자 OpenType 기능과 줄 눈금 상자가 런과 저장 JSON에 닿고 값 칸에 단위가 든다", async (page) => {
     await typeFirstParagraph(page, "가나다라 1234");
@@ -191,7 +191,7 @@ export const docSteps = [
     assert.equal(hit[0].scalePercent, 150);
   }],
 
-  // PD-375: every field, combo box and color button of the 글꼴 dialog has the reference dialog's box (22px high, 11px text), the three
+  // PD-376: every field, combo box and color button of the 글꼴 dialog has the reference dialog's box (22px high, 11px text), the three
   // controls under 한글 글꼴, 글꼴 스타일 and 크기 start on one line, and the list boxes use the reference's list rows.
   ["글꼴 대화상자의 모든 컨트롤이 참조 대화상자의 높이·글자 크기를 쓰고 한글 글꼴·글꼴 스타일·크기가 한 줄에서 시작한다", async (page) => {
     await typeFirstParagraph(page, "가나다라");
@@ -231,7 +231,7 @@ export const docSteps = [
     assert.ok(start >= 8 && start < 12, `the controls start ${start}px after the longest label`);
   }],
 
-  // PD-375: the 글꼴 탭's colors, underline style, double strikethrough, capitals, hidden text and emphasis reach the run, its computed style
+  // PD-376: the 글꼴 탭's colors, underline style, double strikethrough, capitals, hidden text and emphasis reach the run, its computed style
   // in the real WebKit and the save JSON.
   ["글꼴 대화상자 글꼴 탭의 색·밑줄 스타일·이중 취소선·대문자·강조점이 런과 저장 JSON에 닿는다", async (page) => {
     await typeFirstParagraph(page, "가나다라 abc");

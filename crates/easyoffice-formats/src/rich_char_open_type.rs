@@ -1,5 +1,5 @@
 //! OpenType features of a run (ligatures, number spacing, number forms, stylistic sets, contextual alternates), the
-//! 고급 tab's "OpenType 기능" group of the word processor's Font dialog (PD-375).
+//! 고급 tab's "OpenType 기능" group of the word processor's Font dialog (PD-376).
 //!
 //! Reference implementation: the Open XML SDK (https://github.com/dotnet/Open-XML-SDK, MIT, Copyright (c) .NET Foundation and
 //! Contributors), `data/schemas/schemas_microsoft_com_office_word_2010_wordml.json`: the values of `w14:ST_Ligatures` (the 16

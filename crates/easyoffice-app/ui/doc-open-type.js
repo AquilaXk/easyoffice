@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // OpenType features of a run (PD-375), the 고급 tab's "OpenType 기능" group: ligatures, number spacing, number form,
+  // OpenType features of a run (PD-376), the 고급 tab's "OpenType 기능" group: ligatures, number spacing, number form,
   // stylistic sets and contextual alternates. A run carries them as one integer, packed like the engine's `OpenType::pack`:
   // bits 0-3 are the ligature kinds (standard 1, contextual 2, historical 4, discretional 8), bits 4-5 the number spacing
   // (0 default, 1 proportional, 2 tabular), bits 6-7 the number form (0 default, 1 lining, 2 old style), bit 8 the contextual

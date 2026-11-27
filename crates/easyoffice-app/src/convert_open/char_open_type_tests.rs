@@ -1,4 +1,4 @@
-//! The packed OpenType features and the line-grid switch of a run (`openType`, `snapToGrid`, PD-375) through the save and
+//! The packed OpenType features and the line-grid switch of a run (`openType`, `snapToGrid`, PD-376) through the save and
 //! open requests.
 
 use super::tests::{blocks_array, json_field, request};

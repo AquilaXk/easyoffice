@@ -101,7 +101,7 @@ fn docx_reads_east_asia_font_apart_from_ascii_and_keeps_default_runs_none() {
     let RichBlock::Paragraph(p) = &doc.blocks[0] else {
         panic!("expected paragraph");
     };
-    // The Latin face (`ascii`, `hAnsi`, `cs`) and the East Asian one (`eastAsia`) are apart since PD-375.
+    // The Latin face (`ascii`, `hAnsi`, `cs`) and the East Asian one (`eastAsia`) are apart since PD-376.
     let fonts: Vec<(Option<&str>, Option<&str>)> = p
         .runs
         .iter()

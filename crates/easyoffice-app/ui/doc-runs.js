@@ -19,7 +19,7 @@
   // Advanced settings of the font dialog (PD-372): `scale` is the glyph width in percent (1-600, never 100), `position` the
   // raise (positive) or lowering in half-points (either way up to 1,584 pt, never 0) and `kerning` the smallest kerned size in
   // half-points (1-3,276 = 1,638 pt).
-  // PD-375 adds `opentype` (the packed OpenType features, see `doc-open-type.js`) and `nogrid` (1: the run does not snap to the
+  // PD-376 adds `opentype` (the packed OpenType features, see `doc-open-type.js`) and `nogrid` (1: the run does not snap to the
   // document's line grid, 문서 눈금이 지정되어 있으면 줄 눈금에 맞춤 off; the save carries it as `snapToGrid: false`).
   // `textfx` is the packed text effects (double strikethrough, capitals, hidden, underline style, emphasis; `doc-text-fx.js`) and
   // `ucolor` the underline colour, a hex colour like `color`.
@@ -297,7 +297,7 @@
     st.fontVariantLigatures = advanced.fontVariantLigatures || "";
     st.fontVariantNumeric = advanced.fontVariantNumeric || "";
     st.fontFeatureSettings = advanced.fontFeatureSettings || "";
-    // The text effects (PD-375) set their keys either way, so a run that lost one clears it; the plain decoration stays unless an effect owns it.
+    // The text effects (PD-376) set their keys either way, so a run that lost one clears it; the plain decoration stays unless an effect owns it.
     for (const [key, value] of Object.entries(host.__EASYOFFICE_DOC_TEXT_FX__?.css(fmt) || {})) {
       if (key !== "textDecoration" || value) st[key] = value;
     }

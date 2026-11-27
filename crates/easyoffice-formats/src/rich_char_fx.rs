@@ -1,4 +1,4 @@
-//! Text effects of the 글꼴 tab beyond bold, italic, single underline and single strikethrough (PD-375): double strikethrough,
+//! Text effects of the 글꼴 tab beyond bold, italic, single underline and single strikethrough (PD-376): double strikethrough,
 //! small capitals, all capitals, hidden text, the underline style and colour, and the emphasis mark.
 //!
 //! Reference implementation: docx-rs (https://github.com/bokuweb/docx-rs, MIT, Copyright (c) 2020 bokuweb), the run property

@@ -6,7 +6,7 @@
 //! a percent of the font size and keep kerning as a switch only, so those two convert with the run's
 //! size and read the switch back as [`DEFAULT_KERNING_HALF_PT`]. HWPX also limits the scale to 10-200 %.
 //!
-//! PD-375 adds the rest of the 고급 tab: the OpenType features ([`OpenType`], DOCX only) and the
+//! PD-376 adds the rest of the 고급 tab: the OpenType features ([`OpenType`], DOCX only) and the
 //! "문서 눈금이 지정되어 있으면 줄 눈금에 맞춤" switch (DOCX `w:snapToGrid`, on unless the run turns it off).
 
 use crate::rich_char_fx::TextFx;
@@ -40,7 +40,7 @@ const MAX_PERMILLE: i64 = 1_000_000;
 pub struct CharAdvanced {
     /// OpenType features (ligatures, number spacing and form, stylistic sets, contextual alternates).
     pub open_type: OpenType,
-    /// Double strikethrough, capitals, hidden text, underline style and colour, emphasis mark (PD-375).
+    /// Double strikethrough, capitals, hidden text, underline style and colour, emphasis mark (PD-376).
     pub fx: TextFx,
     /// The run does not snap to the document's line grid (`w:snapToGrid` off); snapping is the default.
     pub grid_snap_off: bool,

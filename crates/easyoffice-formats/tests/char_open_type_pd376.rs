@@ -1,4 +1,4 @@
-//! PD-375: the OpenType features and the line-grid switch of a run (the 고급 tab of the Font dialog) survive DOCX, the formats
+//! PD-376: the OpenType features and the line-grid switch of a run (the 고급 tab of the Font dialog) survive DOCX, the formats
 //! that cannot keep them say so, and hostile `w14:*` values stay inside the model's bounds.
 
 use easyoffice_formats::{

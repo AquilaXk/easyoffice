@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { createRunHarness, rangeOf, p } from "./test-support/doc-run-harness.mjs";
 
-// PD-375: the 글꼴 tab's 이중 취소선, 작은 대문자, 모두 대문자, 숨김, 밑줄 스타일·색 and 강조점 are one packed run value (`textFx`)
+// PD-376: the 글꼴 tab's 이중 취소선, 작은 대문자, 모두 대문자, 숨김, 밑줄 스타일·색 and 강조점 are one packed run value (`textFx`)
 // and the underline colour (`underlineColor`) in the save, and the editor draws them with CSS.
 
 const byId = (h, id) => h.document.getElementById(id);

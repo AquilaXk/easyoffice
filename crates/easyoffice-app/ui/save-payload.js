@@ -14,7 +14,7 @@
   const TABLE_DIRS = new Set(["ABOVE", "BELOW", "LEFT", "RIGHT"]);
   const BOOL_KEYS = ["bold", "italic", "underline", "strike"];
   const VALUE_KEYS = ["size", "spacing", "scale", "position", "kerning", "opentype", "nogrid", "textfx", "ucolor", "font", "eastfont", "face", "color", "highlight"];
-  // Run fields of the structured payload (PD-077): `size` is sent as `sizeHalfPt`, `face` (the variant, PD-368) as `fontFace`; PD-372 adds scale/position/kerning, PD-375 `openType` and `nogrid` (sent as `snapToGrid: false`).
+  // Run fields of the structured payload (PD-077): `size` is sent as `sizeHalfPt`, `face` (the variant, PD-368) as `fontFace`; PD-372 adds scale/position/kerning, PD-376 `openType` and `nogrid` (sent as `snapToGrid: false`).
   const RUN_FIELDS = { size: "sizeHalfPt", spacing: "letterSpacingTwips", scale: "scalePercent", position: "positionHalfPt", kerning: "kerningHalfPt", opentype: "openType", nogrid: "snapToGrid", textfx: "textFx", ucolor: "underlineColor", font: "font", eastfont: "fontEastAsia", face: "fontFace", color: "color", highlight: "highlight" };
   const SCRIPT_TAGS = { SUP: "superscript", SUB: "subscript" };
   const LAYOUT_TAGS = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "ASIDE"]);

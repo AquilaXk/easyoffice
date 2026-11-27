@@ -1,4 +1,4 @@
-//! PD-375: double strikethrough, capitals, hidden text, the underline style and colour and the emphasis mark of a run survive
+//! PD-376: double strikethrough, capitals, hidden text, the underline style and colour and the emphasis mark of a run survive
 //! DOCX, ODT and RTF in the words each format has, the formats without them say so, and hostile values stay inside the bounds.
 
 use easyoffice_formats::{

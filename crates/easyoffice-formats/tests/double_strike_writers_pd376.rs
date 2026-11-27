@@ -1,4 +1,4 @@
-//! PD-375: a double strikethrough read from DOCX (`w:dstrike`) or ODT is `fx.double_strike` with `strike` off, so the writers
+//! PD-376: a double strikethrough read from DOCX (`w:dstrike`) or ODT is `fx.double_strike` with `strike` off, so the writers
 //! that do not keep the effects (HWPX, Pages, Markdown) must still draw it as a strikethrough; HWPX has the double shape.
 
 use easyoffice_formats::{

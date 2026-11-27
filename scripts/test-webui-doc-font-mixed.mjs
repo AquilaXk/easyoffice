@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { createRunHarness, rangeOf, p } from "./test-support/doc-run-harness.mjs";
 
-// PD-375: the 글꼴 dialog on a mixed selection changes only what the user touched. The fonts of two runs stay apart (changing the
+// PD-376: the 글꼴 dialog on a mixed selection changes only what the user touched. The fonts of two runs stay apart (changing the
 // Korean font keeps each run's Latin font), and the packed OpenType and effect values are patched bit by bit (`{ mask, value }`).
 
 const byId = (h, id) => h.document.getElementById(id);

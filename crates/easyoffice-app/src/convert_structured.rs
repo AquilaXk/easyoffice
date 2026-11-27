@@ -383,7 +383,7 @@ pub(crate) fn parse_runs(
                 strike: opt_bool(run, "strike")?,
                 size_half_pt: opt_size_half_pt(run)?,
                 font: opt_font(run, "font")?,
-                // The East Asian face when it differs from `font` (PD-375); the same name is the one font.
+                // The East Asian face when it differs from `font` (PD-376); the same name is the one font.
                 font_east_asia: opt_font(run, "fontEastAsia")?,
                 // A face that is too long or has control characters reads as none (PD-368).
                 font_face: opt_str(run, "fontFace")?.and_then(font_face),
@@ -575,7 +575,7 @@ pub(crate) fn opt_bounded(
 }
 
 /// Width scale, raised or lowered position and kerning threshold of a run (PD-372), its packed OpenType
-/// features and its line-grid switch (PD-375). Each number is an integer inside the model's bounds or absent,
+/// features and its line-grid switch (PD-376). Each number is an integer inside the model's bounds or absent,
 /// `snapToGrid` is a boolean (`false` turns the grid off); a value outside them rejects the save.
 fn opt_advanced(run: &JsonObject) -> Result<CharAdvanced, EasyOfficeError> {
     let max_position = i64::from(MAX_POSITION_HALF_PT);

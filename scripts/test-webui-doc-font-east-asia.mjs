@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { createRunHarness, rangeOf, p } from "./test-support/doc-run-harness.mjs";
 
-// PD-375: the 글꼴 dialog's 한글 글꼴(T) is the East Asian face and 영어 글꼴(F) the Latin one. A run keeps them as `font` (Latin)
+// PD-376: the 글꼴 dialog's 한글 글꼴(T) is the East Asian face and 영어 글꼴(F) the Latin one. A run keeps them as `font` (Latin)
 // and `eastfont` (only when it differs), the save carries `font` and `fontEastAsia`, and the editor draws "Latin, East Asian".
 
 const byId = (h, id) => h.document.getElementById(id);

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { createRunHarness, rangeOf, p } from "./test-support/doc-run-harness.mjs";
 
-// PD-375: the 글꼴 dialog's 고급 tab has the OpenType 기능 group (합자, 숫자 간격, 숫자 형식, 스타일 세트, 상황별 대체 사용) and the
+// PD-376: the 글꼴 dialog's 고급 tab has the OpenType 기능 group (합자, 숫자 간격, 숫자 형식, 스타일 세트, 상황별 대체 사용) and the
 // 문서 눈금이 지정되어 있으면 줄 눈금에 맞춤 box. They are one packed run value (`openType`) and the `snapToGrid` switch in the save.
 
 const byId = (h, id) => h.document.getElementById(id);

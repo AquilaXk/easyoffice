@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // Text effects of a run beyond bold, italic, single underline and single strikethrough (PD-375), the 글꼴 tab's 이중 취소선,
+  // Text effects of a run beyond bold, italic, single underline and single strikethrough (PD-376), the 글꼴 tab's 이중 취소선,
   // 작은 대문자, 모두 대문자, 숨김, 밑줄 스타일 and 강조점. A run carries them as one integer (`textfx`), packed like the engine's
   // `TextFx::pack`: bit 0 double strikethrough, bit 1 small capitals, bit 2 all capitals, bit 3 hidden, bits 4-6 the emphasis
   // mark (0 none, 1 dot, 2 comma, 3 circle, 4 dot below) and bits 7-11 the underline style (0 single ... 16, the index of the

@@ -10,7 +10,7 @@ pub(super) struct CharState {
     pub(super) strike: bool,
     pub(super) size: Option<u16>,
     pub(super) font: Option<i32>,
-    /// `\af`: the associated font, the East Asian face when it is not the Latin one (PD-375).
+    /// `\af`: the associated font, the East Asian face when it is not the Latin one (PD-376).
     pub(super) font_ea: Option<i32>,
     pub(super) color: Option<usize>,
     pub(super) highlight: Option<usize>,
