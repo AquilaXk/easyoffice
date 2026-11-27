@@ -339,6 +339,15 @@ impl Site {
     }
 }
 
+/// Where the reference into another workbook ends whose workbook group (`[Book2.xlsx]`) ends at `at`.
+fn external_ref_end(text: &str, at: usize) -> usize {
+    let Some(prefix) = prefix_at(text, at) else {
+        return at;
+    };
+    let from = at + prefix.len;
+    parse_unit(text, from, None).map_or(from, |unit| unit.end())
+}
+
 /// `text` with the sites `replace` answers for rewritten: it gets each reference (outside string
 /// literals) and returns the text that takes the place of `text[start..end]`, or `None` to keep it.
 /// `None` when nothing changed.
@@ -369,14 +378,24 @@ pub(super) fn scan_refs(
             i += 1;
             continue;
         }
+        let prev_ident = i > 0 && (is_ident_byte(bytes[i - 1]) || bytes[i - 1] == b'.');
         if b == b'[' {
-            // The group of a structured reference names columns, not cells (PD-225): it is left as written.
+            // The group of a structured reference names columns, not cells (PD-225): it is left as written. A group
+            // that opens a token and is followed by a sheet name is the workbook of a reference into another
+            // workbook (`[Book2.xlsx]Sheet2:Sheet6!A1`): the whole reference is left as written.
             if let Some(end) = easyoffice_formats::group_end(text, i) {
-                i = end;
+                let outside = !prev_ident
+                    && bytes
+                        .get(end)
+                        .is_some_and(|&n| is_ident_byte(n) || !n.is_ascii());
+                i = if outside {
+                    external_ref_end(text, end)
+                } else {
+                    end
+                };
                 continue;
             }
         }
-        let prev_ident = i > 0 && (is_ident_byte(bytes[i - 1]) || bytes[i - 1] == b'.');
         let starts_token = b == b'\'' || b == b'$' || is_ident_byte(b) || !b.is_ascii();
         if prev_ident || !starts_token {
             i += text[i..].chars().next().map_or(1, char::len_utf8);
@@ -406,6 +425,15 @@ pub(super) fn scan_refs(
             unit,
         };
         let end = site.end();
+        // `'[Book2.xlsx]Sheet2'!A1`: the sheet is in another workbook.
+        if [&site.sheet, &site.end_sheet]
+            .into_iter()
+            .flatten()
+            .any(|name| name.starts_with('['))
+        {
+            i = end;
+            continue;
+        }
         if let Some(new) = replace(&site) {
             let buf = out.get_or_insert_with(|| String::with_capacity(len + 8));
             buf.push_str(&text[copied..i]);
