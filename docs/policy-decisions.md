@@ -6603,3 +6603,19 @@
 - **Trade-offs** 데이터 유효성 검사 대화상자는 한 화면 구조라 탭 이름(`설명 메시지`·`오류 경고`)을 아직 따르지 않는다.
 - **Verified by** `scripts/test-webui-sheet-rules.mjs`, `scripts/test-webui-sheet-look.mjs`, `scripts/test-webui-sheet-link.mjs`, `crates/easyoffice-desktop/src/native_menu/tests/contracts.rs`.
 - **Revisit when** 남은 이름의 원문을 확인할 때, 데이터 유효성 검사 대화상자를 탭 구조로 바꿀 때.
+
+## PD-375 — 대화상자 부품 키트와 크기·글자 화살표·새 컨트롤 클래스 가드 (2026-11-27)
+
+- **Status** Implemented (QA 요청 2026-11-27). 브랜치 `chore/design-guard`. `PD-098`을 기계가 지키게 하는 수단이다.
+- **Context** 대화상자 화면에서 박스 크기·여백·글자 크기 불일치, 시작 위치 어긋남, 임의로 만든 컨트롤이 같은 모양으로 되풀이됐다. 기준(`PD-098`, `docs/design-system.md`, `tokens.css`)은 있었지만 시험은 색 리터럴만 막아서 높이·글자 크기·여백·새 위젯은 워커가 px 값과 자체 컴포넌트로 만들 수 있었다.
+- **Decision (`PD-375`)**
+  1. **키트**: `docs/design-system.md` 4-2에 대화상자 부품마다 클래스 하나와 크기(토큰)를 한 표로 정했다. 값은 참조 앱의 `dialogs.css`·`find-dialog.css`·`style-dialog.css`와 같다. 표의 모든 줄은 PD 번호를 갖는다.
+  2. **토큰**: `tokens.css`에 `--control-height-field`(24px, 찾기 입력), `--dialog-*`(안쪽 여백, 간격, 줄 간격, 제목 안쪽, 탭 안쪽, 라벨 폭, 상태 줄 높이), `--list-row-padding-*`를 참조 앱 값으로 더했다. 기존 `--control-height-*`, `--font-size-*`, `--space-*`는 그대로다.
+  3. **정적 가드** (`scripts/design-guard.mjs`, `scripts/test-design-guard.mjs`, Node 시험): (a) 대화상자·컨트롤 선택자의 `height`·`min-height`·`font-size`·`line-height`·`gap`·`padding`에 0이 아닌 리터럴 px를 쓰면 실패한다(`ui/*.css`와 스크립트 안 CSS 문자열·`style` 대입). (b) 글자로 그린 화살표는 `▾`의 정해진 자리(`SANCTIONED_CARETS`, 줄 단위)만 허용한다. (c) index.html의 `<dialog>` 안 컨트롤 성격 클래스(`combo`·`select`·`input`·`list`·`tab`·`btn`·`swatch` 등이 이름에 든 것)는 키트 표에 있거나 옛 목록에 있어야 한다.
+  4. **알려진 위반 목록** (`scripts/design-guard-known.mjs`): 가드를 넣는 날 트리가 깨고 있던 것을 파일별 선택자(110자까지)로 적었다. 리터럴 px 선택자 191개(base 9, board 8, content 2, copilot 6, home 7, menu-bar 11, shell 87, styles 26, toolbar 35), 글자 화살표 11곳, 옛 컨트롤 클래스 24개. 시험은 목록에 없는 새 위반과 이미 고쳐진 줄을 둘 다 실패로 보고, 파일별 개수를 시험에 못박아 늘어난 줄이 diff에 드러나게 한다. 위반은 고치지 않고 적었다.
+  5. **런타임 가드** (`scripts/webkit-dom/dialog-layout.mjs`, `dialogs.mjs`, `run.mjs`의 SHEET·DOC 그룹): 메뉴 명령으로 대화상자(셀 서식 6탭, 데이터 유효성 검사, 조건부 서식, 페이지 설정 3탭, 찾기 및 바꾸기, 행 높이, 열 너비, 시트 보호, 통합 문서 보호, 정렬, 선택하여 붙여넣기, 이름 관리, 중복된 항목 제거, 텍스트 나누기, 피벗 테이블, 차트, 하이퍼링크, 메모, 문서의 용지 설정·찾기 및 바꾸기·목차·문서 통계·기호·단락 줄 간격·편지 병합·메모·차트)를 열어 잰다. 한 줄(`.dialog-row`·`.dialog-footer`·`.dialog-btn-group`)의 컨트롤은 높이·위쪽 위치가 같고, 높이는 `--control-height-*`, 글자는 `--font-size-*` 중 하나이며, 내용이 넘쳐 잘리는 상자(`scrollWidth > clientWidth` 등)가 없고, 스크립트가 만든 요소까지 키트 클래스를 쓴다. 라벨, 체크·라디오, 갤러리 칸(기호표·선 모양)은 재지 않는다. 실패는 대화상자·요소·잰 값을 보고한다. 알려진 위반은 단계별로 `dialog-known.mjs`에 둔다(정렬의 단추 26px 대 콤보 22px, 하이퍼링크의 미리보기 단추 26px 대 입력 22px). 글꼴 대화상자는 다른 작업이 참조 앱 컴포넌트로 다시 만드는 중이라 뺐고 `TODO.md`에 적었다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 같은 일을 하는 허용 라이선스 도구가 있는지 보았다. CSS 린터(stylelint의 `declaration-property-value-disallowed-list`)와 CSS 파서(PostCSS)는 받아들일 수 있는 라이선스(MIT)지만 이 리포의 Node 시험은 의존성을 두지 않고, 규칙이 선택자 범위·키트 표·허용 목록과 엮여 있어 설정만으로 되지 않는다. (2) 이미 쓰는 의존성: 색 가드의 `css-rules.mjs`·`css-declarations.mjs`는 `{`·`;` 분할이라 `@media` 안 규칙과 따옴표·괄호 안 `;`를 다루지 못해 쓰지 못했다. 런타임 쪽은 `scripts/webkit-dom/support.mjs`의 실행기를 그대로 썼다. (3) 이식할 참조 구현이 없는 가드 스크립트라 새 코드다.
+- **Why** 기준이 문서에만 있으면 화면마다 값이 어긋난다. 높이·글자·여백·위젯을 색처럼 기계가 막아야 QA가 같은 지적을 되풀이하지 않는다.
+- **Trade-offs** 선택자 범위는 이름으로 정한다(대화상자, 입력·선택·단추·탭·메뉴 같은 낱말). 이 범위에 안 든 선택자의 px는 못 잡는다. 글자 화살표는 짧은 문자열(3자 이하)만 본다. 문장 안의 `→`도 짧은 구분 문자열이면 걸려 목록에 있다. 런타임 `clip`은 브라우저 글꼴에 따라 달라 알려진 목록에서 빠졌다고 실패하지 않는다. 세로로 쌓은 줄(`flex-direction: column`)은 같은 줄 비교를 건너뛴다.
+- **Verified by** `scripts/test-design-guard.mjs`(실제 트리, 합성 위반: 리터럴 px·새 클래스·글자 화살표·줄 불일치), `scripts/webkit-dom/run.mjs`(WebKit에서 위 대화상자 34단계). 일부러 넣은 위반(`.dialog-text-input`의 30px·15px, 새 클래스 `dialog-spin-btn`, 글자 `▸`, 폭 24px로 잘린 단추)에서 두 가드가 모두 실패하는 것을 확인하고 되돌렸다.
+- **Revisit when** 알려진 목록을 줄이다 선택자 이름이 바뀔 때, 글꼴 대화상자가 참조 앱 컴포넌트로 들어와 단계에 더할 때, 슬라이드·PDF·BASE 창 대화상자를 더할 때.
