@@ -163,6 +163,20 @@ test("확인 without a change on the 고급 tab leaves the run's other settings 
   assert.equal(run.kerningHalfPt, undefined);
 });
 
+test("확인 applies to the range the dialog opened on when the modal collapses the selection (WebKit)", async () => {
+  const h = await createRunHarness([p("가나다")]);
+  const [a] = h.blocks;
+  await openDialog(h, a);
+  const text = a.childNodes[0].nodeType === 3 ? a.childNodes[0] : a.childNodes[0].childNodes[0];
+  h.selection.removeAllRanges();
+  h.selection.addRange(rangeOf(text, text.textContent.length, text, text.textContent.length));
+  h.document.dispatchEvent({ type: "selectionchange" });
+  await flushAsyncTurns(4);
+  setBox(h, "doc-font-scale", "150");
+  apply(h);
+  assert.deepEqual(withKey(h, "scalePercent"), [150], "the character the dialog opened on is scaled");
+});
+
 test("a script keeps its own vertical position over a raise or lowering", async () => {
   const h = await createRunHarness([p("가나다")]);
   const [a] = h.blocks;

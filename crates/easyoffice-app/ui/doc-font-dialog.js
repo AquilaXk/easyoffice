@@ -192,8 +192,9 @@
     showPane("font");
     drawSample();
 
+    // A modal dialog takes the selection from the editor (WebKit collapses it), so 확인 applies to the range the dialog opened on.
     current = {
-      els, R, initial, runs, document, drawSample, syncValue, showPane,
+      els, R, initial, runs, document, drawSample, syncValue, showPane, range: runs.getLastRange?.() ?? null,
     };
     if (!bound) {
       bound = true;
@@ -267,7 +268,7 @@
     }
     Object.assign(patch, advanced.patch);
     els.dialog.close();
-    if (Object.keys(patch).length > 0) runs.applyPatch?.(patch);
+    if (Object.keys(patch).length > 0) runs.applyPatch?.(patch, current.range ? { range: current.range } : {});
   }
 
   host.__EASYOFFICE_DOC_FONT_DIALOG__ = {

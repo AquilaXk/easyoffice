@@ -121,4 +121,39 @@ export const docSteps = [
     assert.ok(Math.abs(atLeastLarge - 120) < 1.5, `at least 60px x 2 lines: ${atLeastLarge}`);
     assert.ok(Math.abs(between - (single + 40)) < 1.5, `one line plus 20px per line: ${between} vs ${single}`);
   }],
+
+  // PD-372: 글꼴 > 고급 sets 배율, 위치 and 글꼴 커닝 on the selected run; the real WebKit raises it and the save JSON carries them.
+  ["글꼴 대화상자 고급 탭의 배율·위치·글꼴 커닝이 런과 저장 JSON에 닿는다", async (page) => {
+    await typeFirstParagraph(page, "가나다라");
+    await page.keyboard.press("Shift+ArrowLeft");
+    await page.keyboard.press("Shift+ArrowLeft");
+    await page.evaluate(() => document.querySelector('.md-item[data-studio-menu-cmd="font-dialog"]').click());
+    await page.waitForSelector("#doc-font-dialog[open]");
+    await page.click("#doc-font-tab-advanced");
+    await page.fill("#doc-font-scale", "150");
+    await page.selectOption("#doc-font-position-kind", "raised");
+    await page.fill("#doc-font-position-value", "4");
+    await page.check("#doc-font-kerning");
+    await page.fill("#doc-font-kerning-value", "12");
+    await page.click("#btn-doc-font-apply");
+    await page.waitForSelector(`${EDITOR} .eo-run`);
+    const run = await page.$eval(`${EDITOR} .eo-run`, (el) => {
+      const style = getComputedStyle(el);
+      const plain = el.parentElement.firstChild;
+      const range = document.createRange();
+      range.selectNodeContents(plain);
+      return {
+        data: [el.dataset.eoScale, el.dataset.eoPosition, el.dataset.eoKerning],
+        stretch: style.fontStretch,
+        kerning: style.fontKerning,
+        raised: range.getBoundingClientRect().bottom - el.getBoundingClientRect().bottom,
+      };
+    });
+    assert.deepEqual(run.data, ["150", "8", "24"]);
+    assert.equal(run.stretch, "150%");
+    assert.equal(run.kerning, "normal");
+    assert.ok(run.raised > 4.5, `the run sits 4 pt (5.3 px) above its neighbour's baseline: ${run.raised}`);
+    const runs = await page.evaluate(() => window.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(document.querySelector("#doc-editor")).flatMap((b) => b.runs || []));
+    assert.deepEqual(runs.filter((r) => r.scalePercent).map((r) => [r.text, r.scalePercent, r.positionHalfPt, r.kerningHalfPt]), [["다라", 150, 8, 24]]);
+  }],
 ];
