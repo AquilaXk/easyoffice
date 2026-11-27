@@ -56,10 +56,29 @@ const MARK_OF_EMPHASIS: [u8; 5] = [0, 1, 3, 2, 5];
 /// The emphasis of each `symMark` id: `COLON` is two dots, so a dot.
 const EMPHASIS_OF_MARK: [u8; 7] = [0, 1, 3, 2, 2, 4, 1];
 
-/// `hh:underline@type` tokens that draw a line under the text (the reference parser reads only these; `TOP` is a line above
-/// the text, which the model has no place for, so it is drawn below).
-fn is_underline_type(token: &str) -> bool {
-    matches!(token, "BOTTOM" | "TOP")
+/// What an `hh:underline@type` draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HwpxLine {
+    /// No line (`NONE`, or no `type`).
+    Off,
+    /// A line under the text.
+    Underline,
+    /// A line through the middle of the text (`CENTER`): a strikethrough.
+    Through,
+}
+
+impl HwpxLine {
+    /// The line of a `type` token, compared without regard to case. `NONE` and no token are none, `CENTER` is the middle line,
+    /// and every other value (`BOTTOM`, `TOP`, an unknown word) is an underline, so a file the table does not know keeps its
+    /// line (`TOP` is a line above the text, which the model has no place for, so it is drawn below).
+    fn of_type(token: Option<&str>) -> Self {
+        match token {
+            None => Self::Off,
+            Some(t) if t.eq_ignore_ascii_case("NONE") => Self::Off,
+            Some(t) if t.eq_ignore_ascii_case("CENTER") => Self::Through,
+            Some(_) => Self::Underline,
+        }
+    }
 }
 
 fn index_of(table: &[&str], token: Option<&str>) -> Option<usize> {
@@ -104,21 +123,19 @@ impl TextFx {
         self.emphasis = index_of(&SYM_MARKS, token).map_or(0, |i| EMPHASIS_OF_MARK[i]);
     }
 
-    /// Reads an `hh:underline` element and returns whether the run is underlined. An unknown `type` is no line, an unknown
-    /// `shape` is the plain line, and a `color` that is not six hex digits, or that is the text colour (`text_color`, `None`
-    /// black), is automatic.
+    /// Reads an `hh:underline` element and returns the line it draws ([`HwpxLine::of_type`]); the style and colour are set only
+    /// for an underline. An unknown `shape` is the plain line, and a `color` that is not six hex digits, or that is the text
+    /// colour (`text_color`, `None` black), is automatic.
     pub(crate) fn read_hwpx_underline(
         &mut self,
         attrs: &Attrs<'_>,
         text_color: Option<&str>,
-    ) -> bool {
+    ) -> HwpxLine {
         self.underline_style = 0;
         self.underline_color = None;
-        if !attr(attrs, "type")
-            .as_deref()
-            .is_some_and(is_underline_type)
-        {
-            return false;
+        let line = HwpxLine::of_type(attr(attrs, "type").as_deref());
+        if line != HwpxLine::Underline {
+            return line;
         }
         let shape = attr(attrs, "shape");
         self.underline_style =
@@ -128,7 +145,7 @@ impl TextFx {
             .and_then(normalize_hex_color)
             .filter(|c| c.as_str() != text_color.unwrap_or("000000"));
         self.underline_color = color.and_then(|c| u32::from_str_radix(&c, 16).ok());
-        true
+        line
     }
 }
 

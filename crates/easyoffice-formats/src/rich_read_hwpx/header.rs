@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use super::table_style::BorderFillReader;
 use crate::hwpx_parts::{DEFAULT_FONT_FACE, HWPUNIT_PER_TWIP};
+use crate::rich_char_fx_hwpx::HwpxLine;
 use crate::rich_char_spacing::{from_permille, MAX_SPACING_PERCENT};
 use crate::rich_document::normalize_hex_color;
 use crate::rich_list_writers::HwpxNumberingReader;
@@ -215,7 +216,11 @@ impl HeaderBuilder {
             }
             "hh:underline" => {
                 if let Some(f) = self.char_fmt_mut() {
-                    f.underline = f.advanced.fx.read_hwpx_underline(attrs, f.color.as_deref());
+                    let line = f.advanced.fx.read_hwpx_underline(attrs, f.color.as_deref());
+                    f.underline = line == HwpxLine::Underline;
+                    // `CENTER` is the line through the middle of the text: a strikethrough (the strikeout may come before or
+                    // after, so neither clears the other).
+                    f.strike |= line == HwpxLine::Through;
                 }
             }
             "hh:strikeout" => {
@@ -223,7 +228,7 @@ impl HeaderBuilder {
                     // `DOUBLE_SLIM` is the double line of the reference parser's line shape table; any other shape but NONE is a line.
                     let shape = attr(attrs, "shape");
                     f.advanced.fx.double_strike = shape.as_deref() == Some("DOUBLE_SLIM");
-                    f.strike = shape.is_some_and(|t| t != "NONE") && !f.advanced.fx.double_strike;
+                    f.strike |= shape.is_some_and(|t| t != "NONE") && !f.advanced.fx.double_strike;
                 }
             }
             "hh:supscript" | "hh:subscript" => {

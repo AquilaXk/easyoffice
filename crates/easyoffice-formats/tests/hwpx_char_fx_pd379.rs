@@ -325,8 +325,8 @@ fn hostile_underline_and_mark_values_read_as_not_set() {
         format!("<hh:underline type=\"{kind}\" shape=\"{shape}\" color=\"{color}\"/>")
     };
     let off = (false, TextFx::default());
-    // An unknown or middle-line type is no underline (the reference parser reads only BOTTOM and TOP).
-    for kind in ["NONE", "CENTER", "BOGUS", "bottom", "", long.as_str()] {
+    // `NONE` is no line, in any case (the other types are in the next test).
+    for kind in ["NONE", "none", "None"] {
         assert_eq!(
             read(&line(kind, "WAVE", "#FF0000"), "NONE"),
             off,
@@ -373,6 +373,67 @@ fn hostile_underline_and_mark_values_read_as_not_set() {
             off,
             "{mark:.12}"
         );
+    }
+}
+
+/// The run `x` of a document whose underlined charPr has `kind` as its `hh:underline@type`; `strike_first` puts the
+/// `hh:strikeout` element before the `hh:underline` one.
+fn read_type(kind: &str, strike_first: bool) -> RichRun {
+    let base = encode(&underlined(14, Some(0xFF_0000), 0), DocumentFormat::Hwpx);
+    let source = with_header(&base, |h| {
+        let strike = "<hh:strikeout shape=\"NONE\" color=\"#000000\"/>";
+        let h = h.replace(
+            "<hh:underline type=\"BOTTOM\"",
+            &format!("<hh:underline type=\"{kind}\""),
+        );
+        if strike_first {
+            h.replace(strike, "")
+                .replace("<hh:underline", &format!("{strike}<hh:underline"))
+        } else {
+            h
+        }
+    });
+    the_run(&decode(&source, "t.hwpx"), "x")
+}
+
+#[test]
+fn a_middle_line_is_a_strikethrough_and_every_other_type_but_none_is_an_underline() {
+    let long = "A".repeat(100_000);
+    // `CENTER` is the line through the middle of the text, in any case and before or after the strikeout element.
+    for kind in ["CENTER", "center", "Center"] {
+        for strike_first in [false, true] {
+            let run = read_type(kind, strike_first);
+            assert!(!run.underline, "{kind} {strike_first}");
+            assert!(run.strike, "{kind} {strike_first}");
+            assert_eq!(run.advanced.fx, TextFx::default(), "{kind}");
+        }
+    }
+    // Saved again it is a strikethrough with no underline.
+    let hwpx = encode(
+        &decode(
+            &with_header(
+                &encode(&underlined(0, None, 0), DocumentFormat::Hwpx),
+                |h| {
+                    h.replace(
+                        "<hh:underline type=\"BOTTOM\"",
+                        "<hh:underline type=\"CENTER\"",
+                    )
+                },
+            ),
+            "t.hwpx",
+        ),
+        DocumentFormat::Hwpx,
+    );
+    let head = header(&hwpx);
+    assert!(head.contains("<hh:strikeout shape=\"SOLID\""), "{head}");
+    assert!(!head.contains("<hh:underline type=\"BOTTOM\""), "{head}");
+    // `BOTTOM` and `TOP`, any case, and a word the table does not know keep their line (as before PD-379); the shape is read.
+    for kind in ["BOTTOM", "bottom", "TOP", "Top", "BOGUS", "", long.as_str()] {
+        let run = read_type(kind, false);
+        assert!(run.underline, "{kind:.12}");
+        assert!(!run.strike, "{kind:.12}");
+        assert_eq!(run.advanced.fx.underline_style, 14, "{kind:.12}");
+        assert_eq!(run.advanced.fx.underline_color, Some(0xFF_0000));
     }
 }
 
