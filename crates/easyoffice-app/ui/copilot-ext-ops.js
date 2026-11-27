@@ -17,6 +17,20 @@
     return String(item.text ?? item.content ?? "").replace(/<[^>]+>/g, "");
   }
 
+  function codePointLength(value) {
+    const str = String(value ?? "");
+    let count = 0;
+    for (let i = 0; i < str.length; i += 1) {
+      const first = str.charCodeAt(i);
+      if (first >= 0xd800 && first <= 0xdbff && i + 1 < str.length) {
+        const second = str.charCodeAt(i + 1);
+        if (second >= 0xdc00 && second <= 0xdfff) i += 1;
+      }
+      count += 1;
+    }
+    return count;
+  }
+
   function createCopilotExtOps(deps) {
     const {
       document,
@@ -361,30 +375,74 @@
 
     // ---- PDF context, page search & page locate ----------------------------------------------------
 
+    function currentPdfActivePage(hooks) {
+      const cardActive = Number(document.getElementById("pdf-page-card")?.dataset?.activePage || 0);
+      const hookActive = Number(hooks?.getPdfCurrentPage?.() || 0);
+      return Math.max(1, Math.trunc(cardActive || hookActive || 1) || 1);
+    }
+
     function extractPdfContext() {
       const hooks = host.__EASYOFFICE_MODULE_FIND_HOOKS__;
       const pages = hooks?.getPdfPages?.() || [];
-      const activePage = Math.max(1, Number(document.getElementById("pdf-page-card")?.dataset?.activePage || 1) || 1);
+      const activePage = currentPdfActivePage(hooks);
       if (Array.isArray(pages) && pages.length > 0) {
-        const formatted = pages
+        const pageCount = pages.length;
+        const entries = pages
           .map((p, idx) => {
-            const pageNo = Number(p?.page) || idx + 1;
+            const pageNo = Math.max(1, Math.trunc(Number(p?.page) || Number(p?.pageNumber) || idx + 1));
             const txt = typeof p === "string" ? p : String(p?.text ?? "");
-            return `[${pageNo}쪽] ${txt.trim()}`;
+            return { pageNo, formatted: `[${pageNo}쪽] ${txt.trim()}` };
           })
-          .join("\n\n");
-        return {
-          text: clipCodePoints(formatted, MAX_CONTEXT_TEXT_CHARS),
-          pageCount: pages.length,
-          activePage: Math.min(activePage, pages.length),
-        };
+          .sort((a, b) => a.pageNo - b.pageNo);
+        const clampedActive = Math.min(activePage, pageCount);
+        let activeIdx = entries.findIndex((e) => e.pageNo === activePage);
+        if (activeIdx < 0) activeIdx = entries.findIndex((e) => e.pageNo === clampedActive);
+        if (activeIdx < 0) activeIdx = Math.max(0, Math.min(entries.length - 1, clampedActive - 1));
+
+        const lengths = entries.map((e) => codePointLength(e.formatted));
+        const sepLen = 2; // "\n\n"
+        const frontNotice = (loIdx) => (loIdx > 0 ? `[${entries[0].pageNo}..${entries[loIdx - 1].pageNo}쪽 생략]` : "");
+        const frontCost = (loIdx) => (loIdx > 0 ? codePointLength(frontNotice(loIdx)) + sepLen : 0);
+
+        if (frontCost(activeIdx) + lengths[activeIdx] > MAX_CONTEXT_TEXT_CHARS) {
+          const header = frontNotice(activeIdx);
+          const room = Math.max(0, MAX_CONTEXT_TEXT_CHARS - (header ? codePointLength(header) + sepLen : 0));
+          const clipped = clipCodePoints(entries[activeIdx].formatted, room);
+          return {
+            text: header ? `${header}\n\n${clipped}` : clipped,
+            pageCount,
+            activePage: entries[activeIdx].pageNo,
+          };
+        }
+
+        let lo = activeIdx;
+        let hi = activeIdx;
+        let bodyChars = lengths[activeIdx];
+        while (lo > 0 || hi + 1 < entries.length) {
+          const canPrev = lo > 0 && frontCost(lo - 1) + bodyChars + sepLen + lengths[lo - 1] <= MAX_CONTEXT_TEXT_CHARS;
+          const canNext = hi + 1 < entries.length && frontCost(lo) + bodyChars + sepLen + lengths[hi + 1] <= MAX_CONTEXT_TEXT_CHARS;
+          if (!canPrev && !canNext) break;
+          const preferPrev = activeIdx - lo <= hi - activeIdx;
+          if (canPrev && (!canNext || preferPrev)) {
+            lo -= 1;
+            bodyChars += sepLen + lengths[lo];
+          } else {
+            hi += 1;
+            bodyChars += sepLen + lengths[hi];
+          }
+        }
+
+        const slice = entries.slice(lo, hi + 1).map((e) => e.formatted);
+        const header = frontNotice(lo);
+        const text = clipCodePoints(header ? [header, ...slice].join("\n\n") : slice.join("\n\n"), MAX_CONTEXT_TEXT_CHARS);
+        return { text, pageCount, activePage: entries[activeIdx].pageNo };
       }
-      const rawText = clipCodePoints(
-        String(extractEditableDocumentText?.("PDF") || document.getElementById("pdf-page-card")?.textContent || "").trim(),
-        MAX_CONTEXT_TEXT_CHARS,
-      );
       const pageCount = Math.max(1, Number(getPdfEdit?.()?.pageCount?.() || pages.length || 1) || 1);
-      return { text: rawText ? `[1쪽] ${rawText}` : "", pageCount, activePage: Math.min(activePage, pageCount) };
+      const currentPage = Math.min(activePage, pageCount);
+      const prefix = `[${currentPage}쪽] `;
+      const raw = String(extractEditableDocumentText?.("PDF") || document.getElementById("pdf-page-card")?.textContent || "").trim();
+      const rawText = clipCodePoints(raw, Math.max(0, MAX_CONTEXT_TEXT_CHARS - codePointLength(prefix)));
+      return { text: rawText ? `${prefix}${rawText}` : "", pageCount, activePage: currentPage };
     }
 
     function searchPdfPagesTool(args) {
@@ -393,9 +451,11 @@
       const qLower = query.toLowerCase();
       const hooks = host.__EASYOFFICE_MODULE_FIND_HOOKS__;
       const pages = hooks?.getPdfPages?.() || [];
+      const fallbackCount = Math.max(1, Number(getPdfEdit?.()?.pageCount?.() || 1) || 1);
+      const fallbackPage = Math.min(currentPdfActivePage(hooks), fallbackCount);
       const sourcePages = Array.isArray(pages) && pages.length > 0
-        ? pages.map((p, i) => ({ page: Number(p?.page) || i + 1, text: typeof p === "string" ? p : String(p?.text ?? "") }))
-        : [{ page: 1, text: String(extractEditableDocumentText?.("PDF") || document.getElementById("pdf-page-card")?.textContent || "") }];
+        ? pages.map((p, i) => ({ page: Math.max(1, Math.trunc(Number(p?.page) || Number(p?.pageNumber) || i + 1)), text: typeof p === "string" ? p : String(p?.text ?? "") }))
+        : [{ page: fallbackPage, text: String(extractEditableDocumentText?.("PDF") || document.getElementById("pdf-page-card")?.textContent || "") }];
 
       const matches = [];
       for (const entry of sourcePages) {

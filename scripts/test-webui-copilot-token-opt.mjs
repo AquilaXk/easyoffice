@@ -191,6 +191,66 @@ test("SLIDE omits duplicate body/notes/default layout, PDF sends activePage, SHE
   await pdfH.send("3쪽 요약");
   assert.equal(pdfCtx.activePage, 3);
 
+  // >24,000-char 50-page PDF preserves activePage=45 window, ascending order, and [1..N쪽 생략] front notice
+  const fiftyPages = Array.from({ length: 50 }, (_, i) => ({
+    pageNumber: i + 1,
+    text: `PAGE_${i + 1}_BODY ` + "가나다라마바사아자차카타파하 ".repeat(55),
+  }));
+  pdfH.host.__EASYOFFICE_MODULE_FIND_HOOKS__ = {
+    ...(pdfH.host.__EASYOFFICE_MODULE_FIND_HOOKS__ || {}),
+    getPdfPages: () => fiftyPages,
+  };
+  pdfH.document.getElementById("pdf-page-card").dataset.activePage = "45";
+  await pdfH.send("45쪽 핵심 요약");
+  assert.equal(pdfCtx.pageCount, 50);
+  assert.equal(pdfCtx.activePage, 45);
+  assert.ok(Array.from(pdfCtx.text).length <= 24000, `PDF context stays within 24,000 chars: ${pdfCtx.text.length}`);
+  assert.match(pdfCtx.text, /^\[1\.\.\d+쪽 생략\]\n\n/, "front omit header preserved when earlier pages skipped");
+  assert.ok(pdfCtx.text.includes("[45쪽] PAGE_45_BODY"), "activePage=45 preserved inside req.context.pdf.text");
+  assert.ok(pdfCtx.text.includes("[44쪽] PAGE_44_BODY") && pdfCtx.text.includes("[46쪽] PAGE_46_BODY"), "adjacent pages around activePage included");
+  const pageMarkers = [...pdfCtx.text.matchAll(/\[(\d+)쪽\]/g)].map((m) => Number(m[1]));
+  assert.ok(pageMarkers.length >= 5, "multiple pages included in window");
+  for (let i = 1; i < pageMarkers.length; i += 1) {
+    assert.ok(pageMarkers[i] > pageMarkers[i - 1], `page numbers strictly ascending: ${pageMarkers[i - 1]} -> ${pageMarkers[i]}`);
+  }
+
+  // activePage=1 on >24,000-char PDF starts directly with [1쪽] and omits front notice
+  pdfH.document.getElementById("pdf-page-card").dataset.activePage = "1";
+  await pdfH.send("1쪽 확인");
+  assert.match(pdfCtx.text, /^\[1쪽\] PAGE_1_BODY/);
+  assert.doesNotMatch(pdfCtx.text, /쪽 생략\]/);
+
+  // Oversized single activePage >24,000 chars keeps front omit header and [45쪽] prefix within 24,000 chars
+  const hugeSinglePages = Array.from({ length: 50 }, (_, i) => ({
+    page: i + 1,
+    text: i === 44 ? "HUGE45_" + "한".repeat(25000) : `짧은 ${i + 1}`,
+  }));
+  pdfH.host.__EASYOFFICE_MODULE_FIND_HOOKS__ = {
+    ...(pdfH.host.__EASYOFFICE_MODULE_FIND_HOOKS__ || {}),
+    getPdfPages: () => hugeSinglePages,
+  };
+  pdfH.document.getElementById("pdf-page-card").dataset.activePage = "45";
+  await pdfH.send("긴 45쪽 확인");
+  assert.ok(Array.from(pdfCtx.text).length <= 24000);
+  assert.ok(pdfCtx.text.startsWith("[1..44쪽 생략]\n\n[45쪽] HUGE45_"));
+
+  // Single-page DOM fallback uses clamped [activePage쪽] instead of hardcoded [1쪽] and respects 24,000 char ceiling
+  const extPdfEnv = {};
+  loadUiModule(UI("copilot-text.js"), extPdfEnv);
+  loadUiModule(UI("copilot-ext-ops.js"), extPdfEnv);
+  pdfH.document.getElementById("pdf-page-card").dataset.activePage = "6";
+  const pdfFallbackOps = extPdfEnv.__EASYOFFICE_CREATE_COPILOT_EXT_OPS__({
+    document: pdfH.document,
+    getHwpHost: () => null,
+    getPdfEdit: () => ({ pageCount: () => 8 }),
+    extractEditableDocumentText: () => "가".repeat(25000),
+  });
+  const fbCtx = pdfFallbackOps.extractPdfContext();
+  assert.equal(fbCtx.pageCount, 8);
+  assert.equal(fbCtx.activePage, 6);
+  assert.ok(fbCtx.text.startsWith("[6쪽] "), "single-page fallback formats actual activePage");
+  assert.ok(Array.from(fbCtx.text).length <= 24000, "single-page fallback fits within 24,000 chars");
+
   // SHEET tabs, usedRange & prioritized selection.range when >512 cells exist
   let sheetCtx = null;
   const sheetH = await open({

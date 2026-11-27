@@ -10599,7 +10599,7 @@ SOFTWARE.
 
 ---
 
-## Copilot token optimization open-source references (`PD-361`)
+## Copilot token optimization open-source references (`PD-364`)
 
 Nothing in this section is vendored or linked at runtime; only cache key normalization, multi-provider usage parsing, spreadsheet grid/isomorphic formula compression, and read-tool receipt compaction rules were adapted into `crates/easyoffice-app/src/copilot/{cache,usage,compact}.rs` and `crates/easyoffice-app/ui/copilot-context-compact.js`.
 

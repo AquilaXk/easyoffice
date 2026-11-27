@@ -1,4 +1,4 @@
-//! 코파일럿 토큰 사용 최적화 통합 검증(PD-361):
+//! 코파일럿 토큰 사용 최적화 통합 검증(PD-364):
 //! P0: 4계층 캐시·불변 PDF 문맥 배치·정적 시스템 프롬프트·OpenAI SHA-256 prompt_cache_key·include_usage·
 //!     Anthropic 블록 배열/최상위 cache_control·usage 계측·무료 GET /models 우선 연결 시험·모듈별 고밀도 압축·
 //!     DOC/HWP 실제 빈 문단("")과 희소 슬롯(null) 분리·selected_text 중복 제거.
@@ -389,6 +389,20 @@ fn module_high_density_compression_dedup_tsv_isomorphic_and_pdf_window() {
         "activePage kept inside PDF window"
     );
     assert!(p_body.contains("[앞 "), "far earlier pages omitted cleanly");
+
+    // Pre-windowed JS payload with [1..35쪽 생략] front notice keeps activePage=45 intact in Rust
+    let js_window_pages: Vec<String> = std::iter::once("[1..35쪽 생략]".to_string())
+        .chain((36..=50).map(|p| format!("[{p}쪽] 페이지 {p} 본문")))
+        .collect();
+    let pdf_js_win_req = format!(
+        r#"{{"action":"copilot_run","mode":"ask","module":"PDF","prompt":"45쪽 확인","context":{{"pdf":{{"text":"{}","pageCount":50,"activePage":45}}}},"provider":{{"kind":"ollama","model":"qwen3"}}}}"#,
+        js_window_pages.join("\\n\\n")
+    );
+    let (pdf_jw_res, pdf_jw_r) =
+        dispatch_raw_llm(&pdf_js_win_req, &openai_text_reply("[45쪽] 요약"));
+    pdf_jw_res.expect("pdf pre-windowed ok");
+    assert!(pdf_jw_r[0].body_json.contains("[1..35쪽 생략]"));
+    assert!(pdf_jw_r[0].body_json.contains("[45쪽] 페이지 45 본문"));
 
     // SLIDE omits empty notes and default titleAndContent layout
     let slide_req = r#"{"action":"copilot_run","mode":"ask","module":"SLIDE","prompt":"점검","context":{"slide":{"activeIndex":0,"slides":[{"title":"표지","bullets":["핵심"],"notes":"","layout":"titleAndContent","elements":[]}]}},"provider":{"kind":"ollama","model":"qwen3"}}"#;
