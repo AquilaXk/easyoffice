@@ -929,7 +929,8 @@ fn hostile_rle_stroke_expansion_and_shared_sidecar_amplification_fail_closed() {
         Some("noop-multi.pages"),
     );
     assert!(
-        matches!(&err3, Err(EasyOfficeError::ResourceBudgetExceeded(msg)) if msg.contains("테두리 런 총수")),
+        // Either budget ends it: the run total, or (PD-363) the decoded bytes the layers' parsed fields cost.
+        matches!(&err3, Err(EasyOfficeError::ResourceBudgetExceeded(msg)) if msg.contains("테두리 런 총수") || msg.contains("복원 크기가 예산")),
         "expected ResourceBudgetExceeded for shared sidecar noop-run amplification, got {err3:?}"
     );
 

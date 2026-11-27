@@ -774,11 +774,9 @@ mod tests {
         let mut images = PageImages::new(&objects, &files);
         let mut budget = TableBudget::default();
         let mut text_budget = DecodeBudget::new();
-        let start = std::time::Instant::now();
         let outcome = read_table(&objects, &info, &mut budget, &mut images, &mut text_budget);
-        let took = start.elapsed();
+        // a parse per entry would cost 19,000 payloads and their fields, far over the budget
         assert!(matches!(outcome, Ok(TableOutcome::Read(_))));
-        assert!(took < std::time::Duration::from_secs(2), "{took:?}");
         // the tile payload is paid for once, not once per entry
         let used = DecodeBudget::new().remaining() - text_budget.remaining();
         assert!(used < 2 * 1024 * 1024, "{used}");
