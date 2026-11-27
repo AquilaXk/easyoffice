@@ -19,16 +19,35 @@ function rewrite(raw, op, sheet, newName) {
   return raw.replace(new RegExp(`${old}!`, "g"), `${quoted(newName)}!`);
 }
 
+// What the engine does with a move, for the plain spans these tests write (`Start:End!`): an end that goes past the
+// other end is replaced by its neighbor inside the old span that did not move; a span left with one sheet is that sheet.
+function moveSpans(raw, { sheets: moved, order: after }, before) {
+  return raw.replace(/([A-Za-z0-9_]+):([A-Za-z0-9_]+)!/g, (whole, start, end) => {
+    const hitStart = moved.includes(start);
+    if (hitStart === moved.includes(end)) return whole;
+    const [at, other] = hitStart ? [start, end] : [end, start];
+    const [from, to] = [before.indexOf(at), before.indexOf(other)];
+    if ((from < to) === (after.indexOf(at) < after.indexOf(other))) return whole;
+    const step = to > from ? 1 : -1;
+    let heir = from + step;
+    while (moved.includes(before[heir])) heir += step;
+    const [first, last] = hitStart ? [before[heir], end] : [start, before[heir]];
+    return first === last ? `${first}!` : `${first}:${last}!`;
+  });
+}
+
 function fakeEngine() {
   const requests = [];
   const state = { refuse: "" };
   const cells = new Map();
   let sessions = 0;
+  let tabOrder = [];
   async function evaluate(body) {
     requests.push(body);
     switch (body.sessionAction) {
       case "open":
         cells.clear();
+        tabOrder = body.sheets;
         sessions += 1;
         return { session: "s" + sessions };
       case "apply":
@@ -40,6 +59,15 @@ function fakeEngine() {
         return { session: body.session, changed: [], circular: false };
       case "sheetRefs": {
         if (state.refuse) throw new Error(state.refuse);
+        if (body.op === "move") {
+          const formulas = [];
+          for (const [key, raw] of cells) {
+            const [sheet, cell] = key.split("!");
+            const next = raw.startsWith("=") ? moveSpans(raw, body, tabOrder) : raw;
+            if (next !== raw) formulas.push({ sheet, cell, value: next });
+          }
+          return { session: body.session, formulas, rules: {} };
+        }
         if (body.op === "rename" && /[\\/?*[\]:]/.test(body.newName)) throw new Error("시트 이름에 쓸 수 없는 글자입니다");
         const formulas = [];
         for (const [key, raw] of cells) {
@@ -1468,4 +1496,100 @@ test("grouped Ctrl+drag copy, tab menu focus restore, rename guard/preserve, and
   assert.equal(renamedOk, true);
   assert.ok(restored);
   assert.deepEqual(localStrip.getGroup(["S1", "Two", "S3"], "S1"), ["S1", "Two"], "renameInGroup preserves group before render reconciles");
+});
+
+// ---- moving the end sheet of a 3D span (PD-372) ----------------------------------------------------------------------
+
+// Sheet1..Sheet5 and Sum, whose A1 sums Sheet2:Sheet4, A2 Sheet2:Sheet3 and B1 reads Sheet2 alone.
+async function openSpanBook() {
+  const h = await open();
+  await h.openBook([
+    ...[1, 2, 3, 4, 5].map((n) => ({ name: "Sheet" + n, cells: { A1: String(n) } })),
+    { name: "Sum", cells: { A1: "=SUM(Sheet2:Sheet4!A1)", A2: "=SUM(Sheet2:Sheet3!A1)", B1: "=Sheet2!A1" } },
+  ]);
+  const spans = async () => {
+    const { cells } = (await h.book()).Sum;
+    return [cells.A1, cells.A2, cells.B1];
+  };
+  const moves = () => h.engine.requests.filter((r) => r.sessionAction === "sheetRefs" && r.op === "move");
+  return { h, spans, moves };
+}
+
+const ORIGINAL_SPANS = ["=SUM(Sheet2:Sheet4!A1)", "=SUM(Sheet2:Sheet3!A1)", "=Sheet2!A1"];
+
+test("dragging an end sheet of a 3D span past its other end takes the neighbor inside the span, in one undo step (PD-372)", async () => {
+  const { h, spans, moves } = await openSpanBook();
+  h.tabs().forEach((t, i) => {
+    t.getBoundingClientRect = () => ({ left: 10 + i * 80, top: 0, width: 80, height: 24 });
+  });
+  // Sheet2 goes after Sheet4.
+  const second = h.tab("Sheet2");
+  second.dispatchEvent({ type: "mousedown", target: second, clientX: 130, button: 0 });
+  h.document.dispatchEvent({ type: "mousemove", target: h.document.body, clientX: 300 });
+  h.document.dispatchEvent({ type: "mouseup", target: h.document.body, clientX: 300 });
+  await flushAsyncTurns(40);
+  assert.deepEqual(h.names(), ["Sheet1", "Sheet3", "Sheet4", "Sheet2", "Sheet5", "Sum"]);
+  assert.deepEqual(moves().map((r) => [r.sheets, r.order]), [[["Sheet2"], ["Sheet1", "Sheet3", "Sheet4", "Sheet2", "Sheet5", "Sum"]]]);
+  assert.deepEqual(await spans(), ["=SUM(Sheet3:Sheet4!A1)", "=SUM(Sheet3!A1)", "=Sheet2!A1"]);
+  await h.history("studio-undo");
+  assert.deepEqual(h.names(), ["Sheet1", "Sheet2", "Sheet3", "Sheet4", "Sheet5", "Sum"]);
+  assert.deepEqual(await spans(), ORIGINAL_SPANS);
+  await h.history("studio-redo");
+  assert.deepEqual(await spans(), ["=SUM(Sheet3:Sheet4!A1)", "=SUM(Sheet3!A1)", "=Sheet2!A1"]);
+});
+
+test("the menu, the sheet menu key and the 이동/복사 list rewrite the span the same way (PD-372)", async () => {
+  // Menu 왼쪽으로 이동: Sheet3 before Sheet2 leaves Sheet2:Sheet3 as Sheet2.
+  let { h, spans } = await openSpanBook();
+  await h.tabMenu("Sheet3", "move-left");
+  assert.deepEqual(h.names(), ["Sheet1", "Sheet3", "Sheet2", "Sheet4", "Sheet5", "Sum"]);
+  assert.deepEqual(await spans(), ["=SUM(Sheet2:Sheet4!A1)", "=SUM(Sheet2!A1)", "=Sheet2!A1"]);
+  // The sheet menu's command on the active sheet: Sheet2 after Sheet3 (a move that keeps Sheet2:Sheet4 in order).
+  ({ h, spans } = await openSpanBook());
+  h.userClick(h.tab("Sheet2"));
+  await flushAsyncTurns(20);
+  userClickMenuAct(h, "tab-right");
+  await flushAsyncTurns(40);
+  assert.deepEqual(h.names(), ["Sheet1", "Sheet3", "Sheet2", "Sheet4", "Sheet5", "Sum"]);
+  assert.deepEqual(await spans(), ["=SUM(Sheet2:Sheet4!A1)", "=SUM(Sheet3!A1)", "=Sheet2!A1"]);
+  // 이동/복사: Sheet4 before Sheet2.
+  ({ h, spans } = await openSpanBook());
+  await h.tabMenu("Sheet4", "move-copy");
+  const row = [...h.document.querySelectorAll("#sheet-tab-move-list li")].find((r) => r.textContent === "시트 2");
+  h.userClick(row);
+  h.userClick(h.document.getElementById("btn-sheet-tab-move-ok"));
+  await flushAsyncTurns(40);
+  assert.deepEqual(h.names(), ["Sheet1", "Sheet4", "Sheet2", "Sheet3", "Sheet5", "Sum"]);
+  assert.deepEqual(await spans(), ["=SUM(Sheet2:Sheet3!A1)", "=SUM(Sheet2:Sheet3!A1)", "=Sheet2!A1"]);
+});
+
+test("a group moved together sends every moved sheet and keeps a span whose ends both moved (PD-372)", async () => {
+  const { h, spans, moves } = await openSpanBook();
+  h.userClick(h.tab("Sheet2"));
+  await flushAsyncTurns(20);
+  const third = h.tab("Sheet3");
+  const base = { button: 0, bubbles: true, cancelable: true, shiftKey: true };
+  third.dispatchEvent({ type: "mousedown", target: third, ...base });
+  third.dispatchEvent({ type: "mouseup", target: third, ...base });
+  third.dispatchEvent({ type: "click", target: third, ...base });
+  await flushAsyncTurns(20);
+  userClickMenuAct(h, "tab-right");
+  await flushAsyncTurns(40);
+  assert.deepEqual(h.names(), ["Sheet1", "Sheet4", "Sheet2", "Sheet3", "Sheet5", "Sum"]);
+  assert.deepEqual(moves().map((r) => r.sheets), [["Sheet2", "Sheet3"]]);
+  // Sheet2:Sheet4 lost Sheet3 (it moved too) and so holds Sheet4 only; Sheet2:Sheet3 moved as a whole.
+  assert.deepEqual(await spans(), ["=SUM(Sheet4!A1)", "=SUM(Sheet2:Sheet3!A1)", "=Sheet2!A1"]);
+  await h.history("studio-undo");
+  assert.deepEqual(await spans(), ORIGINAL_SPANS);
+});
+
+test("a move the engine refuses changes neither the order nor the formulas (PD-372)", async () => {
+  const { h, spans } = await openSpanBook();
+  h.engine.state.refuse = "engine refused";
+  await h.tabMenu("Sheet3", "move-left");
+  assert.deepEqual(h.names(), ["Sheet1", "Sheet2", "Sheet3", "Sheet4", "Sheet5", "Sum"]);
+  assert.deepEqual(await spans(), ORIGINAL_SPANS);
+  h.engine.state.refuse = "";
+  await h.tabMenu("Sheet3", "move-left");
+  assert.deepEqual(h.names(), ["Sheet1", "Sheet3", "Sheet2", "Sheet4", "Sheet5", "Sum"]);
 });

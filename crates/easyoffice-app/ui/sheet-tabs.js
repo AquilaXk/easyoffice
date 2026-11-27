@@ -161,6 +161,17 @@
       next.sheetOrder.splice(index < 0 ? next.sheetOrder.length : index, 0, name);
     }
 
+    // Puts the sheets of `next` in `order` (every sheet name, `moved` the ones the step moves). A 3D span whose end sheet
+    // goes past its other end changes its text, so the engine, whose session still holds the order before, rewrites those
+    // formulas first (PD-372). False, with the reason in the status text, when it cannot.
+    async function reorder(next, order, moved) {
+      const result = await rewriteRefs({ op: "move", sheets: moved, order }, next);
+      if (!result.ok) return false;
+      applyRewrites(next, result.answer);
+      next.sheetOrder = order;
+      return true;
+    }
+
     // ---- the engine rewrites the references to a renamed or deleted sheet -------------------------
     function rulesRequest(rulesMap = null) {
       const out = {};
@@ -463,7 +474,7 @@
         order.splice(anchor === null ? order.length : order.indexOf(anchor), 0, ...targets);
         // A move to where the sheets already are makes no step.
         if (order.every((n, i) => n === next.sheetOrder[i])) return false;
-        next.sheetOrder = order;
+        if (!(await reorder(next, order, targets))) return false;
         if (!targetSet.has(next.activeSheetName)) activate(next, targets[0]);
         return "시트 이동: " + targets.map(names.labelOf).join(", ");
       });
@@ -484,14 +495,15 @@
     // `sheet` takes the place of the tab that is now at visible position `target`.
     function moveTo(sheet, target) {
       if (structureBlocked()) return Promise.resolve(false);
-      return change((next) => {
+      return change(async (next) => {
         const shown = shownIn(next);
         const from = shown.indexOf(sheet);
         const dest = shown[target];
         if (from < 0 || dest === undefined || from === target) return false;
         const after = target > from ? 1 : 0;
-        next.sheetOrder = next.sheetOrder.filter((n) => n !== sheet);
-        next.sheetOrder.splice(next.sheetOrder.indexOf(dest) + after, 0, sheet);
+        const order = next.sheetOrder.filter((n) => n !== sheet);
+        order.splice(order.indexOf(dest) + after, 0, sheet);
+        if (!(await reorder(next, order, [sheet]))) return false;
         return "시트 이동: " + names.labelOf(sheet);
       });
     }
@@ -507,7 +519,7 @@
       const shown = shownSheets();
       const canMove = delta < 0 ? shown.indexOf(targets[0]) > 0 : shown.indexOf(targets[targets.length - 1]) < shown.length - 1;
       if (!canMove) return Promise.resolve(false);
-      return change((next) => {
+      return change(async (next) => {
         const curShown = shownIn(next);
         const targetSet = new Set(targets);
         const moved = curShown.slice();
@@ -526,7 +538,8 @@
         }
         if (moved.every((n, i) => n === curShown[i])) return false;
         let idx = 0;
-        next.sheetOrder = next.sheetOrder.map((n) => (hiddenIn(next, n) ? n : moved[idx++]));
+        const order = next.sheetOrder.map((n) => (hiddenIn(next, n) ? n : moved[idx++]));
+        if (!(await reorder(next, order, targets))) return false;
         return "시트 이동: " + targets.map(names.labelOf).join(", ");
       });
     }
