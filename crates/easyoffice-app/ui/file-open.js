@@ -673,6 +673,7 @@
             eoFirstPage: res.firstPageDifferent ? "true" : "",
             eoEvenOdd: res.evenOddDifferent ? "true" : "",
             eoTrackChanges: res.trackChanges === true ? "true" : "",
+            eoDefaults: host.__EASYOFFICE_SAVE_PAYLOAD__.packDocDefaults(res.docDefaults),
             ...host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.layoutFields(host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.fromDecoded(res.pageSetup, mod)),
           },
         };

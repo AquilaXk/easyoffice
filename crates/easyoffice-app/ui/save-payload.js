@@ -767,10 +767,30 @@
 
   const MAX_ANNOTATION_ITEMS = 2048;
 
+  // The document defaults of an opened DOCX, ODT or RTF (PD-363) ride on the editor root as one JSON string (`eoDefaults`)
+  // from open to save. Both ends keep only the known keys: integers, and names of at most 256 characters.
+  const DEFAULT_INTEGERS = ["sizeHalfPoints", "spaceBeforeTwips", "spaceAfterTwips", "line240ths", "tabStopTwips"];
+  function packDocDefaults(raw) {
+    if (!raw || typeof raw !== "object" || !DEFAULT_INTEGERS.every((k) => Number.isSafeInteger(raw[k]))) return "";
+    const out = Object.fromEntries(DEFAULT_INTEGERS.map((k) => [k, raw[k]]));
+    for (const k of ["font", "eastAsianFont", "alignment"]) if (typeof raw[k] === "string" && raw[k].length <= 256) out[k] = raw[k];
+    return JSON.stringify(out);
+  }
+  function unpackDocDefaults(text) {
+    try {
+      const packed = packDocDefaults(JSON.parse(text));
+      return packed ? JSON.parse(packed) : null;
+    } catch {
+      return null;
+    }
+  }
+
   function collectDocAnnotations(root) {
     const out = {};
     if (!root) return out;
     if (root.dataset?.eoTrackChanges === "true") out.trackChanges = true;
+    const defaults = unpackDocDefaults(root.dataset?.eoDefaults);
+    if (defaults) out.docDefaults = defaults;
     const refKeys = new Set();
     const commentIds = new Set();
     const scanBody = (node) => {
@@ -967,6 +987,7 @@
     collectDocBlocks,
     collectPageFrame,
     collectDocAnnotations,
+    packDocDefaults,
     plainParagraphBlocks,
     evaluateDocTableFormulas,
     buildSheetsPayload,

@@ -26,6 +26,8 @@ use easyoffice_formats::{
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
+#[path = "convert_structured_defaults.rs"]
+pub(crate) mod convert_structured_defaults;
 #[path = "convert_structured_notes.rs"]
 pub(crate) mod convert_structured_notes;
 #[path = "convert_structured_table.rs"]
@@ -237,9 +239,9 @@ pub(crate) fn parse_structured_content(
             notes,
             comments,
             track_changes,
-            // The editor payload carries no document defaults yet (PD-363), so a save from it is
-            // written with the new-document defaults.
-            defaults: None,
+            // The defaults of an opened file come back with the save (PD-363); a new document sends
+            // none and is written with the Korean defaults.
+            defaults: convert_structured_defaults::parse_doc_defaults(entries)?,
         };
         check_document_images(&doc)?;
         let content = StructuredContent::Document(doc, parse_pdf_options(entries)?);

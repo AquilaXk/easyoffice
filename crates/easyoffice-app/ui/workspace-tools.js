@@ -131,6 +131,7 @@
         const tempDiv = document.createElement("div");
         restoreDomChildren(tempDiv, saved?.editorNodes || [], document);
         if (ls.eoTrackChanges === "true") tempDiv.dataset.eoTrackChanges = "true";
+        if (ls.eoDefaults) tempDiv.dataset.eoDefaults = ls.eoDefaults;
         const options = {
           baseAlign: ls.textAlign,
           baseLineHeight: ls.lineHeight,
