@@ -177,6 +177,22 @@ test("확인 applies to the range the dialog opened on when the modal collapses 
   assert.deepEqual(withKey(h, "scalePercent"), [150], "the character the dialog opened on is scaled");
 });
 
+test("확인 applies nothing when the range the dialog opened on left the editor (undo or open while it was up)", async () => {
+  const h = await createRunHarness([p("가나다")]);
+  const [a] = h.blocks;
+  await openDialog(h, a);
+  let mutations = 0;
+  h.editor.addEventListener("eo-doc-mutated", () => { mutations += 1; });
+  a.remove();
+  setBox(h, "doc-font-scale", "150");
+  apply(h);
+  assert.equal(byId(h, "doc-font-dialog").open, false);
+  assert.equal(mutations, 0, "the document is not marked changed");
+  assert.equal(a.querySelector(".eo-run"), null, "the detached block is not formatted");
+  assert.match(byId(h, "status-command-feedback").textContent, /먼저 선택/, "the user is told nothing was selected");
+  assert.deepEqual(withKey(h, "scalePercent"), []);
+});
+
 test("a script keeps its own vertical position over a raise or lowering", async () => {
   const h = await createRunHarness([p("가나다")]);
   const [a] = h.blocks;

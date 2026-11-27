@@ -205,7 +205,8 @@
       const none = { mode: "none", changed: false };
       if (!root || !isDocModule()) return none;
       const range = options.range || currentRange();
-      if (!range) {
+      // A given range (the font dialog's) can be stale: an undo or an open while a dialog was up replaced the document.
+      if (!range || !insideEditor(range)) {
         setFeedback("서식을 적용할 글자를 먼저 선택하세요");
         return none;
       }
