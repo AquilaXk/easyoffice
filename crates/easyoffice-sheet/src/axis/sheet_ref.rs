@@ -20,6 +20,9 @@
 //! first sheet of the span is replaced by the next sheet in tab order and the last one by the
 //! previous sheet; only a span with no sheet left becomes `#REF!`. The tab order comes with the
 //! change; without the sheets in it the span cannot be followed and fails closed to `#REF!`.
+//!
+//! A moved end follows the same page's "Move an endpoint" rule (see [`span_after_move`]): the
+//! text stays while the two ends keep their order and changes only when the move reverses them.
 
 use super::formula::scan_refs;
 
@@ -35,12 +38,19 @@ pub enum SheetChange<'a> {
         name: &'a str,
         tab_order: &'a [&'a str],
     },
+    /// `moved` (one sheet, or a group moved together) goes to another place. `tab_order` is every
+    /// sheet name in tab order before the move and `new_order` the same names after it.
+    Move {
+        moved: &'a [String],
+        tab_order: &'a [&'a str],
+        new_order: &'a [String],
+    },
 }
 
-/// A 3D span after one of its sheets was deleted.
-enum SpanAfterDelete {
+/// A 3D span after a change of one of its end sheets.
+enum SpanAfter {
     Unchanged,
-    /// No sheet of the span is left.
+    /// The span cannot be kept: no sheet of it is left, or the tab order is not usable.
     Gone,
     /// The sheets that remain; equal ends are one sheet.
     Span {
@@ -49,19 +59,37 @@ enum SpanAfterDelete {
     },
 }
 
-fn span_after_delete(start: &str, end: &str, gone: &str, tab_order: &[&str]) -> SpanAfterDelete {
+impl SpanAfter {
+    /// The span with the end `heir` in place of the end that `hit_start` names.
+    fn replaced(start: &str, end: &str, hit_start: bool, heir: &str) -> Self {
+        let (start, end) = if hit_start {
+            (heir, end)
+        } else {
+            (start, heir)
+        };
+        Self::Span {
+            start: start.to_string(),
+            end: end.to_string(),
+        }
+    }
+}
+
+fn index_of<S: AsRef<str>>(order: &[S], name: &str) -> Option<usize> {
+    order.iter().position(|t| same_sheet(t.as_ref(), name))
+}
+
+fn span_after_delete(start: &str, end: &str, gone: &str, tab_order: &[&str]) -> SpanAfter {
     let hit_start = same_sheet(start, gone);
     let hit_end = same_sheet(end, gone);
     if !hit_start && !hit_end {
-        return SpanAfterDelete::Unchanged;
+        return SpanAfter::Unchanged;
     }
-    let position = |name: &str| tab_order.iter().position(|t| same_sheet(t, name));
-    let (Some(from), Some(to)) = (position(start), position(end)) else {
-        return SpanAfterDelete::Gone;
+    let (Some(from), Some(to)) = (index_of(tab_order, start), index_of(tab_order, end)) else {
+        return SpanAfter::Gone;
     };
     let (first, last) = (from.min(to), from.max(to));
     if first == last {
-        return SpanAfterDelete::Gone;
+        return SpanAfter::Gone;
     }
     let deleted = if hit_start { from } else { to };
     let heir = if deleted == first {
@@ -69,16 +97,58 @@ fn span_after_delete(start: &str, end: &str, gone: &str, tab_order: &[&str]) -> 
     } else {
         last - 1
     };
-    let heir = tab_order[heir];
-    let (start, end) = if hit_start {
-        (heir, end)
-    } else {
-        (start, heir)
-    };
-    SpanAfterDelete::Span {
-        start: start.to_string(),
-        end: end.to_string(),
+    SpanAfter::replaced(start, end, hit_start, tab_order[heir])
+}
+
+/// A span whose end sheet was moved. The span is the sheets between its ends, so a move that keeps
+/// the order of the two ends needs no new text (the sheets between them are other ones now). A move
+/// that puts the ends in reverse order replaces the moved end by its nearest neighbor, going
+/// toward the other end, that did not move: the sheet the old span still holds next to it (the
+/// reference spreadsheet app's "Move an endpoint": `Sheet2:Sheet6` with Sheet2 after Sheet6 is
+/// `Sheet3:Sheet6`, with Sheet6 before Sheet2 it is `Sheet2:Sheet5`). A group moved together has
+/// at most one end in it, as the group keeps its own order. When the orders do not fit the move
+/// the span fails closed.
+fn span_after_move(
+    start: &str,
+    end: &str,
+    moved: &[String],
+    tab_order: &[&str],
+    new_order: &[String],
+) -> SpanAfter {
+    let is_moved = |name: &str| moved.iter().any(|m| same_sheet(m, name));
+    let hit_start = is_moved(start);
+    if hit_start == is_moved(end) {
+        return SpanAfter::Unchanged;
     }
+    let (moved_end, other_end) = if hit_start {
+        (start, end)
+    } else {
+        (end, start)
+    };
+    let places = (
+        index_of(tab_order, moved_end),
+        index_of(tab_order, other_end),
+        index_of(new_order, moved_end),
+        index_of(new_order, other_end),
+    );
+    let (Some(moved_from), Some(other_from), Some(moved_to), Some(other_to)) = places else {
+        return SpanAfter::Gone;
+    };
+    if tab_order.len() != new_order.len() {
+        return SpanAfter::Gone;
+    }
+    if (moved_from < other_from) == (moved_to < other_to) {
+        return SpanAfter::Unchanged;
+    }
+    let heir = if moved_from < other_from {
+        (moved_from + 1..other_from).find(|&i| !is_moved(tab_order[i]))
+    } else {
+        (other_from + 1..moved_from)
+            .rev()
+            .find(|&i| !is_moved(tab_order[i]))
+    }
+    .map_or(other_end, |i| tab_order[i]);
+    SpanAfter::replaced(start, end, hit_start, heir)
 }
 
 /// Sheet names compare without case (ASCII and the common Unicode folds), as in every file format.
@@ -148,15 +218,26 @@ pub fn rewrite_sheet_names(text: &str, change: SheetChange<'_>) -> Option<String
                     }
                     Some(out)
                 }
-                SheetChange::Delete { name, tab_order } => {
+                SheetChange::Delete { .. } | SheetChange::Move { .. } => {
                     let unit = site.unit.as_ref()?;
-                    let mut out = match span_after_delete(start, end, name, tab_order) {
-                        SpanAfterDelete::Unchanged => return None,
-                        SpanAfterDelete::Gone => return Some("#REF!".to_string()),
-                        SpanAfterDelete::Span { start, end } if same_sheet(&start, &end) => {
+                    let after = match change {
+                        SheetChange::Delete { name, tab_order } => {
+                            span_after_delete(start, end, name, tab_order)
+                        }
+                        SheetChange::Move {
+                            moved,
+                            tab_order,
+                            new_order,
+                        } => span_after_move(start, end, moved, tab_order, new_order),
+                        SheetChange::Rename { .. } => return None,
+                    };
+                    let mut out = match after {
+                        SpanAfter::Unchanged => return None,
+                        SpanAfter::Gone => return Some("#REF!".to_string()),
+                        SpanAfter::Span { start, end } if same_sheet(&start, &end) => {
                             quote_sheet_name(&start)
                         }
-                        SpanAfterDelete::Span { start, end } => quote_sheet_span(&start, &end),
+                        SpanAfter::Span { start, end } => quote_sheet_span(&start, &end),
                     };
                     out.push('!');
                     out.push_str(&text[site.unit_start()..unit.end()]);

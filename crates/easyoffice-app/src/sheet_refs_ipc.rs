@@ -1,8 +1,9 @@
-//! `evaluate_sheet` with `sessionAction` `sheetRefs`: the formulas a sheet rename or deletion
-//! rewrites (PD-209).
+//! `evaluate_sheet` with `sessionAction` `sheetRefs`: the formulas a sheet rename, deletion or move
+//! rewrites (PD-209, PD-372).
 //!
-//! Request: `{session, op: "rename"|"delete", sheet, newName, rules}` (`newName` for a rename) and
-//! the rules `{sheet: {cf, dv}}` of every sheet, whose operand formulas may name the sheet too, and
+//! Request: `{session, op: "rename"|"delete", sheet, newName, rules}` (`newName` for a rename) or
+//! `{session, op: "move", sheets, order, rules}` (`sheets` the moved sheets, `order` every sheet
+//! name in tab order after the move; the session holds the order before it) and the rules `{sheet: {cf, dv}}` of every sheet, whose operand formulas may name the sheet too, and
 //! `linkTargets` `{sheet: ["#Old!B5", ...]}`, the in-workbook targets of the cell links (`sheet_links_json`).
 //! The engine checks the name (`sheet_name_problem`, no other sheet has it) and that a deletion
 //! leaves a sheet. It does not change the session: the page applies the answer and its sheet set
@@ -26,24 +27,40 @@ type Entries = [(String, StrictJsonValue)];
 
 /// What the request asks for, with the names owned by the parsed request.
 pub(crate) enum SheetOp {
-    Rename { from: String, to: String },
-    Delete { name: String },
+    Rename {
+        from: String,
+        to: String,
+    },
+    Delete {
+        name: String,
+    },
+    /// `moved` go to where `order` (every name after the move) puts them.
+    Move {
+        moved: Vec<String>,
+        order: Vec<String>,
+    },
 }
 
 impl SheetOp {
-    /// The change with the session's sheets in tab order (a deleted end of a 3D span moves to
-    /// its neighbor in that order).
+    /// The change with the session's sheets in tab order (a deleted or moved end of a 3D span
+    /// is followed in that order).
     pub(crate) fn change<'a>(&'a self, tab_order: &'a [&'a str]) -> SheetChange<'a> {
         match self {
             Self::Rename { from, to } => SheetChange::Rename { from, to },
             Self::Delete { name } => SheetChange::Delete { name, tab_order },
+            Self::Move { moved, order } => SheetChange::Move {
+                moved,
+                tab_order,
+                new_order: order,
+            },
         }
     }
 
-    pub(crate) fn sheet(&self) -> &str {
+    /// The sheets the request names, which must be in the session.
+    pub(crate) fn sheets(&self) -> &[String] {
         match self {
-            Self::Rename { from, .. } => from,
-            Self::Delete { name } => name,
+            Self::Rename { from: name, .. } | Self::Delete { name } => std::slice::from_ref(name),
+            Self::Move { moved, .. } => moved,
         }
     }
 }
@@ -52,7 +69,26 @@ fn invalid(what: &str) -> EasyOfficeError {
     EasyOfficeError::InvalidArgument(format!("시트 요청이 올바르지 않습니다: {what}"))
 }
 
+fn string_list(entries: &Entries, key: &str) -> Result<Vec<String>, EasyOfficeError> {
+    StrictJsonValue::get_field(entries, key)
+        .and_then(StrictJsonValue::as_array)
+        .ok_or_else(|| invalid(key))?
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .map(str::to_string)
+                .ok_or_else(|| invalid(key))
+        })
+        .collect()
+}
+
 fn parse_op(entries: &Entries) -> Result<SheetOp, EasyOfficeError> {
+    if EasyOfficeIpcRouter::optional_json_str(entries, "op")? == Some("move") {
+        return Ok(SheetOp::Move {
+            moved: string_list(entries, "sheets")?,
+            order: string_list(entries, "order")?,
+        });
+    }
     let sheet = EasyOfficeIpcRouter::optional_json_str(entries, "sheet")?
         .filter(|s| !s.is_empty())
         .ok_or_else(|| invalid("sheet"))?

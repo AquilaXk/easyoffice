@@ -210,8 +210,8 @@ impl WorkbookEngine {
 impl WorkbookEngine {
     /// The new text of every formula that names the sheet `change` renames or deletes, as sheet
     /// index, cell and text. The workbook itself does not change (the caller renames or removes
-    /// the sheet). The formulas of a deleted sheet go with it and are left out. A deletion follows
-    /// the workbook's own tab order, whatever `tab_order` the change carries. Fails when the
+    /// the sheet). The formulas of a deleted sheet go with it and are left out. A deletion or move
+    /// follows the workbook's own tab order, whatever `tab_order` the change carries. Fails when the
     /// scan outruns `budget` (time or the number of formulas it changes).
     pub fn plan_sheet_rewrites(
         &self,
@@ -226,6 +226,13 @@ impl WorkbookEngine {
             SheetChange::Delete { name, .. } => SheetChange::Delete {
                 name,
                 tab_order: &tab_order,
+            },
+            SheetChange::Move {
+                moved, new_order, ..
+            } => SheetChange::Move {
+                moved,
+                tab_order: &tab_order,
+                new_order,
             },
             rename => rename,
         };

@@ -252,3 +252,120 @@ fn a_rename_and_a_deletion_answer_the_link_targets_that_name_the_sheet() {
         r###"{"T":[["#S!B5","##REF!"],["#'S'!A1:A3","##REF!"]]}"###
     );
 }
+
+fn moved(id: &str, sheets: &str, order: &str) -> String {
+    refs(
+        id,
+        &format!("\"op\":\"move\",\"sheets\":[{sheets}],\"order\":[{order}]"),
+    )
+}
+
+#[test]
+fn moving_an_end_of_a_3d_span_past_the_other_end_takes_the_neighbor_in_tab_order() {
+    // The session holds the sheets in tab order: Jan Feb Mar Apr Sum.
+    let id = open_with(
+        &["Jan", "Feb", "Mar", "Apr", "Sum"],
+        &[
+            ("Sum!A1", "=SUM(Jan:Apr!A1)"),
+            ("Sum!A2", "=SUM(Feb:Mar!A1)"),
+            ("Sum!A3", "=SUM(Jan:Feb!A1)"),
+        ],
+    );
+    // Jan goes after Apr.
+    let first = texts(&call(&moved(
+        &id,
+        r#""Jan""#,
+        r#""Feb","Mar","Apr","Jan","Sum""#,
+    )));
+    assert_eq!(
+        first
+            .iter()
+            .filter(|(c, _)| c == "Sum!A1")
+            .collect::<Vec<_>>(),
+        vec![&("Sum!A1".to_string(), "=SUM(Feb:Apr!A1)".to_string())]
+    );
+    // Jan:Feb with Jan after Feb is the one sheet that stays; Feb:Mar is untouched.
+    assert!(first.contains(&("Sum!A3".to_string(), "=SUM(Feb!A1)".to_string())));
+    assert_eq!(first.len(), 2);
+    // Apr goes before Jan (the session did not change, so the same sheets answer).
+    let second = texts(&call(&moved(
+        &id,
+        r#""Apr""#,
+        r#""Apr","Jan","Feb","Mar","Sum""#,
+    )));
+    assert_eq!(
+        second,
+        vec![("Sum!A1".to_string(), "=SUM(Jan:Mar!A1)".to_string())]
+    );
+    // A move that keeps the ends in order rewrites nothing, whatever it passes over.
+    let inside = texts(&call(&moved(
+        &id,
+        r#""Mar""#,
+        r#""Jan","Feb","Apr","Mar","Sum""#,
+    )));
+    assert!(inside.is_empty(), "{inside:?}");
+}
+
+#[test]
+fn a_move_answers_the_rules_that_name_a_span_end() {
+    let id = open_with(&["Jan", "Feb", "Mar", "T"], &[]);
+    let res = call(&refs(
+        &id,
+        concat!(
+            "\"op\":\"move\",\"sheets\":[\"Jan\"],\"order\":[\"Feb\",\"Mar\",\"Jan\",\"T\"],",
+            "\"rules\":{\"T\":{\"cf\":[{\"r\":\"A1:A9\",\"p\":1,\"t\":\"cellIs\",\"op\":\"greaterThan\",\"a\":\"=SUM(Jan:Mar!$B$1)\"}],\"dv\":[]}}"
+        ),
+    ));
+    let rules = field(&res, "rules").to_json_string();
+    assert!(rules.contains("=SUM(Feb:Mar!$B$1)"), "{rules}");
+}
+
+#[test]
+fn a_move_with_a_wrong_new_order_closes_only_the_span_of_the_moved_end() {
+    let id = open_with(
+        &["Jan", "Feb", "Mar", "Sum"],
+        &[
+            ("Sum!A1", "=SUM(Jan:Mar!A1)"),
+            ("Sum!A2", "=SUM(Feb:Mar!A1)"),
+        ],
+    );
+    // The order lacks Mar, which is the other end of the span.
+    let got = texts(&call(&moved(&id, r#""Jan""#, r#""Feb","Jan","Sum""#)));
+    assert_eq!(got, vec![("Sum!A1".to_string(), "=SUM(#REF!)".to_string())]);
+}
+
+#[test]
+fn hostile_move_requests_change_nothing() {
+    let id = open_with(&["S", "T"], &[("T!A1", "=SUM(S:T!A1)")]);
+    let long: Vec<String> = (0..64).map(|i| format!("\"S{i}\"")).collect();
+    let long = long.join(",");
+    for body in [
+        moved(&id, r#""Nope""#, r#""T","S""#),
+        moved(&id, "", r#""T","S""#),
+        moved(&id, r#""S","T","S""#, r#""T","S""#),
+        moved(&id, r#""S""#, &long),
+        moved(&id, "1", r#""T","S""#),
+        moved(&id, r#""S""#, "2"),
+        refs(&id, "\"op\":\"move\",\"order\":[\"T\",\"S\"]"),
+        refs(&id, "\"op\":\"move\",\"sheets\":[\"S\"]"),
+        refs(
+            &id,
+            "\"op\":\"move\",\"sheets\":\"S\",\"order\":[\"T\",\"S\"]",
+        ),
+        refs(
+            &id,
+            "\"op\":\"move\",\"sheet\":\"S\",\"order\":[\"T\",\"S\"]",
+        ),
+    ] {
+        assert!(
+            EasyOfficeIpcRouter::dispatch("evaluate_sheet", &body).is_err(),
+            "{body}"
+        );
+    }
+    assert_eq!(
+        texts(&call(&moved(&id, r#""S""#, r#""T","S""#))),
+        vec![("T!A1".to_string(), "=SUM(T!A1)".to_string())]
+    );
+    let res = call(&moved("ssnone", r#""S""#, r#""T","S""#));
+    assert_eq!(res.to_json_string(), "{\"expired\":true}");
+}
