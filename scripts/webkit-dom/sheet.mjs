@@ -365,6 +365,68 @@ export const sheetSteps = [
     else assert.equal(await tab(), "Sheet2", "Alt+Left is not a sheet key outside a Mac");
   }],
 
+  ["moving the end sheet of a 3D span past its other end through the tab menu rewrites the span with the real engine (PD-372)", async (page) => {
+    const tabSel = (name) => `#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="${name}"]`;
+    const order = () => page.$$eval("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]", (tabs) => tabs.map((t) => t.dataset.sheetTab));
+    const show = async (name) => {
+      await page.click(tabSel(name));
+      await page.waitForFunction((n) => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === n, name);
+    };
+    for (const n of [2, 3, 4]) {
+      await page.click("#btn-add-sheet-tab");
+      await page.waitForFunction((name) => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === name, `Sheet${n}`);
+      await page.click(td("A1"));
+      await page.keyboard.type(String(n));
+      await page.keyboard.press("Enter");
+    }
+    await show("Sheet1");
+    await page.click(td("A1"));
+    await page.keyboard.type("=SUM(Sheet2:Sheet4!A1)");
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A1"]')?.textContent === "9");
+    const formula = () => page.$eval(td("A1"), (el) => el.dataset.formula);
+    const tabMenu = async (name, act) => {
+      await page.click(tabSel(name), { button: "right" });
+      await page.click(`#sheet-tab-menu [data-tab-act="${act}"]`);
+    };
+    const undo = async () => {
+      await page.click(td("A2"));
+      await page.keyboard.press("Control+z");
+    };
+    // Sheet2 after Sheet3 keeps the ends in order: the text stays and the span holds Sheet2 and Sheet4 (2 + 4).
+    await tabMenu("Sheet2", "move-right");
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A1"]')?.textContent === "6");
+    assert.deepEqual(await order(), ["Sheet1", "Sheet3", "Sheet2", "Sheet4"]);
+    assert.equal(await formula(), "=SUM(Sheet2:Sheet4!A1)");
+    // Sheet2 after Sheet4 reverses the ends of a span that held nothing between them: Sheet4 alone.
+    await tabMenu("Sheet2", "move-right");
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A1"]')?.dataset.formula === "=SUM(Sheet4!A1)");
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A1"]')?.textContent === "4");
+    // One undo per move gives the order and the text of the span back (the shown sum waits for a recalculation: `TODO.md`).
+    await undo();
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A1"]')?.dataset.formula === "=SUM(Sheet2:Sheet4!A1)");
+    assert.deepEqual(await order(), ["Sheet1", "Sheet3", "Sheet2", "Sheet4"]);
+    await undo();
+    await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]:nth-child(2)")?.dataset.sheetTab === "Sheet2");
+    assert.deepEqual(await order(), ["Sheet1", "Sheet2", "Sheet3", "Sheet4"]);
+    assert.equal(await formula(), "=SUM(Sheet2:Sheet4!A1)");
+    // 이동/복사 puts Sheet2 after Sheet4: the span is Sheet3:Sheet4 (the help page's "Sheet2:Sheet6" example).
+    await tabMenu("Sheet2", "move-copy");
+    await page.click("#sheet-tab-move-list li:last-child");
+    await page.click("#btn-sheet-tab-move-ok");
+    // The moved sheet is the active one; the span is on Sheet1.
+    await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === "Sheet2");
+    assert.deepEqual(await order(), ["Sheet1", "Sheet3", "Sheet4", "Sheet2"]);
+    await show("Sheet1");
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A1"]')?.dataset.formula === "=SUM(Sheet3:Sheet4!A1)");
+    await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A1"]')?.textContent === "7");
+    await undo();
+    await page.waitForFunction(() => document.querySelector("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]:nth-child(2)")?.dataset.sheetTab === "Sheet2");
+    assert.deepEqual(await order(), ["Sheet1", "Sheet2", "Sheet3", "Sheet4"]);
+    await show("Sheet1");
+    assert.equal(await formula(), "=SUM(Sheet2:Sheet4!A1)");
+  }],
+
   ["a picture sits on the cell it was put on and follows it when the rows above get taller or the default row height changes (PD-299)", async (page) => {
     await page.click(td("C4"));
     const inserted = await page.evaluate(async (base64) => {
