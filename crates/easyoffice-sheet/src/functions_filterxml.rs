@@ -749,11 +749,32 @@ fn found_value(text: String) -> Result<V, FormulaError> {
     })
 }
 
+/// Most namespace declarations (`xmlns`) one document may hold. The parser gives each element the
+/// declarations in scope, so declarations times elements grows with the square of the text; real
+/// documents declare a handful.
+const MAX_XML_NAMESPACE_DECLS: usize = 256;
+/// Bytes of XML text one evaluation step stands for.
+const XML_BYTES_PER_STEP: usize = 16;
+
+/// Refuses a document that is too large or declares too many namespaces, and charges the cell for
+/// reading it: its length, and declarations times elements. Runs before the parser and before the
+/// result cache, so a hit costs the same as a miss.
+fn charge_xml_cost(xml: &str, ctx: &mut EvalContext<'_>) -> Result<(), FormulaError> {
+    if xml.len() > MAX_XML_BYTES || xml.trim().is_empty() {
+        return Err(FormulaError::Value);
+    }
+    let decls = xml.matches("xmlns").count();
+    if decls > MAX_XML_NAMESPACE_DECLS {
+        return Err(FormulaError::Value);
+    }
+    let elements = xml.bytes().filter(|&b| b == b'<').count();
+    ctx.charge_steps(
+        (xml.len() / XML_BYTES_PER_STEP).saturating_add(decls.saturating_mul(elements)),
+    )
+}
+
 fn filter_xml(xml: &str, xpath: &str, ctx: &mut EvalContext<'_>) -> Result<Vec<V>, FormulaError> {
-    if xml.len() > MAX_XML_BYTES
-        || xml.trim().is_empty()
-        || XmlSanitizer::validate_safe_xml(xml).is_err()
-    {
+    if XmlSanitizer::validate_safe_xml(xml).is_err() {
         return Err(FormulaError::Value);
     }
     let ast = parse_xpath(xpath)?;
@@ -811,7 +832,15 @@ impl SheetEngine {
             V::Error(e) => return Err(e),
             v => v.to_display_string(),
         };
-        let found = filter_xml(&xml, &xpath, ctx)?;
+        charge_xml_cost(&xml, ctx)?;
+        let found = match ctx.filterxml_cache.get(&xml, &xpath) {
+            Some(found) => found,
+            None => {
+                let found = filter_xml(&xml, &xpath, ctx)?;
+                ctx.filterxml_cache.insert(&xml, &xpath, &found);
+                found
+            }
+        };
         if found.is_empty() {
             return Err(FormulaError::Value);
         }

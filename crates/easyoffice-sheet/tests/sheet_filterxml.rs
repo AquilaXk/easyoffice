@@ -296,6 +296,87 @@ fn filterxml_refuses_declarations_and_honors_cdata_and_comments() {
     assert_eq!(eval(&format!("=FILTERXML({comment},\"/a\")")), "<!ENTITYok");
 }
 
+/// `<r xmlns:a0=".." ...>` with `root` declarations and `children` elements that declare one each.
+fn namespace_heavy_xml(root: usize, children: usize) -> String {
+    let mut xml = String::from("<r");
+    for i in 0..root {
+        xml.push_str(&format!(" xmlns:a{i}=\"u{i}\""));
+    }
+    xml.push('>');
+    for i in 0..children {
+        xml.push_str(&format!("<c xmlns:b{i}=\"v{i}\">x</c>"));
+    }
+    xml.push_str("</r>");
+    xml
+}
+
+#[test]
+fn filterxml_rejects_namespace_declaration_bombs_fast() {
+    // Every child sees the root's declarations again: declarations times elements is quadratic in
+    // the size of the file, so the declaration count is capped before the parser runs (PD-361).
+    let started = Instant::now();
+    let mut model = new_empty_model();
+    // 20 cells of the worst 32 KB shape, then two more ways over the cap
+    let mut shapes = vec![(900, 500); 20];
+    shapes.extend([(300, 20), (20, 800)]);
+    for (row, (root, children)) in shapes.iter().enumerate() {
+        // the text sits in a cell, as a file loads it
+        let xml = namespace_heavy_xml(*root, *children);
+        assert!(xml.len() <= 32_767, "{}", xml.len());
+        model._set(&format!("B{}", row + 1), &xml);
+        model._set(
+            &format!("A{}", row + 1),
+            &format!("=FILTERXML(B{},\"/r/c[1]\")", row + 1),
+        );
+    }
+    model.evaluate();
+    for (row, (root, children)) in shapes.iter().enumerate() {
+        assert_eq!(
+            model._get_text(&format!("A{}", row + 1)),
+            "#VALUE!",
+            "{root} root and {children} child declarations"
+        );
+    }
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn filterxml_keeps_documents_with_ordinary_namespace_use() {
+    // 256 declarations in all is the cap; 257 is over it.
+    let at_cap = namespace_heavy_xml(200, 56);
+    assert_eq!(eval(&format!("=FILTERXML({},\"//c\")", lit(&at_cap))), "x");
+    let over = namespace_heavy_xml(200, 57);
+    assert_eq!(
+        eval(&format!("=FILTERXML({},\"//c\")", lit(&over))),
+        "#VALUE!"
+    );
+    let soap = "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" \
+                xmlns:t=\"urn:t\"><s:Body><t:Price>12.5</t:Price></s:Body></s:Envelope>";
+    assert_eq!(
+        eval(&format!("=FILTERXML({},\"//t:Price\")", lit(soap))),
+        "12.5"
+    );
+}
+
+#[test]
+fn filterxml_gives_the_same_answer_for_the_same_pair_in_many_cells() {
+    let xml = lit("<r><i>1</i><i>2</i><i>4</i></r>");
+    let mut model = new_empty_model();
+    for row in 1..=200 {
+        model._set(
+            &format!("A{row}"),
+            &format!("=SUM(FILTERXML({xml},\"//i\"))"),
+        );
+    }
+    model.evaluate();
+    assert_eq!(model._get_text("A1"), "7");
+    assert_eq!(model._get_text("A200"), "7");
+}
+
 #[test]
 fn filterxml_fails_closed_on_deep_wide_and_hostile_queries() {
     let deep = format!("{}x{}", "<a>".repeat(129), "</a>".repeat(129));

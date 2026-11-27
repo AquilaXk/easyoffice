@@ -23,6 +23,7 @@ mod dyn_reads;
 mod eval_context;
 pub mod expr;
 pub mod filter;
+mod filterxml_cache;
 #[cfg(test)]
 mod function_coverage_tests;
 pub mod functions;

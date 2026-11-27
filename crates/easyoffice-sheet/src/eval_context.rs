@@ -3,6 +3,7 @@
 use crate::array::Grid;
 use crate::deadline::Clock;
 use crate::dyn_reads::DynReads;
+use crate::filterxml_cache::FilterXmlCache;
 use crate::lookup_index::LookupCache;
 use crate::memo::MemoTable;
 use crate::spill::Pending;
@@ -158,6 +159,8 @@ pub(crate) struct EvalContext<'a> {
     /// What the formulas of this pass read through `OFFSET` and `INDIRECT`; `None` when nobody collects it.
     pub(crate) dyn_reads: Option<DynReads>,
     pub(crate) lookup_cache: LookupCache,
+    /// `FILTERXML` results of this pass, by document and query (PD-361).
+    pub(crate) filterxml_cache: FilterXmlCache,
     /// Virtual single-cell override for zero-mutation evaluations.
     pub(crate) cell_overlay: Option<(u16, PackedCellCoordinate, EvaluatedCellValue)>,
     /// Link handle produced by the most recent scalar `HYPERLINK` / `INDEX` call (`0` = none).
@@ -192,6 +195,7 @@ impl<'a> EvalContext<'a> {
             fresh: FastMap::default(),
             dyn_reads: None,
             lookup_cache: LookupCache::default(),
+            filterxml_cache: FilterXmlCache::default(),
             cell_overlay: None,
             last_hyperlink_id: 0,
             link_targets: None,
@@ -221,6 +225,7 @@ impl<'a> EvalContext<'a> {
             fresh: FastMap::default(),
             dyn_reads: None,
             lookup_cache: LookupCache::default(),
+            filterxml_cache: FilterXmlCache::default(),
             cell_overlay: None,
             last_hyperlink_id: 0,
             link_targets: None,
