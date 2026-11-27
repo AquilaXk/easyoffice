@@ -208,7 +208,7 @@ export const docSteps = [
       for (const box of boxes) assert.deepEqual([box.height, box.font], [22, "11px"], `${tab}: ${box.id}`);
     }
     await page.click("#doc-font-tab-font");
-    const tops = await page.$$eval('.custom-select[data-select-id="doc-font-family"], .custom-select[data-select-id="doc-font-style"], #doc-font-size', (els) => els.map((el) => el.getBoundingClientRect().top));
+    const tops = await page.$$eval('.custom-select[data-select-id="doc-font-family"], .custom-select[data-select-id="doc-font-style"], .eo-stepper:has(#doc-font-size)', (els) => els.map((el) => el.getBoundingClientRect().top));
     assert.equal(new Set(tops).size, 1, `한글 글꼴, 글꼴 스타일 and 크기 start on one line: ${tops}`);
     // 크기 is the reference's 기준 크기 field (60px) and its spin buttons sit inside it: nothing is cut. The block holds no empty rows: it ends where 영어 글꼴 ends.
     const size = await page.$eval("#doc-font-size", (el) => ({ width: el.parentNode.getBoundingClientRect().width, clipped: el.scrollWidth > el.clientWidth }));

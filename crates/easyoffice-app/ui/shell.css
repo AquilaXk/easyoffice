@@ -874,6 +874,8 @@
 .eo-stepper.disabled { background: var(--ui-surface-muted); border-color: var(--color-border-lighter); color: var(--color-text-disabled); }
 .eo-stepper-buttons { display: flex; flex: none; flex-direction: column; width: var(--stepper-width); }
 .eo-stepper-button { display: inline-flex; flex: 1 1 0; align-items: center; justify-content: center; width: 100%; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--color-text-muted); cursor: default; overflow: visible; }
+/* The chevron is as high as its half button, and its drawing (the full 14px square, its line in the middle) is centered in it, so the button holds exactly what it shows. */
+.eo-stepper-button .eo-chevron { height: 100%; -webkit-mask-size: var(--chevron-size) var(--chevron-size); mask-size: var(--chevron-size) var(--chevron-size); }
 .eo-stepper-button + .eo-stepper-button { border-top: 1px solid var(--color-border-light); }
 .eo-stepper-button:hover:not(:disabled) { background: var(--ui-hover); color: var(--color-text); }
 .eo-stepper-button:active:not(:disabled) { background: var(--ui-active); }

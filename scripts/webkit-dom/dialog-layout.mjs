@@ -16,10 +16,10 @@ import { KNOWN_WIDGET_CLASSES } from "../design-guard-known.mjs";
 
 /** Row containers whose controls must line up. */
 export const ROW_SELECTOR = ".dialog-row, .dialog-footer, .dialog-btn-group, .find-buttons";
-/** What counts as a control: the kit's fields and buttons. Parts inside another control (a combo's trigger, a swatch's chip) are not measured on their own; cells of a gallery (`.sheet-line-item`, `.symbol-cell`) are widgets of their own. */
+/** What counts as a control: the kit's fields and buttons (a number field is its stepper box, `.eo-stepper`, PD-377). Parts inside another control (a combo's trigger, a swatch's chip, the field and the buttons inside a stepper box) are not measured on their own; cells of a gallery (`.sheet-line-item`, `.symbol-cell`) are widgets of their own. */
 export const CONTROL_SELECTOR = [
   "input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=color]):not([type=range]):not([type=file])",
-  "select", ".custom-select", ".sb-color-host", ".dialog-swatch",
+  "select", ".custom-select", ".eo-stepper", ".sb-color-host", ".dialog-swatch",
   "button.dialog-btn", ".dialog-btn-group button",
 ].join(", ");
 const TOLERANCE_PX = 0.5;
