@@ -310,8 +310,8 @@
 :root[data-toolbar-labels="hidden"] #pdf-toolbar .tb-btn,
 :root[data-toolbar-labels="hidden"] #base-toolbar .tb-btn,
 :root[data-toolbar-labels="hidden"] #board-toolbar .tb-btn {
-  min-width: 28px;
-  min-height: 28px;
+  min-width: var(--control-height-sm);
+  min-height: var(--control-height-sm);
   padding: 2px 5px;
 }
 
@@ -401,12 +401,13 @@
 }
 
 .sb-select {
-  border-radius: var(--radius-sm);
+  border-radius: var(--control-radius);
 }
 
 .sb-size-group {
-  border: 1px solid var(--color-border-input);
-  border-radius: var(--radius-sm);
+  box-sizing: border-box;
+  border: var(--control-border-width) solid var(--color-border-input);
+  border-radius: var(--control-radius);
   background: var(--color-surface);
   overflow: hidden;
 }
@@ -428,10 +429,11 @@
 }
 
 .sb-ls-group .sb-stepper-col {
-  height: 22px;
-  border: 1px solid var(--color-border-input);
+  box-sizing: border-box;
+  height: var(--control-height-sm);
+  border: var(--control-border-width) solid var(--color-border-input);
   border-left: 0;
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  border-radius: 0 var(--control-radius) var(--control-radius) 0;
   overflow: hidden;
 }
 
@@ -496,9 +498,9 @@
   display: inline-flex;
   align-items: stretch;
   min-width: 0;
-  height: 22px;
+  height: var(--control-height-sm);
   vertical-align: middle;
-  font-size: var(--font-size-base);
+  font-size: var(--control-font-size);
   color: var(--color-text);
 }
 
@@ -513,13 +515,15 @@
   appearance: none;
   -webkit-appearance: none;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 15px;
+  grid-template-columns: minmax(0, 1fr) var(--chevron-size);
+  column-gap: var(--picker-text-gap);
   align-items: center;
+  box-sizing: border-box;
   width: 100%;
   height: 100%;
-  padding: 0 0 0 6px;
-  border: 1px solid var(--color-border-input);
-  border-radius: var(--radius-sm);
+  padding: 0 var(--picker-padding-end) 0 var(--control-padding-x);
+  border: var(--control-border-width) solid var(--color-border-input);
+  border-radius: var(--control-radius);
   background: var(--color-surface);
   color: inherit;
   font: inherit;
@@ -556,10 +560,10 @@
 }
 
 input.sb-ls-select {
-  height: 22px;
-  padding: 0 4px;
-  border: 1px solid var(--color-border-input);
-  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  height: var(--control-height-sm);
+  padding: 0 var(--control-padding-x);
+  border: var(--control-border-width) solid var(--color-border-input);
+  border-radius: var(--control-radius) 0 0 var(--control-radius);
   background: var(--color-surface);
   color: var(--color-text);
   font: inherit;
@@ -568,7 +572,6 @@ input.sb-ls-select {
 
 .custom-select-value {
   min-width: 0;
-  padding-right: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -582,10 +585,12 @@ input.sb-ls-select {
 /* The chevron of a drop-down (PD-377): Lucide `chevron-down` / `chevron-up`, drawn as a mask in the text color so it follows both themes.
    Reference implementation (ported): Lucide, https://github.com/lucide-icons/lucide, `icons/chevron-down.svg` and `icons/chevron-up.svg`
    (24x24, stroke 2, round caps and joins; ISC, Copyright (c) 2026 Lucide Icons and Contributors; these two icons are Feather's,
-   MIT, Copyright (c) 2013-present Cole Bemis; see THIRD_PARTY_NOTICES.md). No divider in front of it: only the chevron, centered in its cell. */
+   MIT, Copyright (c) 2013-present Cole Bemis; see THIRD_PARTY_NOTICES.md). No divider in front of it: only the chevron, centered in its cell.
+   The mask's view box is cropped to the stroke's extent (5 8 14 8 of the 24 grid), so the icon box `--chevron-size` (the Spectrum S chevron icon size,
+   10px) is as wide as the glyph; the full 24 grid would draw a 5px glyph in it. */
 :root {
-  --chevron-down-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-  --chevron-up-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 15-6-6-6 6'/%3E%3C/svg%3E");
+  --chevron-down-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='5 8 14 8' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --chevron-up-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='5 8 14 8' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 15-6-6-6 6'/%3E%3C/svg%3E");
 }
 
 .eo-chevron,
@@ -804,11 +809,12 @@ input.sb-ls-select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 12px;
-  height: 25px;
+  box-sizing: border-box;
+  width: calc(var(--chevron-size) + 2 * var(--control-border-width));
+  height: var(--control-height-sm);
   padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border: var(--control-border-width) solid transparent;
+  border-radius: var(--control-radius);
   background: transparent;
   color: var(--color-text-muted);
   line-height: 1;
@@ -1004,7 +1010,7 @@ input.sb-ls-select {
 .doc-image-handle[data-resize-dir="s"] { left: calc(50% - 4px); bottom: -5px; cursor: ns-resize; }
 .sb-spacing-group { display: inline-flex; align-items: center; gap: 4px; }
 .sb-spacing-label { font-size: var(--font-size-xs); color: var(--ui-text-secondary); white-space: nowrap; }
-.sb-spacing-input { width: 52px; height: 22px; padding: 0 4px 0 6px; border: 1px solid var(--ui-border-light); border-radius: var(--radius-sm); background: var(--ui-surface); color: var(--ui-text); font-size: var(--font-size-xs); text-align: right; }
+.sb-spacing-input { box-sizing: border-box; width: 52px; height: var(--control-height-sm); padding: 0 var(--control-padding-x); border: var(--control-border-width) solid var(--ui-border-light); border-radius: var(--control-radius); background: var(--ui-surface); color: var(--ui-text); font-size: var(--control-font-size); text-align: right; }
 .sb-spacing-input:focus { outline: none; border-color: var(--focus-ring); }
 .slide-presenter-notes-input { width: 100%; min-height: 58px; resize: vertical; font: inherit; line-height: 1.45; }
 .slide-context-menu.context-menu[data-mode="canvas"] { min-width: 200px; display: block; padding: 4px 0; background: var(--color-surface); border: 1px solid var(--ui-border); box-shadow: var(--shadow-dropdown); }

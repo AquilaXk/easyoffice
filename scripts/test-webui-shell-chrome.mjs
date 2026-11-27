@@ -143,7 +143,7 @@ test("theme toggle keeps an accessible name and announces its state", async () =
 test("reference values: 28px menu bar with the light border, bottom-left update card with the dialog shadow, 14px preview margin, product information in the dialog frame", () => {
   const bar = cssRule(".topbar", SHELL_CSS);
   assert.ok(hasDecl(bar, "height", "28px") && hasDecl(bar, "border-bottom", "1px solid var(--ui-border-light)"));
-  assert.ok(hasDecl(cssRule(".icon-btn", SHELL_CSS), "height", "24px") && hasDecl(cssRule(".palette-btn", SHELL_CSS), "height", "22px"), "the search and theme controls fit 28px");
+  assert.ok(hasDecl(cssRule(".icon-btn", SHELL_CSS), "height", "24px") && hasDecl(cssRule(".palette-btn", SHELL_CSS), "height", "var(--control-height-sm)"), "the search and theme controls (24px, PD-378) fit 28px");
   const home = readText(fileURLToPath(new URL("home.css", UI_DIR)));
   const card = cssRule(".update-notice", home);
   assert.ok(hasDecl(card, "left", "16px") && hasDecl(card, "bottom", "48px") && hasDecl(card, "box-shadow", "var(--shadow-dialog)"));
@@ -275,7 +275,7 @@ test("dialog primary button in home.css uses --accent-strong and dark --ui-bg te
   assert.ok(hasDecl(darkPrimary, "color", "var(--ui-bg)"), ".dialog-btn-primary dark text is var(--ui-bg)");
 
   const closeRule = cssRule(".dialog-close", HOME_CSS);
-  assert.ok(hasDecl(closeRule, "min-width", "22px") && hasDecl(closeRule, "min-height", "22px"), ".dialog-close meets >= 20px target size");
+  assert.ok(hasDecl(closeRule, "min-width", "var(--control-height-sm)") && hasDecl(closeRule, "min-height", "var(--control-height-sm)"), ".dialog-close is the control height (24px, PD-378), above the 20px target size");
 
   const aboutLast = cssRule(".about-license-table td:last-child", SHELL_CSS);
   assert.ok(hasDecl(aboutLast, "color", "var(--ui-text-muted)"), "#about-dialog license table last column uses --ui-text-muted");

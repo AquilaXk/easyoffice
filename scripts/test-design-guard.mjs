@@ -22,7 +22,7 @@ const DESIGN_SYSTEM = readText(fileURLToPath(new URL("../docs/design-system.md",
 const TOKENS = ui("tokens.css");
 
 const SIZE_VIOLATION_COUNTS = {
-  "base.css": 9, "board.css": 8, "content.css": 2, "copilot.css": 6, "home.css": 7, "menu-bar.css": 11, "shell.css": 83, "styles.css": 26, "toolbar.css": 34,
+  "base.css": 9, "board.css": 8, "content.css": 2, "copilot.css": 6, "home.css": 4, "menu-bar.css": 11, "shell.css": 64, "styles.css": 22, "toolbar.css": 27,
 };
 const GLYPH_ARROW_COUNT = 8;
 const WIDGET_CLASS_COUNT = 24;
@@ -137,24 +137,24 @@ test("every token the kit table names is defined in tokens.css", () => {
 });
 
 test("the control heights and font sizes of the layout guard are the tokens of tokens.css", () => {
-  assert.deepEqual(tokenSizes("control-height-"), [22, 24, 26, 28]);
-  assert.deepEqual(tokenSizes("font-size-"), [10, 11, 12, 13, 14, 16]);
+  assert.deepEqual(tokenSizes("control-height-"), [24]);
+  assert.deepEqual(tokenSizes("control-font-size"), [12]);
 });
 
 const dialogOf = (controls, clipped = []) => ({ dialogId: "x-dialog", controls, clipped });
-const field = (name, row, top, height, fontSize = 11) => ({ name, row, top, height, fontSize });
-const tokens = { height: [22, 24, 26, 28], font: [10, 11, 12, 13, 14, 16] };
+const field = (name, row, top, height, fontSize = 12) => ({ name, row, top, height, fontSize });
+const tokens = { height: [24], font: [12] };
 
 test("layout guard: a row of equal controls passes, mismatches name the dialog, the element and the numbers", () => {
-  assert.deepEqual(analyzeDialog(dialogOf([field("input#a", 0, 100, 22), field("div.custom-select", 0, 100, 22), field("button.dialog-btn", 1, 140, 26, 12)]), tokens), []);
+  assert.deepEqual(analyzeDialog(dialogOf([field("input#a", 0, 100, 24), field("div.custom-select", 0, 100, 24), field("button.dialog-btn", 1, 140, 24, 12)]), tokens), []);
   const found = analyzeDialog(dialogOf([
-    field("input#a", 0, 100, 22), field("select#b", 0, 102, 26),
+    field("input#a", 0, 100, 24), field("select#b", 0, 102, 28),
     field("input#c", 1, 140, 25, 15),
-    field("input#d", 2, 180, 22), field("input#e", 2, 183, 22),
+    field("input#d", 2, 180, 24), field("input#e", 2, 183, 24),
   ], [{ name: "span#f", scrollWidth: 140, clientWidth: 100, scrollHeight: 18, clientHeight: 18 }]), tokens);
   assert.deepEqual(found.map((v) => v.key), [
-    "x-dialog height input#c", "x-dialog font input#c", "x-dialog same-height select#b", "x-dialog same-top input#e", "x-dialog clip span#f",
+    "x-dialog height select#b", "x-dialog height input#c", "x-dialog font input#c", "x-dialog same-height select#b", "x-dialog same-top input#e", "x-dialog clip span#f",
   ]);
-  assert.match(found[2].message, /#x-dialog same-height select#b: row 0: 26px beside input#a 22px/);
-  assert.match(found[4].message, /content 140x18 in a 100x18 box/);
+  assert.match(found[3].message, /#x-dialog same-height select#b: row 0: 28px beside input#a 24px/);
+  assert.match(found[5].message, /content 140x18 in a 100x18 box/);
 });

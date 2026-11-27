@@ -5,22 +5,29 @@ import { createWorkspaceHarness } from "./webui-dom-harness.mjs";
 import { rulesFor, ruleWithSelector } from "./test-support/css-rules.mjs";
 import { readText } from "./test-support/read-text.mjs";
 
-// The combo boxes of every dialog share one rule: the text starts 4px inside the frame and ends 4px before the arrow
-// cell's divider, and the box is as wide as its longest choice.
+// The combo boxes of every dialog share one rule: the text starts a control padding inside the frame and ends a picker text gap
+// before the chevron cell, and the box is as wide as its longest choice.
 
 const MIN_TEXT_GAP_PX = 4;
 const shellCss = readText(fileURLToPath(new URL("../crates/easyoffice-app/ui/shell.css", import.meta.url)));
+const toolbarCss = readText(fileURLToPath(new URL("../crates/easyoffice-app/ui/toolbar.css", import.meta.url)));
+const tokensCss = readText(fileURLToPath(new URL("../crates/easyoffice-app/ui/tokens.css", import.meta.url)));
 const px = (body, property) => {
   const declaration = body.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${property}:`));
   return declaration?.slice(property.length + 1).trim().split(/\s+/).map((v) => Number.parseFloat(v));
 };
 
 test("one rule gives every dialog combo box its text gap, and no dialog repeats it", () => {
-  const trigger = ruleWithSelector(shellCss, ".tool-dialog .custom-select-trigger");
-  const value = ruleWithSelector(shellCss, ".tool-dialog .custom-select-value");
-  assert.ok(trigger && value, "the common rules exist");
-  assert.deepEqual(px(trigger.body, "padding"), [0, 0, 0, MIN_TEXT_GAP_PX], "4px before the text");
-  assert.ok(px(value.body, "padding-right")[0] >= MIN_TEXT_GAP_PX, "at least 4px between the text and the arrow cell");
+  // PD-378: the Spectrum S picker's text start (9px), chevron cell (10px) and the 5px between them are tokens, set once in toolbar.css.
+  const trigger = ruleWithSelector(toolbarCss, ".custom-select-trigger");
+  assert.ok(trigger, "the common rule exists");
+  const declared = (property) => trigger.body.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${property}:`))?.slice(property.length + 1).trim();
+  assert.equal(declared("padding"), "0 var(--picker-padding-end) 0 var(--control-padding-x)", "the text starts a control padding inside the frame");
+  assert.equal(declared("column-gap"), "var(--picker-text-gap)");
+  assert.equal(declared("grid-template-columns"), "minmax(0, 1fr) var(--chevron-size)", "the chevron cell is the icon size, with no divider");
+  const token = (name) => Number.parseFloat(new RegExp(`${name}:\\s*([\\d.]+)px`).exec(tokensCss)[1]);
+  assert.ok(token("--picker-text-gap") >= MIN_TEXT_GAP_PX, "at least 4px between the text and the chevron");
+  assert.ok(token("--control-padding-x") >= MIN_TEXT_GAP_PX, "at least 4px before the text");
   const perDialog = rulesFor(shellCss, ["custom-select-trigger", "custom-select-value", "custom-select-arrow", "custom-select-sizer"])
     .filter((rule) => rule.selector.split(",").some((part) => !part.trim().startsWith(".tool-dialog ")));
   assert.deepEqual(perDialog.map((rule) => rule.selector), [], "no combo part is styled for one dialog by id");

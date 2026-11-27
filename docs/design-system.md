@@ -44,29 +44,65 @@ EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 �
 
 ## 4-2. 대화상자 부품 키트 (PD-375)
 
-대화상자는 아래 클래스만 쓰고, 크기는 `tokens.css`의 토큰으로만 적습니다. 값은 참조 앱의 `dialogs.css`(표의 줄 번호)와 같습니다. 키트에 없는 컨트롤 클래스(콤보·스핀·목록·탭·단추·색 선택 같은 새 부품)는 이 표에 PD 번호와 함께 한 줄을 먼저 올린 뒤에 씁니다. `scripts/test-design-guard.mjs`가 index.html의 `<dialog>`에서, `scripts/webkit-dom/dialogs.mjs`가 열린 대화상자(스크립트가 만든 요소 포함)에서 이를 확인합니다. 키트 전에 만든 클래스와 리터럴 px는 `scripts/design-guard-known.mjs`에 있고 그 목록은 줄이기만 합니다.
+대화상자는 아래 클래스만 쓰고, 크기는 `tokens.css`의 토큰으로만 적습니다. 구조와 색은 참조 앱의 `dialogs.css`(표의 줄 번호)를 따르고, 크기(높이·글자·안쪽 여백·간격·모서리·테두리 두께)는 Spectrum S 크기표(4-3, PD-378)를 따릅니다. 키트에 없는 컨트롤 클래스(콤보·스핀·목록·탭·단추·색 선택 같은 새 부품)는 이 표에 PD 번호와 함께 한 줄을 먼저 올린 뒤에 씁니다. `scripts/test-design-guard.mjs`가 index.html의 `<dialog>`에서, `scripts/webkit-dom/dialogs.mjs`가 열린 대화상자(스크립트가 만든 요소 포함)에서 이를 확인합니다. 키트 전에 만든 클래스와 리터럴 px는 `scripts/design-guard-known.mjs`에 있고 그 목록은 줄이기만 합니다.
 
-| 클래스 | 부품 | 크기 (토큰) | 참조 앱 | PD |
+| 클래스 | 부품 | 크기 (토큰) | 참조 앱 | Spectrum S | PD |
+| --- | --- | --- | --- | --- | --- |
+| `.tool-dialog` `.dialog-wrap` | 창 틀 | 폭은 창마다, 글자 `--font-size-base` | dialogs.css 17-24 | 글자 12px | PD-098, PD-378 |
+| `.dialog-title` `.dialog-close` | 제목 줄(끌어서 이동)과 닫기 | 높이 `--dialog-title-height`, 좌우 안쪽 `--dialog-title-padding`, 글자 `--control-font-size` 굵게, 닫기 `--control-height-sm` 정사각 | dialogs.css 26-54 | 높이 24px, 글자 12px | PD-098, PD-378 |
+| `.dialog-body` `.dialog-section` `.dialog-section-title` | 본문, 묶음 틀 | 본문 안쪽 `--dialog-padding`, 묶음 안쪽 `--space-5` `--space-6`, 묶음 제목 `--font-size-sm` | dialogs.css 56-108 | 묶음 사이 `--dialog-group-gap` 8px | PD-098, PD-378 |
+| `.dialog-row` `.dialog-stack` | 한 줄(라벨과 컨트롤), 세로 쌓기 | 간격 `--dialog-gap`, 줄 아래 `--dialog-row-gap`, 세로 가운데 맞춤 | dialogs.css 110-119 | 열 간격 8px, 줄 간격 12px | PD-098, PD-378 |
+| `.dialog-label` | 라벨 | 글자 `--font-size-sm`, 최소 폭 `--dialog-label-min-width`, 찾기류 열은 `--dialog-label-width`, 오른쪽 맞춤, 칸 위 라벨은 글자 위 `--label-top-to-text`·아래 `--label-bottom-to-text` | dialogs.css 121-126, find-dialog.css 36-38 | 글자 12px, 위 4px, 아래 5px | PD-098, PD-378 |
+| `.dialog-input` `.dialog-text-input` | 숫자·글 입력 | 높이 `--control-height-sm`, 글자 `--control-font-size`, 좌우 안쪽 `--control-padding-x`, 테두리 `--control-border-width`, 모서리 `--control-radius` | dialogs.css 128-146·634-646, find-dialog.css 42-47 | 높이 24px, 글자 12px, 글자 시작 9px, 테두리 1px, 모서리 8px | PD-098, PD-378 |
+| `.dialog-select` `.sb-combo` `.native-select-hidden` `.custom-select` `.custom-select-trigger` `.custom-select-value` `.custom-select-arrow` `.custom-select-sizer` `.custom-select-menu` `.custom-select-option` `.custom-select-group` | 콤보(`ui/custom-select.js`가 `<select class="dialog-select">`를 `.custom-select`로 바꾸고 원래 요소는 `.native-select-hidden`) | 높이 `--control-height-sm`, 글자 `--control-font-size`, 글자 시작 `--control-padding-x`, 쉐브론 칸 `--chevron-size`와 끝 안쪽 `--picker-padding-end`, 글자와 쉐브론 `--picker-text-gap`, 화살표 칸의 구분선은 없고 쉐브론만 | dialogs.css 154-169 | 높이 24px, 글자 12px, 글자 시작 9px, 쉐브론 10px, 끝 7px, 글자와 쉐브론 5px | PD-098, PD-377, PD-378 |
+| `.dialog-checkbox` `.dialog-radio-group` `.dialog-icon-radio-group` | 체크·라디오(`input[type="checkbox"]`·`[type="radio"]`는 전부 `shell.css`의 한 규칙) | 글자 `--control-font-size`, 상자 `--checkbox-size`, 테두리 `--checkbox-border-width`, 모서리 `--checkbox-radius`, 글자와 상자 `--checkbox-label-gap` | dialogs.css 176-193·572-584 | 상자 12px, 테두리 2px, 모서리 2px, 글자와 상자 9px | PD-098, PD-378 |
+| `.dialog-unit` | 단위 표기 | 글자 `--font-size-xs` | dialogs.css 171-174 | 글자 11px(`font-size-50`) | PD-098, PD-378 |
+| `.dialog-swatch` `.dialog-swatch-chip` `.dialog-color-host` `.sb-color-host` `.eo-color-input` `.eo-color-palette` `.sb-hl-palette` `.sb-hl-palette-row` `.sb-hl-palette-actions` `.sb-hl-swatch` | 색 선택(`ui/color-picker.js`) | 높이 `--control-height-sm`, 콤보와 같은 안쪽 | toolbar.css 팔레트 | 콤보와 같음 | PD-098, PD-378 |
+| `.dialog-btn-group` | 붙은 단추 묶음 | 높이 `--control-height-sm`, 글자 `--control-font-size`, 끝 모서리 `--control-radius` | dialogs.css 586-624 | 높이 24px, 글자 12px | PD-098, PD-378 |
+| `.dialog-footer` `.dialog-btn` `.dialog-btn-primary` | 아래 단추 줄 | 높이 `--control-height-sm`, 글자 `--control-font-size`, 안쪽 `--button-padding-x`, 테두리 `--button-border-width`, 모서리 `--button-radius`(알약), 단추 간격 `--dialog-button-gap` | dialogs.css 195-238 | 높이 24px, 글자 12px, 안쪽 11px, 테두리 2px, 알약, 간격 12px | PD-098, PD-378 |
+| `.dialog-tabs` `.dialog-tab` `.dialog-tab-panel` | 탭 | 높이 `--dialog-tab-height`, 좌우 안쪽 `--dialog-tab-padding-x`, 글자 `--control-font-size` | dialogs.css 530-570 | 촘촘한 S 탭: 높이 24px, 시작 12px, 글자 12px | PD-098, PD-378 |
+| `.dialog-list` | 목록 상자 | 글자 `--font-size-sm`, 행 안쪽 `--list-row-padding-y` `--list-row-padding-x` | style-dialog.css 30-50 | 글자 12px | PD-098, PD-378 |
+| `.dialog-grid` `.dialog-grid-wide` `.dialog-field` `.dialog-swatch-text` | 라벨·칸·라벨·칸·단위 열 격자와 칸이 셀을 채우는 폭, 색 단추의 이름 | 간격 `--dialog-row-gap` `--dialog-gap`, 글자 `--font-size-sm`, 미리 보기 `--dialog-preview-height` | char-shape-dialog.css 4-31 | 줄 간격 12px, 열 간격 8px | PD-376, PD-378 |
+| `.eo-stepper` `.eo-stepper-input` `.eo-stepper-buttons` `.eo-stepper-button` `.eo-chevron` `.eo-chevron-up` | 숫자 칸(`ui/number-stepper.js`가 모든 `input[type="number"]`를 `.eo-stepper`로 감싸고, 칸의 클래스는 상자가 이어받는다)과 드롭다운·스텝퍼의 Lucide 쉐브론 | 칸 높이는 칸 그대로(`--control-height-sm`), 단추 셀 폭 `--stepper-width`, 쉐브론 `--chevron-size`, 글자 안쪽 `--control-padding-x`, 위·아래 단추 사이에만 줄(아래 단추의 위 가장자리, 셀 폭 그대로) | Spectrum CSS `components/stepper/index.css`, Lucide `chevron-down`·`chevron-up` | 높이 24px, 단추 셀 20px, 쉐브론 10px, 글자 시작 9px | PD-377, PD-378 |
+| `.dialog-status-row` `.dialog-status` `.dialog-pdf-note` | 상태·주석 줄 | 최소 높이 `--dialog-status-height`, 글자 `--font-size-sm` | find-dialog.css 59-68, dialogs.css 249-275 | 글자 12px | PD-098, PD-378 |
+
+한 줄(`.dialog-row`, `.dialog-footer`, `.dialog-btn-group`) 안의 컨트롤은 높이와 위쪽 위치가 같고, 높이는 `--control-height-*`(Spectrum S의 24px 하나), 글자 크기는 `--control-font-size*`(12px 하나)입니다(라벨은 제외). 열린 대화상자의 어떤 상자도 내용이 넘쳐 잘리지 않습니다.
+
+## 4-3. 컨트롤 크기표: Spectrum S (QA 2026-11-28, PD-378)
+
+크기(높이·글자·안쪽 여백·간격·모서리·테두리 두께)는 Spectrum CSS(Apache-2.0, 보관된 저장소 커밋 `70d3660a`, `THIRD_PARTY_NOTICES.md`의 Spectrum CSS 항목)의 작은(S) 크기, 데스크톱 배율 값입니다. 색은 이 앱의 토큰 그대로(가족 룩)입니다. 원본 위치는 `tokens/dist/json/tokens.json`(`tokens.json:줄`)과 `components/<이름>/index.css`(`<이름>/index.css:줄`)입니다. 아래 "측정" 열은 열린 화면을 WebKit에서 2x로 잰 값입니다.
+
+| 요소 | 토큰 | Spectrum S | 원본 위치 | 측정 |
 | --- | --- | --- | --- | --- |
-| `.tool-dialog` `.dialog-wrap` | 창 틀 | 폭은 창마다, 글자 `--font-size-base` | dialogs.css 17-24 | PD-098 |
-| `.dialog-title` `.dialog-close` | 제목 줄(끌어서 이동)과 닫기 | 안쪽 `--dialog-title-padding`, 글자 `--font-size-base` 굵게, 닫기 16x16 | dialogs.css 26-54 | PD-098 |
-| `.dialog-body` `.dialog-section` `.dialog-section-title` | 본문, 묶음 틀 | 본문 안쪽 `--dialog-padding`, 묶음 안쪽 `--space-5` `--space-6`, 묶음 제목 `--font-size-sm` | dialogs.css 56-108 | PD-098 |
-| `.dialog-row` `.dialog-stack` | 한 줄(라벨과 컨트롤), 세로 쌓기 | 간격 `--dialog-gap`, 줄 아래 `--dialog-row-gap`, 세로 가운데 맞춤 | dialogs.css 110-119 | PD-098 |
-| `.dialog-label` | 라벨 | 글자 `--font-size-sm`, 최소 폭 `--dialog-label-min-width`, 찾기류 열은 `--dialog-label-width`, 오른쪽 맞춤 | dialogs.css 121-126, find-dialog.css 36-38 | PD-098 |
-| `.dialog-input` `.dialog-text-input` | 숫자·글 입력 | 높이 `--control-height-sm`(찾기 줄은 `--control-height-field`), 글자 `--font-size-sm`(찾기 줄은 `--font-size-base`), 좌우 안쪽 `--space-2` | dialogs.css 128-146·634-646, find-dialog.css 42-47 | PD-098 |
-| `.dialog-select` `.sb-combo` `.native-select-hidden` `.custom-select` `.custom-select-trigger` `.custom-select-value` `.custom-select-arrow` `.custom-select-sizer` `.custom-select-menu` `.custom-select-option` `.custom-select-group` | 콤보(`ui/custom-select.js`가 `<select class="dialog-select">`를 `.custom-select`로 바꾸고 원래 요소는 `.native-select-hidden`) | 높이 `--control-height-sm`, 글자 `--font-size-sm`, 화살표 칸의 구분선은 없고 쉐브론만(`--chevron-size`) | dialogs.css 154-169 | PD-098, PD-377 |
-| `.dialog-checkbox` `.dialog-radio-group` `.dialog-icon-radio-group` | 체크·라디오 | 글자 `--font-size-sm`, 간격 `--space-2` | dialogs.css 176-193·572-584 | PD-098 |
-| `.dialog-unit` | 단위 표기 | 글자 `--font-size-xs` | dialogs.css 171-174 | PD-098 |
-| `.dialog-swatch` `.dialog-swatch-chip` `.dialog-color-host` `.sb-color-host` `.eo-color-input` `.eo-color-palette` `.sb-hl-palette` `.sb-hl-palette-row` `.sb-hl-palette-actions` `.sb-hl-swatch` | 색 선택(`ui/color-picker.js`) | 높이 `--control-height-sm` | toolbar.css 팔레트 | PD-098 |
-| `.dialog-btn-group` | 붙은 단추 묶음 | 높이 `--control-height-md`, 글자 `--font-size-sm` | dialogs.css 586-624 | PD-098 |
-| `.dialog-footer` `.dialog-btn` `.dialog-btn-primary` | 아래 단추 줄 | 높이 `--control-height-md`, 글자 `--font-size-base`, 간격 `--dialog-gap` | dialogs.css 195-238 | PD-098 |
-| `.dialog-tabs` `.dialog-tab` `.dialog-tab-panel` | 탭 | 안쪽 `--dialog-tab-padding-y` `--dialog-tab-padding-x`, 글자 `--font-size-sm` | dialogs.css 530-570 | PD-098 |
-| `.dialog-list` | 목록 상자 | 글자 `--font-size-sm`, 행 안쪽 `--list-row-padding-y` `--list-row-padding-x` | style-dialog.css 30-50 | PD-098 |
-| `.dialog-grid` `.dialog-grid-wide` `.dialog-field` `.dialog-swatch-text` | 라벨·칸·라벨·칸·단위 열 격자와 칸이 셀을 채우는 폭, 색 단추의 이름 | 간격 `--dialog-row-gap` `--dialog-gap`, 글자 `--font-size-sm`, 미리 보기 `--dialog-preview-height` | char-shape-dialog.css 4-31 | PD-376 |
-| `.eo-stepper` `.eo-stepper-input` `.eo-stepper-buttons` `.eo-stepper-button` `.eo-chevron` `.eo-chevron-up` | 숫자 칸(`ui/number-stepper.js`가 모든 `input[type="number"]`를 `.eo-stepper`로 감싸고, 칸의 클래스는 상자가 이어받는다)과 드롭다운·스텝퍼의 Lucide 쉐브론 | 칸 높이는 칸 그대로(`--control-height-sm`), 단추 셀 폭 `--stepper-width`, 쉐브론 `--chevron-size`, 위·아래 단추 사이에만 줄 | Spectrum CSS `components/stepper/index.css`, Lucide `chevron-down`·`chevron-up` | PD-377 |
-| `.dialog-status-row` `.dialog-status` `.dialog-pdf-note` | 상태·주석 줄 | 최소 높이 `--dialog-status-height`, 글자 `--font-size-sm` | find-dialog.css 59-68, dialogs.css 249-275 | PD-098 |
+| 칸·콤보·단추 높이 | `--control-height-sm` | 24px (`component-height-75`) | tokens.json:3339, textfield/index.css:116 | 24px |
+| 컨트롤 글자 | `--control-font-size` | 12px (`font-size-75`) | tokens.json:5407, textfield/index.css:119 | 12px |
+| 글자 시작(왼쪽 안쪽) | `--control-padding-x` | 10px - 테두리 1px = 9px (`component-edge-to-text-75`) | tokens.json:3186, textfield/index.css:313 | 9px |
+| 칸 테두리 두께 | `--control-border-width` | 1px (`border-width-100`) | tokens.json:1353, textfield/themes/spectrum-two.css:26 | 1px |
+| 칸 모서리 | `--control-radius` | 8px (`corner-radius-100`) | tokens.json:3610, textfield/index.css:24 | 8px |
+| 쉐브론 그림 크기 | `--chevron-size` | 10px (`chevron-icon-size-75`) | tokens.json:2331 | 10px |
+| 콤보 끝 안쪽(쉐브론 오른쪽) | `--picker-padding-end` | 7px (`field-end-edge-to-disclosure-icon-75`) | tokens.json:4876, picker/index.css:102 | 7px |
+| 콤보 글자와 쉐브론 사이 | `--picker-text-gap` | 5px (`text-to-visual-75`) | tokens.json:11960, picker/index.css:95 | 5px |
+| 스텝퍼 단추 셀 폭 | `--stepper-width` | 20px (`in-field-button-width-stacked-small`) | tokens.json:6702, stepper/index.css:92 | 20px |
+| 체크·라디오 상자 | `--checkbox-size` | 12px (`checkbox-control-size-small`, `radio-button-control-size-small`) | tokens.json:2151·9282, checkbox/index.css:72-79 | 12px |
+| 체크·라디오 테두리 | `--checkbox-border-width` | 2px (`border-width-200`) | tokens.json:1357, checkbox/index.css:55 | 2px |
+| 체크 상자 모서리 | `--checkbox-radius` | 2px (`checkbox-control-corner-radius`) | checkbox/themes/spectrum-two.css:22 | 2px |
+| 라디오 점 | `--radio-dot-size` | 4px (`radio-button-selection-indicator`) | tokens.json:9291 | 4px |
+| 체크·라디오 글자와 상자 | `--checkbox-label-gap` | 9px (`text-to-control-75`) | tokens.json:11906, checkbox/index.css:79 | 9px |
+| 단추 높이 | `--control-height-sm` | 24px (`component-height-75`) | button/index.css:32 | 24px |
+| 단추 글자 | `--control-font-size` | 12px (`font-size-75`) | button/index.css:33 | 12px |
+| 단추 안쪽(왼쪽·오른쪽) | `--button-padding-x` | 13px - 테두리 2px = 11px (`component-pill-edge-to-text-75`) | tokens.json:3375, button/index.css:37 | 11px |
+| 단추 테두리 두께 | `--button-border-width` | 2px (`border-width-200`) | tokens.json:1357, button/index.css:348 | 2px |
+| 단추 모서리 | `--button-radius` | 높이 / 2 = 12px (알약) | button/index.css:351 | 12px |
+| 단추 사이 간격 | `--dialog-button-gap` | 12px (`spacing-200`, ButtonGroup sizeS) | tokens.json:10228, buttongroup/index.css:23 | 12px |
+| 라벨 글자 위 / 아래 | `--label-top-to-text` `--label-bottom-to-text` | 4px / 5px (`component-top-to-text-75`, `component-bottom-to-text-75`) | tokens.json:3528·3141, fieldlabel/index.css:31-32 | 4px / 5px |
+| 라벨 옆 간격 | `--dialog-gap` | 8px (`spacing-100`, FieldLabel sizeS 옆 안쪽) | tokens.json:10220, fieldlabel/index.css:36 | 8px |
+| 줄 간격 | `--dialog-row-gap` | 12px (`spacing-200`, Form 라벨 위 배치) | tokens.json:10228, form/index.css:16 | 12px |
+| 묶음 사이 | `--dialog-group-gap` | 8px (`spacing-100`) | tokens.json:10220 | 8px |
+| 탭 | `--dialog-tab-height` `--dialog-tab-padding-x` | 높이 24px (`tab-item-compact-height-small`), 시작 12px (`tab-item-start-to-edge-small`), 글자 12px | tokens.json:10694·10811, tabs/index.css:133-137·67 | 24px / 12px / 12px |
+| 제목 줄 | `--dialog-title-height` | 24px (`component-height-75`; Spectrum의 대화상자 제목은 크기별 값이 없다) | 같은 높이를 씀 | 24px |
+| 포커스 고리 | `--focus-ring-width` | 2px (`focus-indicator-thickness`) | tokens.json:5295 | 2px |
 
-한 줄(`.dialog-row`, `.dialog-footer`, `.dialog-btn-group`) 안의 컨트롤은 높이와 위쪽 위치가 같고, 높이는 `--control-height-*` 중 하나, 글자 크기는 `--font-size-*` 중 하나입니다(라벨은 제외). 열린 대화상자의 어떤 상자도 내용이 넘쳐 잘리지 않습니다.
+Spectrum 대화상자(`dialog/index.css`)에는 S 크기 값이 없고(안쪽 격자 40px, 제목 18px는 크기와 무관한 M 값), 이 앱의 촘촘한 도구 대화상자에 쓰기에 너무 커서 본문 안쪽 `--dialog-padding`(12px = `spacing-200`)과 제목 높이만 S 값으로 맞춥니다.
 
 ## 5. 새 화면을 만들 때
 

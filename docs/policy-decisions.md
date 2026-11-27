@@ -6680,3 +6680,20 @@
 - **Trade-offs** (1) 숫자 칸 상자가 입력을 감싸 DOM이 한 겹 늘고(`input.parentNode`가 상자가 된다) 입력의 `hidden` 속성은 상자를 따라가지 않는다(지금 숫자 칸은 모두 숨김 행 안에 있다). (2) 쉐브론 선 굵기 2가 14px 상자에서 약 1.2px로 그려져 낮은 해상도 화면에서는 옅어 보일 수 있다. (3) 누르고 있는 동안 반복하지 않는다. (4) 앱 번들 `hwp-studio` 안 콤보는 이전 모양이다.
 - **Verified by** `scripts/test-design-guard.mjs`(글자 화살표 0 예외, 이스케이프 감지, 줄어든 알려진 목록), `scripts/test-webui-number-stepper.mjs`(위·아래 클릭, `step` 소수점, `min`·`max` 자르기, 빈 칸 시작, 이벤트, 비활성), WebKit 단계(`scripts/webkit-dom/doc.mjs` 숫자 칸 단추 클릭과 쉐브론 가운데 맞춤), 전·후 스크린샷(`.scratch/shots/v6b-*`, `v6-*`).
 - **Revisit when** 쉐브론이 낮은 해상도에서 옅다는 지적이 나올 때, 누르고 있는 반복이 필요해질 때, `hwp-studio` 번들 콤보를 같은 모양으로 맞출 때.
+
+## PD-378 — 컨트롤 크기를 Spectrum S 크기표로 바꿈 (2026-11-28)
+
+- **Context** PD-377에서 화살표와 스텝퍼를 Lucide·Spectrum CSS에서 가져왔지만 높이 22px, 글자 11px, 안쪽 여백은 참조 앱(rhwp-studio) 값이었다. QA 승인(2026-11-28): 컨트롤 크기도 Spectrum S(작은) 크기표로 바꾼다. 색은 그대로(가족 룩).
+- **Decision (`PD-378`)**
+  1. **크기표**: 높이 24px(`component-height-75`), 글자 12px(`font-size-75`), 글자 시작 9px(`component-edge-to-text-75` 10px에서 테두리 1px), 칸 테두리 1px, 칸 모서리 8px(`corner-radius-100`), 쉐브론 10px(`chevron-icon-size-75`)과 콤보 끝 안쪽 7px, 스텝퍼 단추 셀 20px(`in-field-button-width-stacked-small`), 체크·라디오 상자 12px(테두리 2px, 체크 모서리 2px, 라디오 점 4px), 단추 높이 24px·안쪽 11px·테두리 2px·알약 모서리, 단추 사이 12px, 줄 간격 12px, 열 간격 8px. 토큰과 원본 위치(파일과 줄)는 `docs/design-system.md` 4-3. 원본은 `THIRD_PARTY_NOTICES.md`의 Spectrum CSS 항목(Apache-2.0, 보관됨)의 커밋 `70d3660a`다.
+  2. **토큰**: `tokens.css`의 `--control-height-*`는 `--control-height-sm`(24px) 하나가 되고(`-field`·`-md`·`-lg`는 지움) 컨트롤 글자는 `--control-font-size`(12px), `--font-size-sm`은 이를 가리키고 `--font-size-xs`는 11px(`font-size-50`)이다. 새 토큰은 `--control-padding-x`, `--control-border-width`, `--control-radius`, `--button-*`, `--checkbox-*`, `--picker-*`, `--label-*`, `--dialog-button-gap`, `--dialog-group-gap`, `--dialog-title-height`, `--dialog-tab-height`, `--focus-ring-width`. `--chevron-size`는 14px에서 10px, `--stepper-width`는 16px에서 20px로 바뀐다.
+  3. **쉐브론**: 마스크의 view box를 Lucide 선의 범위(`5 8 14 8`)로 잘라, 10px 아이콘 상자가 글리프 폭과 같다(24칸 전체를 쓰면 10px 상자에 5px 글리프가 그려진다).
+  4. **체크·라디오**: 브라우저 기본 모양을 끄고(`appearance: none`) Spectrum S 상자로 그린다. 체크 표시는 Lucide `check`, 혼합 표시는 `minus`.
+  5. **범위**: 대화상자, 스타일 바, 도구줄 단추, 상태 줄 밖의 컨트롤(홈, 팔레트 단추, 인쇄 미리 보기, 문서 검사 단추, 페이지 인스펙터). BASE의 격자 안 입력(22px 행에 맞춘 값)과 앱 번들 `hwp-studio`는 이번 변경 밖이다.
+  6. **가드**: 런타임 레이아웃 가드(`scripts/webkit-dom/dialog-layout.mjs`)는 컨트롤 높이를 `--control-height-*`, 글자를 `--control-font-size*`로 잰다(전에는 `--font-size-*` 전체라 13px 같은 값도 통과했다). 알려진 위반 목록(`scripts/webkit-dom/dialog-known.mjs`)은 비었고(정렬 대화상자와 하이퍼링크 대화상자의 높이 불일치가 같은 24px로 풀렸다), 정적 가드의 알려진 리터럴 px 선택자는 shell.css 83에서 64, styles.css 26에서 22, toolbar.css 34에서 27, home.css 7에서 4로 줄었다.
+  7. **스텝퍼 줄**: 위·아래 단추 사이의 줄을 아래 단추의 안쪽 위 그림자 한 줄로 그려, 줄 폭이 단추 셀 폭과 같고(스타일 바 스텝퍼는 단추 `min-width`가 셀보다 커서 줄이 셀 왼쪽으로 삐져나왔다) 두 단추 높이가 같다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스의 값 표: Spectrum CSS의 토큰 파일(`tokens/dist/json/tokens.json`)과 컴포넌트 CSS(textfield, picker, stepper, checkbox, radio, button, buttongroup, fieldlabel, form, tabs)의 S 크기 값을 그대로 읽어 썼다. (2) 이미 쓰는 의존성: Lucide(체크·혼합 표시), 기존 `tokens.css` 구조. (3) 새로 쓴 코드는 CSS 규칙과 토큰뿐이다(스크립트 변경 없음).
+- **Why** 값이 한 출처에서 나오면 높이·글자·여백이 화면마다 어긋나지 않고, 가드가 "토큰 하나"만 허용해 새 값이 들어오는 것을 막는다.
+- **Trade-offs** (1) 컨트롤이 22px에서 24px, 글자가 11px에서 12px로 커져 대화상자가 넓고 높아졌다(글꼴 대화상자 높이 약 522px에서 약 612px, 숫자 칸·셀 서식 대화상자 폭 조정). (2) 칸 모서리 8px와 단추 알약 모양은 참조 앱의 2px 모서리보다 훨씬 둥글고, 2px 단추 테두리는 굵다. 모양이 맞지 않으면 `--control-radius`·`--button-radius`·`--button-border-width` 세 토큰만 바꾸면 된다. (3) Spectrum 대화상자에는 S 값이 없어(안쪽 격자 40px, 제목 18px는 M 값) 제목 높이와 본문 안쪽만 S 토큰에 맞췄다. (4) 줄 간격은 라벨 옆 배치의 16px(`form/index.css:15`) 대신 라벨 위 배치의 12px를 썼다(세로가 뷰포트를 넘지 않게).
+- **Verified by** `scripts/test-design-guard.mjs`(토큰 값 `[24]`, `[12]`, 줄어든 목록), WebKit 단계(열린 모든 대화상자의 높이·글자·잘림 가드 0건, 글꼴 대화상자 24px·12px, 숫자 칸 셀 폭 20px·줄 폭 = 셀 폭), 전·후 스크린샷(`.scratch/shots/v7b-*`, `v7-*`).
+- **Revisit when** 모양(모서리·테두리)을 바꿔야 할 때, Spectrum 크기표의 M 크기가 필요한 화면이 생길 때, BASE 격자 입력과 `hwp-studio` 번들을 같은 크기로 맞출 때.

@@ -209,7 +209,7 @@ test("the list arrow takes the combo box arrow cell's look", () => {
     return css.slice(at, css.indexOf("}", at));
   };
   const arrow = rule(".cf-dropdown-btn");
-  for (const part of [/width: 15px/, /border: 0/, /color: var\(--color-text-muted\)/]) assert.match(arrow, part);
+  for (const part of [/width: calc\(var\(--chevron-size\) \+ 2 \* var\(--picker-padding-end\)\)/, /border: 0/, /color: var\(--color-text-muted\)/]) assert.match(arrow, part);
   assert.doesNotMatch(arrow, /border-left|font-size/, "no divider and no letter size: only the chevron");
   assert.match(rule(".cf-dropdown-btn:hover, .cf-dropdown-btn[aria-expanded=\"true\"]"), /background: var\(--color-hover-bg\)/);
   // The reference: the combo's own arrow cell.

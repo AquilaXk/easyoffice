@@ -132,8 +132,8 @@
   --sheet-cell-font-size: 11pt;
   --font-family-mono: 'Consolas', 'Courier New', monospace;
   --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  --font-size-xs: 10px;
-  --font-size-sm: 11px;
+  --font-size-xs: 11px;                   /* font-size-50 */
+  --font-size-sm: var(--control-font-size);
   --font-size-base: 12px;
   --font-size-md: 13px;
   --font-size-lg: 14px;
@@ -157,20 +157,39 @@
   --radius-lg: 4px;
   --radius-pill: 999px;
 
-  /* 컨트롤 크기. sm: 입력·콤보·색 단추(dialogs.css .dialog-input/.dialog-select), field: 찾기 입력(find-dialog.css .find-dialog-input),
-     md: 대화상자 단추(.dialog-btn), lg: 도구줄 단추. 대화상자 컨트롤의 높이는 이 넷 중 하나다(scripts/webkit-dom/dialog-layout.mjs가 잰다). */
-  --control-height-sm: 22px;
-  --control-height-field: 24px;
-  --control-height-md: 26px;
-  --control-height-lg: 28px;
+  /* 컨트롤 크기는 Spectrum S(작은) 크기표다(PD-378). 값마다 원본 토큰 이름을 적는다(원본: spectrum-css tokens/dist/json/tokens.json, 상세는 docs/design-system.md 4-3).
+     대화상자·스타일 바·도구줄 컨트롤의 높이와 글꼴 크기는 이 토큰 하나씩이다(scripts/webkit-dom/dialog-layout.mjs가 잰다). */
+  --control-height-sm: 24px;          /* component-height-75 */
+  --control-font-size: 12px;          /* font-size-75 */
+  --control-padding-x: 9px;           /* component-edge-to-text-75 10px - border-width-100 1px */
+  --control-border-width: 1px;        /* border-width-100 */
+  --control-radius: 8px;              /* corner-radius-100 */
+  --button-padding-x: 11px;           /* component-pill-edge-to-text-75 13px - button 테두리 2px */
+  --button-border-width: 2px;         /* border-width-200 */
+  --button-radius: calc(var(--control-height-sm) / 2);  /* 알약 모양: spectrum-Button border-radius = 높이 / 2 */
+  --checkbox-size: 12px;              /* checkbox-control-size-small, radio-button-control-size-small */
+  --checkbox-border-width: 2px;       /* border-width-200 */
+  --checkbox-radius: 2px;             /* checkbox-control-corner-radius */
+  --radio-dot-size: 4px;              /* radio-button-selection-indicator */
+  --checkbox-label-gap: 9px;          /* text-to-control-75 */
+  --chevron-size: 10px;               /* chevron-icon-size-75 */
+  --picker-padding-end: 7px;          /* field-end-edge-to-disclosure-icon-75 */
+  --picker-text-gap: 5px;             /* text-to-visual-75 */
+  --stepper-width: 20px;              /* in-field-button-width-stacked-small */
+  --focus-ring-width: 2px;            /* focus-indicator-thickness */
 
-  /* 대화상자 간격과 목록 (rhwp-studio dialogs.css·find-dialog.css·style-dialog.css의 값) */
+  /* 대화상자 간격과 목록. 행 간격은 spectrum-Form의 라벨 위 배치 간격, 라벨 옆 간격은 spectrum-FieldLabel sizeS의 side padding */
   --dialog-padding: var(--space-6);
-  --dialog-gap: var(--space-4);
-  --dialog-row-gap: var(--space-3);
-  --dialog-title-padding: var(--space-3) var(--space-6);
-  --dialog-tab-padding-y: 5px;
-  --dialog-tab-padding-x: 14px;
+  --dialog-gap: var(--space-4);                   /* spacing-100 */
+  --dialog-button-gap: var(--space-6);            /* spacing-200 (spectrum-ButtonGroup sizeS) */
+  --dialog-group-gap: var(--space-4);             /* spacing-100: between group frames */
+  --label-top-to-text: 4px;                       /* component-top-to-text-75 (spectrum-FieldLabel sizeS) */
+  --label-bottom-to-text: 5px;                    /* component-bottom-to-text-75 */
+  --dialog-row-gap: var(--space-6);               /* spacing-200 */
+  --dialog-title-padding: 0 var(--space-6);
+  --dialog-title-height: var(--control-height-sm);
+  --dialog-tab-height: var(--control-height-sm);  /* tab-item-compact-height-small */
+  --dialog-tab-padding-x: 12px;                   /* tab-item-start-to-edge-small */
   --dialog-label-min-width: 40px;
   --dialog-label-width: 70px;
   --dialog-status-height: 18px;
@@ -178,9 +197,6 @@
   --list-row-padding-x: var(--space-4);
   /* 글꼴 대화상자(PD-376): 미리 보기는 글꼴 크기가 바뀌어도 높이가 같도록 고정 */
   --dialog-preview-height: 48px;
-  /* 드롭다운 화살표와 숫자 칸(PD-377): 쉐브론 그림 상자 14px(선 모양은 가운데 7x3.5px), 숫자 칸의 위·아래 단추 셀 폭 16px(60px 크기 칸에서 입력 영역 44px이 남는다) */
-  --chevron-size: 14px;
-  --stepper-width: 16px;
 
   /* 터치 타겟 (모바일) */
   --touch-target-min: 44px;

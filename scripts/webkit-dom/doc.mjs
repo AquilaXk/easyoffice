@@ -191,9 +191,9 @@ export const docSteps = [
     assert.equal(hit[0].scalePercent, 150);
   }],
 
-  // PD-376: every field, combo box and color button of the 글꼴 dialog has the reference dialog's box (22px high, 11px text), the three
+  // PD-376, PD-378: every field, combo box and color button of the 글꼴 dialog has the Spectrum S box (24px high, 12px text), the three
   // controls under 한글 글꼴, 글꼴 스타일 and 크기 start on one line with no empty area below them.
-  ["글꼴 대화상자의 모든 컨트롤이 참조 대화상자의 높이·글자 크기를 쓰고 한글 글꼴·글꼴 스타일·크기가 한 줄에서 시작한다", async (page) => {
+  ["글꼴 대화상자의 모든 컨트롤이 Spectrum S의 높이·글자 크기를 쓰고 한글 글꼴·글꼴 스타일·크기가 한 줄에서 시작한다", async (page) => {
     await typeFirstParagraph(page, "가나다라");
     await page.evaluate(() => document.querySelector('.md-item[data-studio-menu-cmd="font-dialog"]').click());
     await page.waitForSelector("#doc-font-dialog[open]");
@@ -205,25 +205,25 @@ export const docSteps = [
         return { id: el.id || el.dataset.selectId, height: el.getBoundingClientRect().height, font: getComputedStyle(text).fontSize };
       }));
       assert.ok(boxes.length >= 4, `${tab}: the controls are found`);
-      for (const box of boxes) assert.deepEqual([box.height, box.font], [22, "11px"], `${tab}: ${box.id}`);
+      for (const box of boxes) assert.deepEqual([box.height, box.font], [24, "12px"], `${tab}: ${box.id}`);
     }
     await page.click("#doc-font-tab-font");
     const tops = await page.$$eval('.custom-select[data-select-id="doc-font-family"], .custom-select[data-select-id="doc-font-style"], .eo-stepper:has(#doc-font-size)', (els) => els.map((el) => el.getBoundingClientRect().top));
     assert.equal(new Set(tops).size, 1, `한글 글꼴, 글꼴 스타일 and 크기 start on one line: ${tops}`);
-    // 크기 is the reference's 기준 크기 field (60px) and its spin buttons sit inside it: nothing is cut. The block holds no empty rows: it ends where 영어 글꼴 ends.
+    // 크기 is a 68px field (the 9px text padding on both sides, the 20px button cell and room for four characters such as 10.5) and its spin buttons sit inside it: nothing is cut. The block holds no empty rows: it ends where 영어 글꼴 ends.
     const size = await page.$eval("#doc-font-size", (el) => ({ width: el.parentNode.getBoundingClientRect().width, clipped: el.scrollWidth > el.clientWidth }));
-    assert.deepEqual(size, { width: 60, clipped: false });
+    assert.deepEqual(size, { width: 68, clipped: false });
     const block = await page.evaluate(() => ({
       end: document.querySelector("#doc-font-pane-font .dialog-font-top").getBoundingClientRect().bottom,
       latin: document.querySelector('.custom-select[data-select-id="doc-font-latin"]').getBoundingClientRect().bottom,
       colors: document.querySelector("#doc-font-pane-font .dialog-font-colors").getBoundingClientRect().top,
     }));
-    assert.deepEqual([block.end - block.latin, block.colors - block.end], [0, 6], "no empty area under 영어 글꼴, and the next row is 6px below");
+    assert.deepEqual([block.end - block.latin, block.colors - block.end], [0, 12], "no empty area under 영어 글꼴, and the next row is a row gap (12px) below");
     // Every group is the same distance from the next on both tabs, the last group of a tab from the preview group included.
     for (const tab of ["font", "advanced"]) {
       await page.click(`#doc-font-tab-${tab}`);
       const gaps = await page.$$eval(`#doc-font-pane-${tab} > fieldset, #doc-font-dialog .doc-font-preview-body fieldset`, (els) => els.slice(1).map((el, i) => Math.round(el.getBoundingClientRect().top - els[i].getBoundingClientRect().bottom)));
-      assert.ok(gaps.length >= 1 && gaps.every((gap) => gap === 6), `${tab}: the gaps between groups are 6px: ${gaps}`);
+      assert.ok(gaps.length >= 1 && gaps.every((gap) => gap === 8), `${tab}: the gaps between groups are 8px (--dialog-group-gap): ${gaps}`);
     }
     // The 고급 tab's label column is as wide as its longest label (70px) plus the 8px gap, so the controls start right after it.
     const start = await page.$eval("#doc-font-pane-advanced .dialog-grid-wide", (grid) => {
@@ -262,25 +262,38 @@ export const docSteps = [
       const rect = (el) => el.getBoundingClientRect();
       const middle = (r) => [(r.left + r.right) / 2, (r.top + r.bottom) / 2];
       const line = (el, side) => getComputedStyle(el)[`border${side}Width`];
+      const divider = (el) => getComputedStyle(el).boxShadow !== "none";
       const chevrons = [up, down].map((b) => ({ button: middle(rect(b)), chevron: middle(rect(b.querySelector(".eo-chevron"))) }));
       const arrow = document.querySelector('.custom-select[data-select-id="doc-font-family"] .custom-select-arrow');
       const before = getComputedStyle(arrow, "::before");
       return {
         box: rect(box).height, cell: rect(cell).height, cellWidth: rect(cell).width, cellRight: rect(cell).right, boxRight: rect(box).right,
-        lines: [line(cell, "Left"), line(up, "Top"), line(down, "Top")], native: getComputedStyle(input).appearance,
+        lines: [line(cell, "Left"), line(up, "Top"), line(down, "Top"), divider(up), divider(down)], native: getComputedStyle(input).appearance,
+        halves: [rect(up).height, rect(down).height], dividerSpan: [rect(down).left - rect(cell).left, rect(cell).right - rect(down).right],
+        styleBar: (() => {
+          // The style bar's size stepper: its two buttons are exactly the column, so the line between them is the column's width, not wider.
+          const col = document.querySelector("#btn-size-up").parentNode;
+          const [high, low] = [document.querySelector("#btn-size-up"), document.querySelector("#btn-size-down")];
+          return { column: rect(col).width, spans: [rect(high).left - rect(col).left, rect(low).left - rect(col).left, rect(col).right - rect(high).right, rect(col).right - rect(low).right], high: rect(high).height, low: rect(low).height };
+        })(),
         chevrons,
         arrowLeft: getComputedStyle(arrow).borderLeftWidth, arrowChevron: [before.width, before.height, before.maskImage || before.webkitMaskImage],
         arrowCenter: (() => { const a = rect(arrow); return a.left + a.width / 2; })(),
       };
     });
     assert.ok(Math.abs(geometry.box - geometry.cell - 2) <= 1, `the cell is as high as the field inside its frame: ${geometry.box} ${geometry.cell}`);
-    assert.equal(geometry.cellWidth, 16, "the cell has the token width");
+    assert.equal(geometry.cellWidth, 20, "the cell has the token width (Spectrum S in-field-button-width-stacked-small)");
     assert.ok(Math.abs(geometry.boxRight - geometry.cellRight - 1) <= 1, "the cell is at the end of the field");
-    assert.deepEqual(geometry.lines, ["0px", "0px", "1px"], "no line in front of the cell, one between the two buttons");
+    assert.deepEqual(geometry.lines, ["0px", "0px", "0px", false, true], "no line in front of the cell, one (the lower button's top edge) between the two buttons");
+    assert.deepEqual(geometry.halves[0], geometry.halves[1], "the two buttons are equally high");
+    assert.deepEqual(geometry.dividerSpan, [0, 0], "the line between the buttons is exactly the button cell's width");
+    assert.equal(geometry.styleBar.column, 20, "the style bar's stepper column has the token width");
+    assert.deepEqual(geometry.styleBar.spans, [0, 0, 0, 0], "the style bar's buttons are exactly its column, so the line between them is not wider than the cell");
+    assert.equal(geometry.styleBar.high, geometry.styleBar.low, "the style bar's two buttons are equally high");
     assert.equal(geometry.native, "textfield", "the browser's own spin button is gone");
     for (const { button, chevron } of geometry.chevrons) assert.ok(Math.abs(button[0] - chevron[0]) <= 1 && Math.abs(button[1] - chevron[1]) <= 1, `a chevron is centered in its button: ${button} ${chevron}`);
     assert.equal(geometry.arrowLeft, "0px", "no divider in front of the combo box's chevron");
-    assert.deepEqual(geometry.arrowChevron.slice(0, 2), ["14px", "14px"]);
+    assert.deepEqual(geometry.arrowChevron.slice(0, 2), ["10px", "10px"]);
     assert.match(geometry.arrowChevron[2], /svg/, "the chevron is an image mask");
   }],
 

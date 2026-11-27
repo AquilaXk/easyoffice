@@ -345,11 +345,11 @@ test("PD-361: SHEET font preview caps oversized pt, fits narrow containers, and 
   const toolbarCss = readUi("toolbar.css");
   const hwpCss = readHwp("src/eo-overrides.css");
   assert.match(shellCss, /#sheet-font-sample\s*\{[^}]*justify-content:\s*center/);
-  assert.match(shellCss, /\.pages-insp-size\s*\{[^}]*padding:\s*0 4px 0 6px;/);
+  assert.match(shellCss, /\.pages-insp-size\s*\{[^}]*padding:\s*0 var\(--control-padding-x\);/);
   // PD-377: our own number fields have no native spin button; the stepper cell is its own box, so the text keeps its inner padding clear of it.
   assert.match(shellCss, /\.eo-stepper-input::-webkit-inner-spin-button[^{]*\{[^}]*appearance:\s*none/);
-  assert.match(shellCss, /\.eo-stepper-input\.eo-stepper-input\s*\{[^}]*padding:\s*0 var\(--space-2\) 0 var\(--space-3\)/);
-  assert.match(toolbarCss, /\.custom-select-value\s*\{[^}]*padding-right:\s*6px;/);
+  assert.match(shellCss, /\.eo-stepper-input\.eo-stepper-input\s*\{[^}]*padding:\s*0 var\(--control-padding-x\)/);
+  assert.match(toolbarCss, /\.custom-select-trigger\s*\{[^}]*column-gap:\s*var\(--picker-text-gap\);/);
   assert.match(hwpCss, /\.dialog-wrap input\[type="number"\]::-webkit-inner-spin-button[\s\S]*?margin-inline-start:\s*4px/);
   assert.match(hwpCss, /\.dialog-wrap input\[type="number"\]\.dialog-input:not\(\.pp-sync-spinner\)\s*\{[^}]*min-width:\s*60px;/);
   assert.match(hwpCss, /\.cs-dialog input\[type="number"\]\[step="0\.5"\]\.dialog-input\s*\{[^}]*min-width:\s*72px;/);

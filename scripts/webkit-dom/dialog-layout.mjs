@@ -4,8 +4,8 @@
 //
 // Rules (all are about the controls, never the labels):
 //   same-height / same-top   the controls of one row (`.dialog-row`, `.dialog-footer`, `.dialog-btn-group`) share one height and one top
-//   height                   a control is as tall as one of the `--control-height-*` tokens of tokens.css
-//   font                     a control's text is one of the `--font-size-*` tokens
+//   height                   a control is as tall as one of the `--control-height-*` tokens of tokens.css (the Spectrum S size table, PD-378)
+//   font                     a control's text is one of the `--control-font-size*` tokens
 //   clip                     no box of the dialog holds more than it shows (`scrollWidth > clientWidth`, same for the height)
 //   class                    a control-like class (also one a script makes) is in the kit list or grandfathered
 import fs from "node:fs";
@@ -92,7 +92,7 @@ export function widgetRegistry() {
  * Violations of one collected dialog as `{ key, message }`. `key` (`dialog rule element`) is what the known-violation list holds;
  * `message` carries the measured values.
  */
-export function analyzeDialog(raw, tokens = { height: tokenSizes("control-height-"), font: tokenSizes("font-size-") }, registry = widgetRegistry()) {
+export function analyzeDialog(raw, tokens = { height: tokenSizes("control-height-"), font: tokenSizes("control-font-size") }, registry = widgetRegistry()) {
   const out = [];
   const { dialogId, controls, clipped } = raw;
   const add = (rule, element, message) => out.push({ key: `${dialogId} ${rule} ${element}`, message: `#${dialogId} ${rule} ${element}: ${message}` });

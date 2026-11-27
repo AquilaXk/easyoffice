@@ -12,7 +12,7 @@
 .topbar-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }
 .icon-btn { width: 24px; height: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--ui-text-secondary); border-radius: 4px; }
 .icon-btn:hover { background: var(--ui-hover); color: var(--ui-text); }
-.palette-btn { display: inline-flex; align-items: center; gap: 8px; height: 22px; min-width: 176px; padding: 0 6px 0 8px; font-size: 12px; color: var(--ui-text-muted); border: 1px solid var(--ui-border); border-radius: 5px; background: transparent; flex-shrink: 0; }
+.palette-btn { display: inline-flex; align-items: center; gap: 8px; height: var(--control-height-sm); min-width: 176px; padding: 0 6px 0 8px; font-size: var(--control-font-size); color: var(--ui-text-muted); border: var(--control-border-width) solid var(--ui-border); border-radius: var(--control-radius); background: transparent; flex-shrink: 0; }
 .palette-btn:hover { background: var(--ui-hover); color: var(--ui-text); }
 .palette-label { flex: 1 1 auto; text-align: left; white-space: nowrap; }
 .palette-btn kbd { font: 11px/1 "Consolas", "Menlo", monospace; padding: 2px 5px; color: var(--ui-text-muted); border: 1px solid var(--ui-border); border-radius: 3px; }
@@ -20,14 +20,14 @@
 .eo-icon-toolbar { background: var(--ui-bg-light); border-bottom-color: var(--ui-border); }
 .eo-doc-style-bar { border-bottom-color: var(--ui-border); color: var(--ui-text); }
 .tb-btn, .eo-glyph-btn { color: var(--ui-text-secondary); }
-.tb-btn { min-width: 28px; height: 26px; }
+.tb-btn { min-width: var(--control-height-sm); height: var(--control-height-sm); }
 .eo-glyph-btn:hover { background: var(--ui-hover-strong); color: var(--ui-text); outline: 1px solid var(--ui-border-light); font-weight: inherit; }
 .eo-glyph-btn.active, .eo-glyph-btn[aria-pressed="true"] { background: var(--ui-active); color: var(--accent-ink); outline: 1px solid var(--ui-border-strong); font-weight: inherit; }
 :root[data-theme-effective="dark"] .eo-glyph-btn.active, :root[data-theme-effective="dark"] .eo-glyph-btn[aria-pressed="true"] { color: var(--ui-text); }
-.sb-step-btn { display: inline-flex; align-items: center; justify-content: center; color: var(--ui-text-secondary); }
+.sb-step-btn { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 0; color: var(--ui-text-secondary); }
 .eo-doc-style-bar .sb-select { color: var(--ui-text); background: var(--ui-surface); border-color: var(--color-border-input); }
 .eo-doc-style-bar .sb-size-input { color: var(--ui-text); background: transparent; border: 0; }
-.icon-btn.secondary-btn { width: 28px; height: 28px; padding: 0; }
+.icon-btn.secondary-btn { width: var(--control-height-sm); height: var(--control-height-sm); padding: 0; }
 /* The embedded HWP editor brings its own complete toolbar: no second EasyOffice toolbar above it. */
 .app-shell[data-hwp-embed="true"] #icon-toolbar,
 .app-shell[data-hwp-embed="true"] #doc-style-bar,
@@ -95,23 +95,20 @@
 .tool-dialog .dialog-body { font-size: var(--font-size-base); line-height: normal; }
 .tool-dialog .dialog-title { cursor: move; }
 /* Dialog rows, labels, fields and combo boxes: reference `dialogs.css` 110-165, 572-585, 634-655 (MIT, see THIRD_PARTY_NOTICES.md), same values. */
-.tool-dialog .dialog-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.tool-dialog .dialog-row { display: flex; align-items: center; gap: var(--dialog-gap); margin-bottom: var(--dialog-row-gap); }
 .tool-dialog .dialog-row:last-child { margin-bottom: 0; }
 .tool-dialog .dialog-label { min-width: 40px; text-align: right; font-size: var(--font-size-sm); color: var(--color-text); }
-.tool-dialog .dialog-input, .tool-dialog .dialog-text-input, .sheet-filter-panel .dialog-text-input, .sheet-tab-edit { height: 22px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); caret-color: var(--caret-color); color-scheme: inherit; padding: 0 4px; font-size: var(--font-size-sm); outline: none; box-sizing: border-box; }
+.tool-dialog .dialog-input, .tool-dialog .dialog-text-input, .sheet-filter-panel .dialog-text-input, .sheet-tab-edit { height: var(--control-height-sm); border: var(--control-border-width) solid var(--color-border); border-radius: var(--control-radius); background: var(--color-surface); color: var(--color-text); caret-color: var(--caret-color); color-scheme: inherit; padding: 0 var(--control-padding-x); font-size: var(--control-font-size); line-height: normal; outline: none; box-sizing: border-box; }
 .tool-dialog .dialog-input { width: 72px; text-align: right; }
 .tool-dialog .dialog-text-input { width: 120px; }
 .tool-dialog .dialog-input:focus, .tool-dialog .dialog-text-input:focus, .sheet-filter-panel .dialog-text-input:focus, .sheet-tab-edit:focus { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); }
 /* Combo boxes in dialogs size to their content, like the reference's `.dialog-select` (no width, `custom-select.css`: inline-flex, the trigger fills the root). */
-.tool-dialog .custom-select.dialog-select { height: 22px; padding: 0; font-size: var(--font-size-sm); border: 0; background: transparent; outline: none; }
-/* Every combo box in a dialog has the field's inner padding (`.dialog-select`, `dialogs.css` 154-164: 0 4px), the arrow cell of `custom-select.css`, and 4px between its text and the arrow cell's divider. Its width is its longest choice (the hidden sizer shares the text's cell), so no choice is cut and the box keeps its width when the choice changes. */
-.tool-dialog .custom-select-trigger { grid-template-columns: minmax(0, 1fr) 15px; padding: 0 0 0 4px; }
-.tool-dialog .custom-select-value { padding-right: 6px; }
+.tool-dialog .custom-select.dialog-select { height: var(--control-height-sm); padding: 0; font-size: var(--control-font-size); border: 0; background: transparent; outline: none; }
+/* The padding of a combo box and the gap between its text and its chevron are the Spectrum S picker's (toolbar.css, `--control-padding-x`, `--picker-padding-end`, `--picker-text-gap`). Its width is its longest choice (the hidden sizer shares the text's cell), so no choice is cut and the box keeps its width when the choice changes. */
 .tool-dialog .custom-select-value, .tool-dialog .custom-select-sizer { grid-area: 1 / 1; }
 .tool-dialog .custom-select-trigger .custom-select-arrow { grid-area: 1 / 2; }
-.tool-dialog .custom-select-sizer { display: grid; height: 0; overflow: hidden; visibility: hidden; padding-right: 6px; white-space: nowrap; }
-.tool-dialog .dialog-checkbox { font-size: var(--font-size-sm); display: flex; align-items: center; gap: 4px; cursor: pointer; }
-.tool-dialog .dialog-checkbox input[type="checkbox"] { margin: 0; accent-color: var(--color-primary); }
+.tool-dialog .custom-select-sizer { display: grid; height: 0; overflow: hidden; visibility: hidden; white-space: nowrap; }
+.tool-dialog .dialog-checkbox { font-size: var(--control-font-size); display: flex; align-items: center; gap: var(--checkbox-label-gap); cursor: pointer; }
 /* Note line of a dialog: reference `dialogs.css` 249-275 `.dialog-pdf-note` (MIT, see THIRD_PARTY_NOTICES.md), same name and values; the PDF print dialog uses it for its hint. */
 .dialog-pdf-note { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 .tool-dialog input:focus-visible, .tool-dialog select:focus-visible { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); outline: none; }
@@ -123,16 +120,15 @@
 /* The reference editor's find dialog (rhwp-studio `find-dialog.css`, MIT, Copyright (c) 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md):
    same placement, sizes and spacing; the colours are this app's tokens. */
 .find-dialog { position: fixed; top: 80px; right: 24px; left: auto; margin: 0; width: min(380px, calc(100vw - 32px)); z-index: 9999; }
-.find-dialog .dialog-title { padding: 6px 12px; background: var(--color-accent-bg); font-weight: bold; font-size: var(--font-size-base); display: flex; align-items: center; justify-content: space-between; }
 .find-dialog .dialog-body { display: block; padding: 10px 12px 4px; }
-.find-dialog .dialog-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.find-dialog .dialog-row { display: flex; align-items: center; gap: var(--dialog-gap); margin-bottom: var(--dialog-row-gap); }
 .find-dialog .dialog-label { width: 70px; flex-shrink: 0; text-align: right; }
-.find-dialog .dialog-input { flex: 1; text-align: left; height: 24px; border: 1px solid var(--ui-border-strong); border-radius: 0; background: var(--color-surface); color: var(--color-text); padding: 0 4px; font-size: var(--font-size-base); box-sizing: border-box; min-width: 0; }
+.find-dialog .dialog-input { flex: 1; text-align: left; height: var(--control-height-sm); border: var(--control-border-width) solid var(--ui-border-strong); border-radius: var(--control-radius); background: var(--color-surface); color: var(--color-text); padding: 0 var(--control-padding-x); font-size: var(--control-font-size); box-sizing: border-box; min-width: 0; }
 .find-dialog .dialog-input:focus { border-color: var(--color-focus-border); outline: none; }
 .find-dialog .find-count { margin-left: auto; color: var(--color-text-muted); font-size: var(--font-size-sm); white-space: nowrap; }
 .find-dialog .find-status { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 .find-dialog .find-status-row { min-height: 18px; line-height: 18px; text-align: right; }
-.find-dialog .find-buttons { display: flex; gap: 6px; padding: 4px 12px 8px; justify-content: flex-end; }
+.find-dialog .find-buttons { display: flex; gap: var(--dialog-button-gap); padding: 4px 12px 8px; justify-content: flex-end; }
 .find-dialog .dialog-btn { white-space: nowrap; }
 /* Hyperlink dialog (doc-link.js): the address and label fields fill their rows; the status line has the find dialog's metrics. */
 #doc-link-dialog { width: min(420px, calc(100vw - 32px)); }
@@ -177,7 +173,7 @@
 #doc-font-dialog .doc-font-preview-body { padding-top: 0; }
 #doc-font-dialog .dialog-status-row:has(> :empty) { display: none; }
 /* Group frames of the dialog: the reference's `.cs-fieldset` (`char-shape-dialog.css` 34-46, MIT, see THIRD_PARTY_NOTICES.md), same values. */
-.tool-dialog .dialog-group { border: 1px solid var(--color-border); border-radius: var(--radius-sm); margin: var(--dialog-row-gap) 0; padding: var(--space-3) var(--space-4) var(--space-4); min-width: 0; }
+.tool-dialog .dialog-group { border: 1px solid var(--color-border); border-radius: var(--radius-sm); margin: var(--dialog-group-gap) 0; padding: var(--space-3) var(--space-4) var(--space-4); min-width: 0; }
 .tool-dialog .dialog-group legend { font-size: var(--font-size-sm); font-weight: bold; color: var(--color-text); padding: 0 var(--space-2); }
 /* Label, field, label, field: the rows of a group line up in four columns (Word's 간격 [표준] 값 [ ] pairs). */
 /* The label column is as wide as the longest label (`스타일 모음(T):`, 5.8em; a wider font grows it), then the combo (150px), the value label, the value field (96px) and its unit. */
@@ -189,7 +185,10 @@
 .tool-dialog .dialog-grid-wide { grid-template-columns: minmax(5.8em, auto) 150px; }
 .tool-dialog .dialog-inline-row .dialog-field { width: 96px; flex: none; }
 /* The 글꼴 tab: font, style and size share one row of labels over their fields (list boxes), then the label/field pairs, then the 효과 group in two columns. */
-#doc-font-dialog .dialog-font-top { display: grid; grid-template-columns: minmax(0, 1fr) 128px 60px; grid-template-areas: "fl sl zl" "ff sf zf" "el . ." "ef . ."; align-items: start; gap: var(--dialog-row-gap) var(--dialog-gap); margin-bottom: var(--dialog-row-gap); }
+#doc-font-dialog .dialog-font-top { display: grid; grid-template-columns: minmax(0, 1fr) 128px 68px; grid-template-areas: "fl sl zl" "ff sf zf" "el . ." "ef . ."; align-items: start; gap: var(--label-bottom-to-text) var(--dialog-gap); margin-bottom: var(--dialog-row-gap); }
+/* A label over its field is the Spectrum FieldLabel: 4px above its text (`component-top-to-text-75`), 5px between its text and the field (`component-bottom-to-text-75`); the next label pair is a row gap (`--dialog-row-gap`) below the field. */
+#doc-font-dialog .dialog-font-top > .dialog-label, #doc-font-dialog .dialog-font-colors > .dialog-label { padding-top: var(--label-top-to-text); }
+#doc-font-dialog .dialog-font-top label[for="doc-font-latin"], #doc-font-dialog .dialog-font-colors label[for="doc-font-emphasis"] { margin-top: calc(var(--dialog-row-gap) - var(--label-bottom-to-text)); }
 #doc-font-dialog .dialog-font-top > .dialog-label { text-align: left; }
 #doc-font-dialog .dialog-font-top > .custom-select { justify-self: stretch; }
 #doc-font-dialog .dialog-font-top > .dialog-field { width: 100%; }
@@ -202,7 +201,7 @@
 #doc-font-dialog .dialog-font-top .custom-select[data-select-id="doc-font-style"] { grid-area: sf; }
 #doc-font-dialog #doc-font-size { grid-area: zf; }
 /* 글꼴 색, 밑줄 스타일 and 밑줄 색 are three columns with the label over each control; 강조점 is the row below. */
-#doc-font-dialog .dialog-font-colors { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "cl ul uc" "ch us uh" "el . ." "es . ."; gap: var(--dialog-row-gap) var(--dialog-gap); margin-bottom: var(--dialog-row-gap); align-items: start; }
+#doc-font-dialog .dialog-font-colors { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "cl ul uc" "ch us uh" "el . ." "es . ."; gap: var(--label-bottom-to-text) var(--dialog-gap); margin-bottom: var(--dialog-row-gap); align-items: start; }
 #doc-font-dialog .dialog-font-colors > .dialog-label { text-align: left; }
 #doc-font-dialog .dialog-font-colors label[for="doc-font-color"] { grid-area: cl; }
 #doc-font-dialog .dialog-font-colors label[for="doc-font-underline-style"] { grid-area: ul; }
@@ -214,12 +213,12 @@
 #doc-font-dialog .dialog-font-colors .custom-select[data-select-id="doc-font-emphasis"] { grid-area: es; }
 #doc-font-dialog .dialog-font-colors > .custom-select, #doc-font-dialog .dialog-font-colors > .dialog-color-host { justify-self: stretch; }
 .tool-dialog .dialog-font-colors .custom-select-trigger { width: 100%; box-sizing: border-box; }
-/* A color button has the combo box's cells: the chip and the name, then the 15px arrow cell (`.custom-select-arrow`) after its divider. */
-#doc-font-dialog .dialog-font-colors .dialog-swatch { display: grid; grid-template-columns: auto minmax(0, 1fr) 15px; width: 100%; box-sizing: border-box; padding: 0 0 0 var(--space-2); }
+/* A color button has the combo box's cells: the chip and the name, then the chevron cell (`.custom-select-arrow`). */
+#doc-font-dialog .dialog-font-colors .dialog-swatch { display: grid; grid-template-columns: auto minmax(0, 1fr) var(--chevron-size); column-gap: var(--picker-text-gap); width: 100%; box-sizing: border-box; padding: 0 var(--picker-padding-end) 0 var(--control-padding-x); }
 /* The check boxes: two columns, `.cs-checkbox-label` margin-right 16px (`char-shape-dialog.css` 117-127), rows `--dialog-row-gap` apart as `.dialog-row`. */
 #doc-font-dialog .dialog-effects { display: grid; grid-template-columns: 1fr 1fr; gap: var(--dialog-row-gap) var(--space-8); }
 /* The font dialog's footer: 기본값으로 설정 and 텍스트 효과 on the left, 확인 and 취소 on the right. */
-#doc-font-dialog .dialog-footer-split { display: flex; align-items: center; gap: var(--dialog-gap); }
+#doc-font-dialog .dialog-footer-split { display: flex; align-items: center; gap: var(--dialog-button-gap); }
 #doc-font-dialog .dialog-footer-gap { flex: 1; }
 /* 확인 and 취소 are the reference's 72px buttons (`.cs-right-col .dialog-btn`, `char-shape-dialog.css` 28-31). */
 #doc-font-dialog .dialog-footer .dialog-btn { min-width: 72px; white-space: nowrap; }
@@ -240,7 +239,7 @@
 #sheet-pivot-dialog { width: min(460px, calc(100vw - 32px)); overflow: visible; }
 #sheet-pivot-dialog .dialog-label { min-width: 68px; flex-shrink: 0; }
 #sheet-dv-alert-dialog { width: min(360px, calc(100vw - 32px)); }
-#sheet-numfmt-dialog { width: min(440px, calc(100vw - 32px)); }
+#sheet-numfmt-dialog { width: min(520px, calc(100vw - 32px)); }
 #sheet-paste-dialog { width: min(360px, calc(100vw - 32px)); overflow: visible; } /* the open list of five choices reaches below the short dialog */
 /* One label column (the find dialog's 70px, right-aligned: `find-dialog.css` 36-38), and every value control fills the rest of the row like the reference's `.formula-input` and `.formula-select` (`dialogs.css` 1049-1052, `flex: 1`); the decimal field keeps `.dialog-input`'s 72px. */
 #sheet-numfmt-dialog .dialog-label, #sheet-paste-dialog .dialog-label { width: 70px; min-width: 70px; flex-shrink: 0; }
@@ -257,13 +256,13 @@
 #sheet-ranges-dialog .sheet-names-list:empty::before { content: "범위 없음"; }
 #sheet-numfmt-dialog .dialog-text-input, #sheet-numfmt-dialog .custom-select.dialog-select, #sheet-paste-dialog .custom-select.dialog-select, #sheet-numfmt-dialog .sheet-numfmt-sample { flex: 1; min-width: 0; width: auto; }
 /* The sample line is a field-sized output on the surface color, so a negative color keeps 4.5:1 on it in both themes. */
-.sheet-numfmt-sample { box-sizing: border-box; height: 22px; padding: 0 4px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font-size: var(--font-size-sm); line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sheet-numfmt-sample { box-sizing: border-box; height: var(--control-height-sm); padding: 0 var(--control-padding-x); border: var(--control-border-width) solid var(--color-border); border-radius: var(--control-radius); background: var(--color-surface); color: var(--color-text); font-size: var(--control-font-size); line-height: calc(var(--control-height-sm) - 2 * var(--control-border-width)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sheet-numfmt-sample.nf-colored { color: var(--nf-color, inherit); }
 .sheet-numfmt-sample.nf-red { color: var(--ui-danger); }
 /* Cell format dialog tabs and panes (PD-207), after the reference editor's tab strip and border dialog (`dialogs.css` 530-570, `table-cell-props.css` 111-190). */
 /* Tabs: the reference editor's dialog tabs (`dialogs.css` .dialog-tabs/.dialog-tab), also the sheet tab strip (no radius, active tab on the raised surface). The strip's line is an inset shadow so its scroll box does not clip the active tab over it. */
 .dialog-tabs { display: flex; gap: 0; padding: 0 12px; border-bottom: 1px solid var(--ui-border-strong); background: var(--color-bg); }
-.dialog-tab, .sheet-tab-btn { position: relative; margin-bottom: -1px; padding: 5px 14px; border: 1px solid transparent; border-bottom: none; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-sm); cursor: pointer; }
+.dialog-tab, .sheet-tab-btn { position: relative; box-sizing: border-box; height: var(--dialog-tab-height); margin-bottom: -1px; padding: 0 var(--dialog-tab-padding-x); border: 1px solid transparent; border-bottom: none; background: transparent; color: var(--color-text-muted); font-size: var(--control-font-size); line-height: 1; cursor: pointer; }
 .dialog-tab:hover, .sheet-tab-btn:hover { background: var(--color-accent-bg); color: var(--color-text); }
 .dialog-tab.active, .sheet-tab-btn.active { background: var(--color-surface-raised); color: var(--color-text); border-color: var(--ui-border-strong); border-bottom: 1px solid var(--color-surface-raised); font-weight: bold; }
 .sheet-tab-bar { display: flex; gap: 0; flex: 0 0 auto; padding: 0 12px; background: var(--color-bg); box-shadow: inset 0 -1px 0 var(--ui-border-strong); overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
@@ -274,10 +273,10 @@
 #sheet-numfmt-dialog [data-fmt-pane][hidden] { display: none; }
 #sheet-numfmt-dialog [data-fmt-pane="align"] .custom-select.dialog-select, #sheet-numfmt-dialog [data-fmt-pane="align"] .dialog-select { flex: 1; min-width: 0; width: auto; }
 .tool-dialog .dialog-btn-group { display: flex; gap: 0; }
-.tool-dialog .dialog-btn-group button { min-width: 36px; height: 26px; padding: 0 6px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); font-size: var(--font-size-sm); cursor: pointer; }
+.tool-dialog .dialog-btn-group button { box-sizing: border-box; min-width: 36px; height: var(--control-height-sm); padding: 0 var(--control-padding-x); border: var(--control-border-width) solid var(--color-border); background: var(--color-surface); color: var(--color-text); font-size: var(--control-font-size); line-height: 1; cursor: pointer; }
 .tool-dialog .dialog-btn-group button:not(:first-child) { border-left: none; }
-.tool-dialog .dialog-btn-group button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
-.tool-dialog .dialog-btn-group button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.tool-dialog .dialog-btn-group button:first-child { border-radius: var(--control-radius) 0 0 var(--control-radius); }
+.tool-dialog .dialog-btn-group button:last-child { border-radius: 0 var(--control-radius) var(--control-radius) 0; }
 .tool-dialog .dialog-btn-group button:hover { background: var(--color-accent-bg); }
 .sheet-line-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; padding: 4px; border: 1px solid var(--color-border); background: var(--color-surface); }
 .sheet-line-item { height: 18px; padding: 2px 4px; display: flex; align-items: center; border: 1px solid transparent; background: transparent; color: var(--color-text-secondary); cursor: pointer; }
@@ -287,7 +286,7 @@
 .sheet-border-preview { width: 120px; height: 72px; flex: none; border: 1px solid var(--ui-border-subtle); background: var(--doc-paper); }
 .sheet-border-preview .sheet-border-guide { fill: none; stroke: var(--doc-guide-stroke); stroke-width: 1; stroke-dasharray: 2 2; }
 .sheet-border-positions { display: grid; grid-template-columns: repeat(2, auto); gap: 2px; margin-left: 8px; }
-.sheet-border-positions button { height: 22px; padding: 0 6px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font-size: var(--font-size-sm); cursor: pointer; }
+.sheet-border-positions button { box-sizing: border-box; height: var(--control-height-sm); padding: 0 var(--control-padding-x); border: var(--control-border-width) solid var(--color-border); border-radius: var(--control-radius); background: var(--color-surface); color: var(--color-text); font-size: var(--control-font-size); line-height: 1; cursor: pointer; }
 .sheet-border-positions button:hover { background: var(--color-accent-bg); }
 .sheet-border-positions button[aria-pressed="true"] { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--ui-text-on-accent); }
 :root[data-theme-effective="dark"] .sheet-border-positions button[aria-pressed="true"] { color: var(--ui-bg); }
@@ -296,7 +295,7 @@
 /* A text field that holds a range, formula or message fills its row, as the reference's `.formula-input` (dialogs.css:1046) and find field (find-dialog.css:42-47). */
 .sheet-rule-dialog .dialog-text-input { flex: 1; min-width: 0; }
 /* Colour field: the shell's palette popup (color-picker.js) behind a chip button. */
-.tool-dialog .dialog-swatch { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 4px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text-muted); }
+.tool-dialog .dialog-swatch { display: inline-flex; align-items: center; gap: var(--space-2); box-sizing: border-box; height: var(--control-height-sm); padding: 0 var(--control-padding-x); border: var(--control-border-width) solid var(--color-border); border-radius: var(--control-radius); background: var(--color-surface); color: var(--color-text-muted); }
 .tool-dialog .dialog-swatch-chip { width: 22px; height: 12px; border: 1px solid var(--color-border-dark); background: var(--dialog-swatch, var(--color-surface)); }
 .tool-dialog .dialog-color-host .sb-hl-palette { z-index: 300; }
 /* The sample of the 글꼴 and 채우기 panes of the cell format dialog (PD-227): the colours come from custom properties set by sheet-look-ui.js. */
@@ -360,7 +359,7 @@
 .sheet-grid td.ts-shadow { box-shadow: var(--ts-shadow, none); }
 .sheet-grid td.ts-shadow.lk-shadow { box-shadow: var(--lk-shadow, 0 0 0 0 transparent), var(--ts-shadow, none); }
 /* The arrow of a list cell is the combo box's arrow cell (`toolbar.css` `.custom-select-arrow`): no box, a 1px left divider, the `▾` letter at 8px in the muted color, 15px wide and as tall as the cell, at the cell's right end. Hover and the open menu take the combo's hover fill. */
-.cf-dropdown-btn { position: fixed; z-index: 30; display: inline-flex; align-items: center; justify-content: center; width: 15px; padding: 0; border: 0; border-radius: 0; background: var(--color-surface); color: var(--color-text-muted); font: inherit; line-height: 1; cursor: default; }
+.cf-dropdown-btn { position: fixed; z-index: 30; display: inline-flex; align-items: center; justify-content: center; width: calc(var(--chevron-size) + 2 * var(--picker-padding-end)); padding: 0; border: 0; border-radius: 0; background: var(--color-surface); color: var(--color-text-muted); font: inherit; line-height: 1; cursor: default; }
 .cf-dropdown-btn:hover, .cf-dropdown-btn[aria-expanded="true"] { background: var(--color-hover-bg); color: var(--color-text-secondary); }
 .cf-dropdown-menu { position: fixed; z-index: 31; min-width: 96px; max-height: 220px; overflow-y: auto; margin: 0; padding: 2px 0; list-style: none; border: 1px solid var(--color-border-dark); background: var(--color-surface-raised); color: var(--color-text); box-shadow: var(--shadow-dropdown); }
 .cf-dropdown-btn[hidden] { display: none; } /* the button's own `display` (icon button) would show it while hidden */
@@ -383,7 +382,7 @@
 /* HWP printing (hwp-print.js, PD-104): the pages live in a hidden root that only the print output shows. */
 #eo-print-root { display: none; }
 .eo-print-progress { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 60; display: flex; align-items: center; gap: 12px; padding: 9px 14px; font-size: 12.5px; line-height: 1.45; color: var(--ui-text); background: var(--ui-bg-light); border: 1px solid var(--ui-border); border-radius: 8px; filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.22)); }
-.eo-print-progress-cancel { height: 26px; padding: 0 12px; font: inherit; color: var(--ui-text); background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 5px; cursor: pointer; }
+.eo-print-progress-cancel { box-sizing: border-box; height: var(--control-height-sm); padding: 0 var(--button-padding-x); font: inherit; font-size: var(--control-font-size); color: var(--ui-text); background: var(--ui-bg); border: var(--button-border-width) solid var(--ui-border); border-radius: var(--button-radius); cursor: pointer; }
 .eo-print-progress-cancel:hover { background: var(--ui-bg-light); }
 @media print {
   html, body { margin: 0; padding: 0; background: var(--doc-paper); }
@@ -559,10 +558,10 @@
 #sheet-page-dialog [data-sp-pane="sheet"] .dialog-label { min-width: 64px; }
 
 /* The name box in the formula bar: the address field with the combo's arrow cell and the in-cell list's menu (PD-214). */
-.sheet-name-box { position: relative; display: inline-flex; align-items: stretch; height: 22px; border: 1px solid var(--color-border-input); background: var(--ui-surface); }
+.sheet-name-box { position: relative; display: inline-flex; align-items: stretch; box-sizing: border-box; height: var(--control-height-sm); border: var(--control-border-width) solid var(--color-border-input); border-radius: var(--control-radius); overflow: hidden; background: var(--ui-surface); }
 .sheet-name-box .cell-ref { display: inline-flex; align-items: center; justify-content: flex-start; min-width: 64px; max-width: 160px; padding: 0 6px; overflow: hidden; white-space: nowrap; font-size: 12px; color: var(--ui-text); outline: none; text-align: left; }
 .sheet-name-box:focus-within { border-color: var(--color-primary-hover); }
-.sheet-name-arrow { display: inline-flex; align-items: center; justify-content: center; width: 15px; padding: 0; border: 0; border-radius: 0; background: var(--color-surface); color: var(--color-text-muted); font: inherit; line-height: 1; cursor: default; }
+.sheet-name-arrow { display: inline-flex; align-items: center; justify-content: center; width: calc(var(--chevron-size) + 2 * var(--picker-padding-end)); padding: 0; border: 0; border-radius: 0; background: var(--color-surface); color: var(--color-text-muted); font: inherit; line-height: 1; cursor: default; }
 .sheet-name-arrow:hover { background: var(--color-hover-bg); color: var(--color-text-secondary); }
 .sheet-name-arrow:hover, .sheet-name-box .cell-ref[aria-expanded="true"] + .sheet-name-arrow { background: var(--color-hover-bg); }
 .sheet-name-box-list { position: absolute; top: 100%; left: 0; z-index: 31; min-width: 240px; max-height: 220px; overflow-y: auto; margin: 0; padding: 2px 0; list-style: none; border: 1px solid var(--color-border-dark); background: var(--color-surface-raised); color: var(--color-text); box-shadow: var(--shadow-dropdown); font-size: var(--font-size-base); }
@@ -722,7 +721,7 @@
 .print-preview-title { font-size: var(--font-size-base); font-weight: 700; color: var(--color-primary-dark); margin-right: 4px; white-space: nowrap; }
 .print-preview-group, .print-preview-actions { display: inline-flex; align-items: center; gap: 2px; }
 .print-preview-actions { margin-left: auto; }
-.print-preview-btn { min-width: 24px; height: 22px; padding: 0 6px; font-size: var(--font-size-sm); white-space: nowrap; }
+.print-preview-btn { min-width: var(--control-height-sm); height: var(--control-height-sm); padding: 0 var(--control-padding-x); font-size: var(--control-font-size); white-space: nowrap; }
 .print-preview-btn[aria-pressed="true"] { background: var(--ui-selected); border-color: var(--accent-primary); color: var(--color-primary-dark); font-weight: 600; }
 :root[data-theme-effective="dark"] .print-preview-btn[aria-pressed="true"] { color: var(--ui-text); }
 .print-preview-status { min-width: 44px; padding: 0 4px; text-align: center; font-size: var(--font-size-sm); color: var(--ui-text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -777,7 +776,7 @@
 .doc-inspect-badge[data-kind="overflow"] { background: var(--ui-danger-soft); border-color: var(--ui-danger); color: var(--ui-danger); }
 .doc-inspect-badge[data-kind="overlap"] { background: var(--ui-warning-bg); border-color: var(--ui-warning-border); color: var(--ui-warning-text); }
 .doc-inspect-desc { flex: 1 1 auto; min-width: 0; font-size: var(--font-size-sm); color: var(--ui-text); line-height: 1.4; overflow-wrap: anywhere; }
-.doc-inspect-jump-btn { flex-shrink: 0; height: 22px; padding: 0 8px; font-size: var(--font-size-xs); }
+.doc-inspect-jump-btn { flex-shrink: 0; height: var(--control-height-sm); padding: 0 var(--control-padding-x); font-size: var(--control-font-size); }
 #symbol-picker-dialog, #doc-stats-dialog, #doc-mailmerge-dialog, #doc-shape-dialog, #doc-chart-dialog, #doc-fn-dialog { width: min(440px, calc(100vw - 32px)); }
 #doc-shape-dialog, #doc-chart-dialog, #doc-fn-dialog { overflow: visible; }
 #doc-shape-dialog .dialog-label, #doc-chart-dialog .dialog-label, #doc-fn-dialog .dialog-label { width: 68px; min-width: 68px; flex-shrink: 0; }
@@ -833,9 +832,9 @@
 .pages-insp-label { font-size: var(--font-size-xs); font-weight: 600; color: var(--ui-text-secondary); }
 .pages-insp-row { display: flex; align-items: center; gap: var(--space-2); }
 .pages-insp-row .custom-select { flex: 1; min-width: 0; }
-.pages-insp-size { box-sizing: border-box; width: 64px; height: 24px; padding: 0 4px 0 6px; border: 1px solid var(--ui-border); background: var(--ui-surface); color: var(--ui-text); font-size: var(--font-size-sm); }
+.pages-insp-size { box-sizing: border-box; width: 64px; height: var(--control-height-sm); padding: 0 var(--control-padding-x); border: var(--control-border-width) solid var(--ui-border); border-radius: var(--control-radius); background: var(--ui-surface); color: var(--ui-text); font-size: var(--control-font-size); }
 .pages-insp-seg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-1); }
-.pages-insp-seg .eo-glyph-btn { width: 100%; height: 26px; border: 1px solid var(--ui-border-light); background: var(--ui-surface); font-size: var(--font-size-xs); }
+.pages-insp-seg .eo-glyph-btn { width: 100%; height: var(--control-height-sm); border: 1px solid var(--ui-border-light); background: var(--ui-surface); font-size: var(--font-size-xs); }
 .pages-insp-seg .eo-glyph-btn.active { background: var(--ui-selected); border-color: var(--accent-strong); color: var(--accent-strong); }
 .pages-insp-summary { font-size: var(--font-size-xs); color: var(--ui-text-secondary); line-height: 1.45; }
 /* The Format sidebar (스타일, 레이아웃) and the Document sidebar are separate panes of the one sidebar, each opened by its toolbar button. */
@@ -844,7 +843,7 @@
 .pages-insp-seg-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .pages-insp-sublabel { font-size: var(--font-size-sm); color: var(--ui-text); white-space: nowrap; }
 .pages-insp-unit { font-size: var(--font-size-xs); color: var(--ui-text-secondary); }
-.pages-insp-num { box-sizing: border-box; width: 56px; height: 24px; padding: 0 4px 0 6px; border: 1px solid var(--ui-border); background: var(--ui-surface); color: var(--ui-text); font-size: var(--font-size-sm); text-align: right; }
+.pages-insp-num { box-sizing: border-box; width: 56px; height: var(--control-height-sm); padding: 0 var(--control-padding-x); border: var(--control-border-width) solid var(--ui-border); border-radius: var(--control-radius); background: var(--ui-surface); color: var(--ui-text); font-size: var(--control-font-size); text-align: right; }
 .pages-insp-color { box-sizing: border-box; width: 36px; height: 24px; padding: 1px; border: 1px solid var(--ui-border); background: var(--ui-surface); }
 .pages-insp-seg .eo-glyph-btn [data-icon], .pages-insp-seg .eo-glyph-btn svg { width: 16px; height: 16px; }
 .custom-select.open .custom-select-menu.slide-layout-grid-menu { display: grid; grid-template-columns: repeat(3, minmax(104px, 1fr)); gap: var(--space-2); padding: var(--space-2); min-width: 344px; }
@@ -868,15 +867,35 @@
    buttons as high as the field, no line in front of the column, one line between the buttons, only the end-side corners rounded
    (the box clips the column to the field's corners). */
 .eo-stepper.eo-stepper { display: inline-flex; align-items: stretch; padding: 0; overflow: hidden; }
-.eo-stepper > input[type="number"].eo-stepper-input.eo-stepper-input { flex: 1 1 0; width: auto; min-width: 0; height: auto; margin: 0; padding: 0 var(--space-2) 0 var(--space-3); border: 0; border-radius: 0; background: transparent; box-shadow: none; outline: none; color: inherit; font: inherit; text-align: inherit; -webkit-appearance: textfield; appearance: textfield; }
-.eo-stepper-input::-webkit-inner-spin-button, .eo-stepper-input::-webkit-outer-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
+.eo-stepper > input[type="number"].eo-stepper-input.eo-stepper-input { flex: 1 1 0; width: auto; min-width: 0; height: auto; margin: 0; padding: 0 var(--control-padding-x); border: 0; border-radius: 0; background: transparent; box-shadow: none; outline: none; color: inherit; font: inherit; text-align: inherit; -webkit-appearance: textfield; appearance: textfield; }
+.eo-stepper-input::-webkit-inner-spin-button, .eo-stepper-input::-webkit-outer-spin-button { display: none; -webkit-appearance: none; appearance: none; width: 0; margin: 0; padding: 0; }
 .eo-stepper:focus-within { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); }
 .eo-stepper.disabled { background: var(--ui-surface-muted); border-color: var(--color-border-lighter); color: var(--color-text-disabled); }
 .eo-stepper-buttons { display: flex; flex: none; flex-direction: column; width: var(--stepper-width); }
-.eo-stepper-button { display: inline-flex; flex: 1 1 0; align-items: center; justify-content: center; width: 100%; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--color-text-muted); cursor: default; overflow: visible; }
-/* The chevron is as high as its half button, and its drawing (the full 14px square, its line in the middle) is centered in it, so the button holds exactly what it shows. */
+.eo-stepper-button { display: inline-flex; flex: 1 1 0; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--color-text-muted); cursor: default; overflow: visible; }
+/* The chevron box is as high as its half button, and its drawing (the cropped 14:8 glyph, drawn at the icon size, centered) sits in the middle of it, so the button holds exactly what it shows. */
 .eo-stepper-button .eo-chevron { height: 100%; -webkit-mask-size: var(--chevron-size) var(--chevron-size); mask-size: var(--chevron-size) var(--chevron-size); }
-.eo-stepper-button + .eo-stepper-button { border-top: 1px solid var(--color-border-light); }
+.eo-stepper-button + .eo-stepper-button { box-shadow: inset 0 var(--control-border-width) 0 var(--color-border-light); }
 .eo-stepper-button:hover:not(:disabled) { background: var(--ui-hover); color: var(--color-text); }
 .eo-stepper-button:active:not(:disabled) { background: var(--ui-active); }
 .eo-stepper-button:disabled { color: var(--ui-text-muted); background: transparent; cursor: not-allowed; }
+/* Check boxes and radio buttons (PD-378), after every rule that frames an input so they win at equal weight. The Spectrum S control: a 12px box
+   (`checkbox-control-size-small`, `radio-button-control-size-small`), a 2px border (`border-width-200`), corner radius 2px (the radio is round); a checked
+   radio is a 4px dot (`radio-button-selection-indicator`), which is a (12 - 4) / 2 = 4px ring in the accent color. The check mark is Lucide `check`, the dash
+   of a mixed box Lucide `minus` (ISC, see the Lucide note in toolbar.css and THIRD_PARTY_NOTICES.md), cropped to its stroke's extent like the chevrons. */
+:root {
+  --check-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='3 5 18 13' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+  --dash-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='4 11 16 2' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14'/%3E%3C/svg%3E");
+}
+input[type="checkbox"], input[type="radio"] { -webkit-appearance: none; appearance: none; display: inline-grid; place-content: center; flex: none; box-sizing: border-box; width: var(--checkbox-size); height: var(--checkbox-size); margin: 0; border: var(--checkbox-border-width) solid var(--color-border-dark); border-radius: var(--checkbox-radius); background: var(--color-surface); vertical-align: middle; cursor: pointer; }
+input[type="radio"] { border-radius: 50%; }
+input[type="checkbox"]::after { content: ""; width: calc(var(--checkbox-size) - 2 * var(--checkbox-border-width)); height: calc(var(--checkbox-size) - 2 * var(--checkbox-border-width)); background-color: var(--ui-text-on-accent); -webkit-mask: var(--check-mask) center / contain no-repeat; mask: var(--check-mask) center / contain no-repeat; visibility: hidden; }
+input[type="checkbox"]:indeterminate::after { -webkit-mask-image: var(--dash-mask); mask-image: var(--dash-mask); }
+input[type="checkbox"]:checked, input[type="checkbox"]:indeterminate { border-color: var(--accent-strong); background: var(--accent-strong); }
+input[type="checkbox"]:checked::after, input[type="checkbox"]:indeterminate::after { visibility: visible; }
+input[type="radio"]:checked { border-width: calc((var(--checkbox-size) - var(--radio-dot-size)) / 2); border-color: var(--accent-strong); }
+:root[data-theme-effective="dark"] input[type="checkbox"]::after { background-color: var(--ui-bg); }
+input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible { outline: var(--focus-ring-width) solid var(--accent-strong); outline-offset: var(--focus-ring-width); box-shadow: none; }
+input[type="checkbox"]:disabled, input[type="radio"]:disabled { border-color: var(--color-border-lighter); background: var(--ui-surface-muted); cursor: not-allowed; }
+input[type="checkbox"]:disabled:checked, input[type="checkbox"]:disabled:indeterminate, input[type="radio"]:disabled:checked { border-color: var(--ui-border-strong); background: var(--ui-border-strong); }
+input[type="radio"]:disabled:checked { background: var(--ui-surface-muted); }
