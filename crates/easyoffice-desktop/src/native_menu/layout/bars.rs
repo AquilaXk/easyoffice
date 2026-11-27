@@ -415,6 +415,7 @@ const FORMAT_DOC: MenuSpec = menu(
         "format:strike",
         "format:superscript",
         "format:subscript",
+        "format:font-dialog",
         S,
         "format:style",
         "format:doc-justify",

@@ -213,6 +213,7 @@
               <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="home-strike" role="menuitem" tabindex="-1"><span class="md-label">취소선</span></div>
               <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="home-superscript" role="menuitem" tabindex="-1"><span class="md-label">위 첨자</span><span class="md-shortcut">Ctrl+Shift+=</span></div>
               <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="home-subscript" role="menuitem" tabindex="-1"><span class="md-label">아래 첨자</span><span class="md-shortcut">Ctrl+=</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="font-dialog" role="menuitem" tabindex="-1"><span class="md-label">글꼴…</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="home-style" role="menuitem" tabindex="-1"><span class="md-label">스타일 적용</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="para-shape" role="menuitem" tabindex="-1"><span class="md-label">양쪽 맞춤</span></div>
@@ -1613,6 +1614,51 @@
         </div>
         <div class="dialog-footer">
           <button id="btn-doc-paragraph-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-font-dialog" class="tool-dialog" aria-labelledby="doc-font-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-font-dialog-title">글꼴</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-tabs" role="tablist" aria-label="글꼴">
+          <button type="button" class="dialog-tab active" role="tab" id="doc-font-tab-font" aria-selected="true" aria-controls="doc-font-pane-font" data-font-tab="font">글꼴</button>
+          <button type="button" class="dialog-tab" role="tab" id="doc-font-tab-advanced" aria-selected="false" aria-controls="doc-font-pane-advanced" tabindex="-1" data-font-tab="advanced">고급</button>
+        </div>
+        <div class="dialog-body" id="doc-font-pane-font" role="tabpanel" aria-labelledby="doc-font-tab-font" data-font-pane="font">
+          <div class="dialog-row"><label class="dialog-label" for="doc-font-family">글꼴(F)</label><select id="doc-font-family" class="sb-combo dialog-select"></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-font-style">글꼴 스타일(Y)</label>
+            <select id="doc-font-style" class="sb-combo dialog-select">
+              <option value="regular">보통</option>
+              <option value="italic">기울임꼴</option>
+              <option value="bold">굵게</option>
+              <option value="bolditalic">굵게 기울임꼴</option>
+            </select>
+          </div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-font-size">크기(S)</label><input id="doc-font-size" class="dialog-input" type="number" min="1" max="1638" step="0.5" /><span class="dialog-unit">pt</span></div>
+          <div class="dialog-section-title">효과</div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="doc-font-strike" type="checkbox" /> 취소선(K)</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="doc-font-sup" type="checkbox" /> 위 첨자(P)</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="doc-font-sub" type="checkbox" /> 아래 첨자(B)</label></div>
+        </div>
+        <div class="dialog-body" id="doc-font-pane-advanced" role="tabpanel" aria-labelledby="doc-font-tab-advanced" data-font-pane="advanced" hidden>
+          <div class="dialog-section-title">문자 간격</div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-font-spacing-kind">간격(S)</label>
+            <select id="doc-font-spacing-kind" class="sb-combo dialog-select">
+              <option value="normal">표준</option>
+              <option value="expanded">넓게</option>
+              <option value="condensed">좁게</option>
+            </select>
+          </div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-font-spacing-value">값(B)</label><input id="doc-font-spacing-value" class="dialog-input" type="number" min="0.1" max="1584" step="0.1" /><span class="dialog-unit">pt</span></div>
+        </div>
+        <div class="dialog-body doc-font-preview-body">
+          <div class="dialog-row"><span class="dialog-label">미리 보기</span><output id="doc-font-sample" class="sheet-color-sample"><span id="doc-font-sample-text">가나다 AaBb</span></output></div>
+          <div class="dialog-status-row"><span id="doc-font-status" class="dialog-status" role="status" aria-live="polite"></span></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-font-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>
       </div>
@@ -3177,6 +3223,7 @@
     <script src="./doc-paste-model.js"></script>
     <script src="./doc-paste.js"></script>
     <script src="./doc-line-spacing.js"></script>
+    <script src="./doc-font-dialog.js"></script>
     <script src="./doc-runs-ui.js"></script>
     <script src="./doc-link.js"></script>
     <script src="./doc-toc.js"></script>

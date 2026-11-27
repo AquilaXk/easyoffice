@@ -341,6 +341,12 @@ pub const ITEMS: &[MenuItemSpec] = &[
         None,
         "studio-cmd:home-subscript",
     ),
+    item(
+        "format:font-dialog",
+        "글꼴…",
+        None,
+        "studio-cmd:font-dialog",
+    ),
     item("format:style", "스타일 적용", None, "studio-cmd:home-style"),
     sc!("format:doc-justify", "양쪽 맞춤", "para-shape"),
     sc!("format:pages-justify", "좌우 정렬", "para-shape"),

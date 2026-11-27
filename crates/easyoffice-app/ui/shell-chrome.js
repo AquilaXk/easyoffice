@@ -100,6 +100,7 @@
     "format:italic": "studio-cmd:home-italic",
     "format:underline": "studio-cmd:home-underline",
     "format:strike": "studio-cmd:home-strike", "format:superscript": "studio-cmd:home-superscript", "format:subscript": "studio-cmd:home-subscript",
+    "format:font-dialog": "studio-cmd:font-dialog",
     "format:style": "studio-cmd:home-style",
     "format:doc-justify": "studio-cmd:para-shape",
     "format:pages-justify": "studio-cmd:para-shape",

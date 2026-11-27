@@ -47,7 +47,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     find: ["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"], replace: ["DOC", "HWP", "SHEET", "BASE"], print: ["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"],
     "clip-copy": [...EDIT_MODULES, "BASE", "BOARD"], "clip-cut": [...DOC_SHEET_MODULES, "SLIDE", "BASE", "BOARD"], "clip-paste": [...DOC_SHEET_MODULES, "SLIDE", "BASE", "BOARD"],
     "mod-symbol": EDIT_MODULES,
-    "home-strike": DOC_MODULES, "home-superscript": DOC_MODULES, "home-subscript": DOC_MODULES,
+    "home-strike": DOC_MODULES, "home-superscript": DOC_MODULES, "home-subscript": DOC_MODULES, "font-dialog": ["DOC"],
     "insert-image": DOC_MODULES, "mod-endnote": DOC_MODULES, "review-accept-all": ["DOC"], "review-reject-all": ["DOC"],
     "table-border-bg": DOC_MODULES, "table-cell-props": DOC_MODULES, "table-col-equal": DOC_MODULES, "table-split": DOC_MODULES,
     // Every ribbon command exists for the five editing modules, so its menu item is enabled in all

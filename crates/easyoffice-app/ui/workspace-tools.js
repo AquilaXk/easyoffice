@@ -761,11 +761,9 @@
       if (execStudioClipboardCmd(cmd)) return;
       if (execStudioParaCmd(cmd, fb, isDocMod, curMod, editor)) return;
       if (execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd, curMod, isDocMod)) return;
+      if (cmd === "font-dialog") return void (curMod === "DOC" && host.__EASYOFFICE_DOC_FONT_DIALOG__?.open(getDocRuns(), document));
       const runProp = { "home-strike": "strike", "home-superscript": "superscript", "home-subscript": "subscript" }[cmd];
-      if (runProp) {
-        if (curMod === "DOC" || (curMod === "HWP" && runProp === "strike")) getDocRuns().toggle(runProp);
-        return;
-      }
+      if (runProp) return void ((curMod === "DOC" || (curMod === "HWP" && runProp === "strike")) && getDocRuns().toggle(runProp));
       if (typeof onStudioCmd === "function") onStudioCmd(cmd);
     }
 
