@@ -35,6 +35,13 @@
 - [ ] 레이아웃의 `열`·탭 중단 지점·오른쪽 들여쓰기
 - [ ] 문서 사이드바에서 용지 크기·방향·문서 여백·머리말 꼬리말 체크상자를 사이드바 안에서 바로 고치기(지금은 페이지 설정 대화상자로 연다)
 
+## 디자인 가드 (PD-375)
+- [ ] 글꼴 대화상자(`doc-font-dialog.js`, `dialog-combo.js`)를 `scripts/webkit-dom/dialogs.mjs`의 워드프로세서 단계에 더한다: `.worktrees/font-dialog-official`(참조 앱 컴포넌트로 재구성)이 main에 들어간 뒤
+- [ ] 레이아웃 단계가 아직 열지 않는 대화상자를 더한다: 문서 하이퍼링크·표 속성·그림 크기·셀 테두리(선택이 필요), 슬라이드·PDF·BASE 창의 대화상자, 시트의 이름 정의·탭 이동·필터·슬라이서·표 스타일·이미지
+- [ ] `scripts/design-guard-known.mjs`의 리터럴 px 191곳을 토큰으로 바꾼다. 키트 규칙(shell.css의 `.tool-dialog .dialog-*`)부터 하고 줄일 때마다 `scripts/test-design-guard.mjs`의 개수를 내린다
+- [ ] 글자 화살표 11곳(`design-guard-known.mjs`의 `KNOWN_GLYPH_ARROWS`)을 `ui/icons.js` 아이콘이나 글로 바꾼다
+- [ ] 정렬·하이퍼링크 대화상자의 단추와 입력 높이 불일치(`scripts/webkit-dom/dialog-known.mjs`)를 맞춘다
+
 ## 배포
 - [ ] 릴리스 발행 잡의 쓰기 403: 수동 실행(`workflow_dispatch`)에서만 나서 릴리스를 태그 push로 시작해 우회 중이다. 원인은 미확정이고, 수동 실행이 필요해질 때 "Record the token's release access…" 경고와 `x-accepted-github-permissions`·`x-github-request-id`로 확정한다(PD-283 6항 (d))
 - [ ] 첫 아키텍처별 릴리스 뒤 dmg 크기와 잡 시간을 재고, `macos-15-intel` 폐기에 대비한다(PD-297)

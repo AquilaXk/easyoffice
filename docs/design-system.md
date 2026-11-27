@@ -30,7 +30,7 @@ EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 �
 
 - UI 글꼴은 `--font-family-ui`(`-apple-system, BlinkMacSystemFont, '맑은 고딕', 'Malgun Gothic', 'Segoe UI', sans-serif`). 문서용 글꼴은 OFL 번들(PD-081, PD-092)입니다.
 - 아이콘은 `ui/icons.js`의 24x24 선 아이콘 한 벌(`currentColor`)만 씁니다. 이모지·화살표·도형 문자를 아이콘 대용으로 쓰지 않고, 아이콘만 있는 컨트롤은 `aria-label`을 갖습니다.
-- 예외 한 가지. `▾`(콤보 화살표, 색 선택 단추)는 참조 앱과 같은 글리프라 `aria-hidden` 요소 안에 둡니다. 체크·라디오 메뉴 항목은 글리프 없이 참조 앱처럼 `aria-checked="true"`에 `.md-item.active`와 같은 바탕·글자색(`--ui-selected`, `--color-primary-dark`)을 씁니다.
+- 예외 한 가지. `▾`(콤보 화살표, 색 선택 단추)는 참조 앱과 같은 글리프라 `aria-hidden` 요소 안에 둡니다. 그 자리는 `scripts/design-guard.mjs`의 `SANCTIONED_CARETS`에 줄 단위로 적혀 있고, 그 밖의 글자 화살표(`▸ ▾ → ‹ ›` 등)는 `scripts/test-design-guard.mjs`가 막습니다. 체크·라디오 메뉴 항목은 글리프 없이 참조 앱처럼 `aria-checked="true"`에 `.md-item.active`와 같은 바탕·글자색(`--ui-selected`, `--color-primary-dark`)을 씁니다.
 - 포커스는 어디서나 `--color-focus-border` 1px 윤곽을 안쪽에 그립니다(`styles.css`의 `:focus-visible`, rhwp-studio `.sb-btn:focus-visible`). 컨트롤마다 따로 링을 만들지 않습니다(메뉴 항목·홈 화면처럼 참조 앱이 따로 정한 곳 제외).
 - 색 선택은 `ui/color-picker.js`(팔레트 + 최근 색 + 숨긴 네이티브 입력)를 씁니다. 대화상자나 `#board-style-bar`(`board-style-bar.js`, `.sb-color-host.dialog-color-host` + `.dialog-swatch`)에서도 보이는 `<input type="color">`는 두지 않습니다.
 
@@ -42,6 +42,30 @@ EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 �
 
 버튼·메뉴·필드 이름 같은 기능 라벨, "최근 문서" 같은 구역 제목, 상태·오류 메시지("열기 실패: …", "일치 3/10")만 화면에 둡니다. 사용법을 알려 주거나 기능을 풀어 쓰는 문장(홈 제목·부제, 끌어다 놓기 안내, 빈 상태 안내, 대화상자 안내 줄, 입력란 안내 문구, 긴 툴팁)은 넣지 않습니다. 툴팁(`title`)은 기능 이름과 단축키만 씁니다. 빈 상태는 빈 작업 영역과 비활성 도구줄로 보입니다. `scripts/test-webui-no-explanations.mjs`가 홈 화면·정적/동적 생성 대화상자(`#base-import-dialog`, `#export-dialog` 등)·빈 화면에 문장형 요소가 다시 들어오는 것을 막습니다.
 
+## 4-2. 대화상자 부품 키트 (PD-375)
+
+대화상자는 아래 클래스만 쓰고, 크기는 `tokens.css`의 토큰으로만 적습니다. 값은 참조 앱의 `dialogs.css`(표의 줄 번호)와 같습니다. 키트에 없는 컨트롤 클래스(콤보·스핀·목록·탭·단추·색 선택 같은 새 부품)는 이 표에 PD 번호와 함께 한 줄을 먼저 올린 뒤에 씁니다. `scripts/test-design-guard.mjs`가 index.html의 `<dialog>`에서, `scripts/webkit-dom/dialogs.mjs`가 열린 대화상자(스크립트가 만든 요소 포함)에서 이를 확인합니다. 키트 전에 만든 클래스와 리터럴 px는 `scripts/design-guard-known.mjs`에 있고 그 목록은 줄이기만 합니다.
+
+| 클래스 | 부품 | 크기 (토큰) | 참조 앱 | PD |
+| --- | --- | --- | --- | --- |
+| `.tool-dialog` `.dialog-wrap` | 창 틀 | 폭은 창마다, 글자 `--font-size-base` | dialogs.css 17-24 | PD-098 |
+| `.dialog-title` `.dialog-close` | 제목 줄(끌어서 이동)과 닫기 | 안쪽 `--dialog-title-padding`, 글자 `--font-size-base` 굵게, 닫기 16x16 | dialogs.css 26-54 | PD-098 |
+| `.dialog-body` `.dialog-section` `.dialog-section-title` | 본문, 묶음 틀 | 본문 안쪽 `--dialog-padding`, 묶음 안쪽 `--space-5` `--space-6`, 묶음 제목 `--font-size-sm` | dialogs.css 56-108 | PD-098 |
+| `.dialog-row` `.dialog-stack` | 한 줄(라벨과 컨트롤), 세로 쌓기 | 간격 `--dialog-gap`, 줄 아래 `--dialog-row-gap`, 세로 가운데 맞춤 | dialogs.css 110-119 | PD-098 |
+| `.dialog-label` | 라벨 | 글자 `--font-size-sm`, 최소 폭 `--dialog-label-min-width`, 찾기류 열은 `--dialog-label-width`, 오른쪽 맞춤 | dialogs.css 121-126, find-dialog.css 36-38 | PD-098 |
+| `.dialog-input` `.dialog-text-input` | 숫자·글 입력 | 높이 `--control-height-sm`(찾기 줄은 `--control-height-field`), 글자 `--font-size-sm`(찾기 줄은 `--font-size-base`), 좌우 안쪽 `--space-2` | dialogs.css 128-146·634-646, find-dialog.css 42-47 | PD-098 |
+| `.dialog-select` `.sb-combo` `.native-select-hidden` `.custom-select` `.custom-select-trigger` `.custom-select-value` `.custom-select-arrow` `.custom-select-sizer` `.custom-select-menu` `.custom-select-option` `.custom-select-group` | 콤보(`ui/custom-select.js`가 `<select class="dialog-select">`를 `.custom-select`로 바꾸고 원래 요소는 `.native-select-hidden`) | 높이 `--control-height-sm`, 글자 `--font-size-sm` | dialogs.css 154-169 | PD-098 |
+| `.dialog-checkbox` `.dialog-radio-group` `.dialog-icon-radio-group` | 체크·라디오 | 글자 `--font-size-sm`, 간격 `--space-2` | dialogs.css 176-193·572-584 | PD-098 |
+| `.dialog-unit` | 단위 표기 | 글자 `--font-size-xs` | dialogs.css 171-174 | PD-098 |
+| `.dialog-swatch` `.dialog-swatch-chip` `.dialog-color-host` `.sb-color-host` `.eo-color-input` `.eo-color-palette` `.sb-hl-palette` `.sb-hl-palette-row` `.sb-hl-palette-actions` `.sb-hl-swatch` | 색 선택(`ui/color-picker.js`) | 높이 `--control-height-sm` | toolbar.css 팔레트 | PD-098 |
+| `.dialog-btn-group` | 붙은 단추 묶음 | 높이 `--control-height-md`, 글자 `--font-size-sm` | dialogs.css 586-624 | PD-098 |
+| `.dialog-footer` `.dialog-btn` `.dialog-btn-primary` | 아래 단추 줄 | 높이 `--control-height-md`, 글자 `--font-size-base`, 간격 `--dialog-gap` | dialogs.css 195-238 | PD-098 |
+| `.dialog-tabs` `.dialog-tab` `.dialog-tab-panel` | 탭 | 안쪽 `--dialog-tab-padding-y` `--dialog-tab-padding-x`, 글자 `--font-size-sm` | dialogs.css 530-570 | PD-098 |
+| `.dialog-list` | 목록 상자 | 글자 `--font-size-sm`, 행 안쪽 `--list-row-padding-y` `--list-row-padding-x` | style-dialog.css 30-50 | PD-098 |
+| `.dialog-status-row` `.dialog-status` `.dialog-pdf-note` | 상태·주석 줄 | 최소 높이 `--dialog-status-height`, 글자 `--font-size-sm` | find-dialog.css 59-68, dialogs.css 249-275 | PD-098 |
+
+한 줄(`.dialog-row`, `.dialog-footer`, `.dialog-btn-group`) 안의 컨트롤은 높이와 위쪽 위치가 같고, 높이는 `--control-height-*` 중 하나, 글자 크기는 `--font-size-*` 중 하나입니다(라벨은 제외). 열린 대화상자의 어떤 상자도 내용이 넘쳐 잘리지 않습니다.
+
 ## 5. 새 화면을 만들 때
 
 1. 색은 위 토큰만, 간격·반경은 `--space-*`·`--radius-*`.
@@ -50,3 +74,7 @@ EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 �
 4. 라이트와 다크 둘 다에서 확인하고, 문서 내용 색이 필요하면 `content.css`에 둡니다.
 5. 기본 버튼은 `--accent-strong` 바탕입니다(참조 앱은 `--accent-primary`, 흰 글자 대비 3.7:1이라 4.5:1에 못 미쳐 의도적으로 다릅니다, PD-098 5항·PD-166).
 6. UI·UX 구성은 rhwp-studio(참조 앱) 기준을 우선 따르고, rhwp-studio에 대응 요소가 없는 시트·슬라이드·PDF 고유 구성 요소(슬라이서 등)는 표준 데스크톱 오피스 프로그램의 배치·동작 해부 구조를 따르되 색·테두리·아이콘은 위 토큰과 `ui/icons.js`로만 그립니다(QA 승인 2026-11-19).
+7. 대화상자는 4-2의 키트 클래스만 씁니다. 키트에 없는 컨트롤 클래스가 필요하면 표에 PD 번호와 함께 한 줄을 먼저 올립니다.
+8. 높이·글자 크기·안쪽 여백·간격은 크기 토큰(`--control-height-*`, `--font-size-*`, `--space-*`, `--dialog-*`)으로만 적고 리터럴 px를 새로 쓰지 않습니다. 필요한 토큰이 없으면 참조 앱 값으로 `tokens.css`에 더합니다.
+9. 같은 대화상자가 참조 앱에 있으면 두 앱을 나란히 캡처해 라벨 시작 위치, 컨트롤 높이, 글자 크기, 단추 줄이 같은지 봅니다. 없으면 같은 키트의 가장 가까운 대화상자와 맞춥니다.
+10. `scripts/webkit-dom/dialogs.mjs`에 대화상자를 여는 단계를 더해 줄 맞춤·크기 토큰·잘림 검사를 통과시킵니다.

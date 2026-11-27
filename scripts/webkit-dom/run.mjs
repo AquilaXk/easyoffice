@@ -3,6 +3,7 @@
 // Exit code 0 when every step passes. Captures of failed steps go to `captureDir` (default: a temp directory).
 import { baseSteps } from "./base.mjs";
 import { copilotDocSteps, copilotSlideSteps } from "./copilot.mjs";
+import { docDialogSteps, sheetDialogSteps } from "./dialogs.mjs";
 import { docSteps } from "./doc.mjs";
 import { sheetSteps } from "./sheet.mjs";
 import { findEngine, loadPlaywright, runSteps, startEngine, tempCaptureDir } from "./support.mjs";
@@ -20,7 +21,12 @@ try {
     launch,
     baseUrl: `http://127.0.0.1:${engine.port}`,
     captureDir,
-    groups: [{ module: "SHEET", steps: sheetSteps }, { module: "DOC", steps: [...docSteps, ...copilotDocSteps] }, { module: "SLIDE", steps: copilotSlideSteps }, { module: "BASE", steps: baseSteps }],
+    groups: [
+      { module: "SHEET", steps: [...sheetSteps, ...sheetDialogSteps] },
+      { module: "DOC", steps: [...docSteps, ...copilotDocSteps, ...docDialogSteps] },
+      { module: "SLIDE", steps: copilotSlideSteps },
+      { module: "BASE", steps: baseSteps },
+    ],
   });
   if (failed) console.log(`${failed} step(s) failed, captures in ${captureDir}`);
 } finally {
