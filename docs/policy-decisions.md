@@ -3567,7 +3567,7 @@
 
 ## PD-217. 동적 배열: 배열 결과를 내는 수식은 아래·오른쪽 칸으로 펼쳐지고, 막히면 `#SPILL!`이며, 펼친 칸은 입력이 아니라 수식의 결과다
 
-- **PD-361이 바꿈** `@`↔`SINGLE` 철자 변환은 수식 8,192자·중첩 64단까지만 하고 넘으면 원문을 둔다. 변환은 호출 스택을 쓰지 않는다.
+- **PD-363이 바꿈** `@`↔`SINGLE` 철자 변환은 수식 8,192자·중첩 64단까지만 하고 넘으면 원문을 둔다. 변환은 호출 스택을 쓰지 않는다.
 
 - **Status** Implemented (QA 요청 2026-11-14). 엔진 `crates/easyoffice-sheet`의 `array.rs`·`array_class.rs`·`array_eval.rs`·`spill.rs`·`functions_spill.rs`·`functions_lambda.rs`·`functions_array_gen.rs`·`parser_array.rs`·`lexer.rs`·`recalc/spill_api.rs`(`recalc/mod.rs`의 `recalculate`), 형식 `crates/easyoffice-formats`의 `sheet_spill.rs`·`xlsx_formula_text.rs`(`xlsx_sheet.rs`, `office_codecs.rs`, `ods_grid.rs`, `odf_hwpx_codecs.rs`), 응용 `crates/easyoffice-app`의 `eval_limit.rs`·`sheet_session.rs`·`sheet_structure_ipc.rs`·`sheet_layout_json.rs`·`convert_structured_encode.rs`, 화면 `ui/sheet-spill.js`·`sheet-store.js`·`sheet-controller.js`·`sheet-grid.js`·`sheet-input.js`·`sheet-clipboard.js`·`sheet-paste-core.js`·`sheet-structure.js`·`save-payload.js`·`styles.css`. 등록 함수는 262종에서 288종이 되었고(14종 + 12종) 위생 가드, 자체 검사, 문서의 수치 계약이 288을 가리킵니다. `functions_array_shape.rs`, `xlsx_parts.rs`, `sheet_protect_json.rs`의 `parse_sheet_lock`, `ui/find-sheet.js`가 더해졌습니다.
 - **Context** 셀은 값 하나만 가졌고 배열 결과를 내는 길이 없었습니다(PD-195·PD-201은 행렬 함수가 왼쪽 위 값만 돌려주게 하고 펼치기를 이 단계로 미뤘습니다). 스프레드시트 프로그램의 "동적 배열 수식과 분산된 배열 동작"과 "#SPILL! 오류" 문서(스프레드시트 프로그램의 한국어 지원 문서)를 기준으로 삼고, 참조 엔진 B(MIT 또는 Apache-2.0, 기준 커밋 `6dc9e8ba`)의 함수 본문과 시험을 옮겼습니다.
@@ -5441,7 +5441,7 @@
 
 ## PD-307. 새 문서와 DOCX·ODT·RTF 쓰기의 기본 글꼴·문단·여백·탭을 한국어판 기준 워드프로세서에 맞춤
 
-- **PD-361이 바꿈** 한국어판 기본값은 새 문서에만 쓴다. 다른 프로그램이 만든 DOCX·ODT·RTF를 열어 저장하면 그 파일의 기본 글꼴·크기·정렬·문단 간격·줄 간격·탭을 그대로 쓴다(`RichDocument::defaults`).
+- **PD-363이 바꿈** 한국어판 기본값은 새 문서에만 쓴다. 다른 프로그램이 만든 DOCX·ODT·RTF를 열어 저장하면 그 파일의 기본 글꼴·크기·정렬·문단 간격·줄 간격·탭을 그대로 쓴다(`RichDocument::defaults`).
 
 - **Status** Implemented (QA 지시 2026-11-23: 문서는 한국어판 기준 워드프로세서와 일치해야 한다). 엔진 `crates/easyoffice-formats/src/rich_document.rs`(`RichPageMargins::DOC_DEFAULT`), `rich_page_frame.rs`(`DOC_DEFAULT_*` 상수, `docx_page_margins`, `docx_cols_xml`, `docx_settings`, `odt_master_page`, `odt_styles_xml`), `rich_writers.rs`(`docx_styles_xml` `<w:docDefaults>`, `word/settings.xml` 상시 포함), `odt_rich_writer.rs`(`styles.xml` 및 `META-INF/manifest.xml` 상시 등록), `rich_run_writers.rs`(`odt_font_face_decls`, `RtfRunTables::header_lines`), `rich_rtf_writer.rs`, `rich_read_rtf.rs`(`RtfPageSetup`, `tab`), `rtf_xml_helpers.rs`, `rtf_escape.rs`, `pdf_laid.rs`. 화면 `crates/easyoffice-app/ui/content.css`, `styles.css`, `index.html`, `doc-runs.js`, `doc-runs-ui.js`, `doc-page-setup.js`, `doc-page-frame.js`, `workspace-panels.js`, `workspace-tools.js`. 시험 `crates/easyoffice-formats/tests/doc_korean_defaults_pd307.rs`, `scripts/test-webui-doc-korean-defaults-pd307.mjs`.
 - **Context** 기존 새 문서는 화면에서 `휴먼명조`·`11.0pt`·`160%`·`48px 56px` 여백과 `.ruler-track` `682px`를 썼다. DOCX 쓰기는 `Calibri`·`11pt`(`22`)·여백 `120` twips·`115%`(`276`)를 적고 `word/settings.xml`은 특수 플래그가 없으면 쓰지 않았다. ODT는 프레임·여백이 없으면 `styles.xml`과 `<style:default-style>`을 생략했고, RTF는 `Calibri`·`\ansicpg949`·`\defchp`·`\defpap`·페이지 설정과 `\tab` 라운드트립이 빠져 있었다.
@@ -5527,7 +5527,7 @@
 
 ## PD-312 — Pages 기본 글꼴·쪽 설정·문단 모양 정합 및 다중 구역 머리글·바닥글 부록 표지 원문 비교 (2026-11-23)
 
-- **PD-361이 바꿈** 표의 타일·테두리 레이어는 개체별로 한 번만 파싱하고 문서 복원 예산에 청구한다. 열어 본 Pages의 문단 스타일 기본값 보존은 아직 없다(`TODO.md`).
+- **PD-363이 바꿈** 표의 타일·테두리 레이어는 개체별로 파싱해 최근 4개만 두고, 파싱마다 payload와 필드 메모리를 문서 복원 예산에 청구한다. 열어 본 Pages의 문단 스타일 기본값 보존은 아직 없다(`TODO.md`).
 
 - **Context** `PD-162`·`PD-246`에서 만든 `.pages` 쓰기(`pages_write/`)는 본문 12 pt(`Helvetica`), 여백 1인치(`72 pt` = `1,440 twip`), 머리글·바닥글 여백 `36 pt`, 기본 탭 간격 `28.0 pt`를 썼다. 반면 기준 Pages 앱 한국어 빈 문서(ISO A4) 템플릿(`Blank/ISO.template` + 한국어 현지화 속성 표)은 ISO A4(`595.28 × 841.89 pt`), 상·하·좌·우 여백 `20.0 mm`(`56.692913 pt`), 머리글 `12.5 mm`(`35.43307 pt`), 바닥글 `15.0 mm`(`42.519684 pt`), 본문 `AppleSDGothicNeo-Regular` `11.0 pt`, 제목 1~6 `AppleSDGothicNeo-Bold` `[18.0, 16.0, 14.0, 13.0, 12.0, 11.0] pt`, 기본 탭 간격 `36.0 pt`로 연다. 또한 `PD-264`의 `RichParagraph.frame_copy: bool`은 첫 구역 쪽 틀과 같은 복사본만 걸러 구역 2 이후의 다른 머리글·바닥글은 열기→저장을 되풀이할 때 본문으로 남는 문제가 남아 있었다(`TODO.md`).
 - **Decision (`PD-312`)**
@@ -5649,7 +5649,7 @@
 
 ## PD-320 — 시트 `FILTERXML` 클린룸 XPath 1.0 평가기 및 내장 함수 314종 확장 (2026-11-23)
 
-- **PD-361이 바꿈** XML의 `xmlns` 선언이 256개를 넘으면 `#VALUE!`이고, XML 길이와 선언 수 × 요소 수를 step으로 청구하며, 같은 (XML, XPath) 쌍의 성공 결과는 한 계산 안에서 캐시한다.
+- **PD-363이 바꿈** XML의 `xmlns` 선언이 256개를 넘으면 `#VALUE!`이고, XML 길이와 선언 수 × 요소 수를 step으로 청구하며, 같은 (XML, XPath) 쌍의 성공 결과는 한 계산 안에서 캐시한다.
 
 - **Context** 기존에는 유지되는 허용 라이선스 XPath 크레이트가 없고 구버전 외부 크레이트의 접두사 패닉과 중첩 술어 시간 폭발 때문에 `FILTERXML`을 이름만 아는 함수(`#VALUE!`)로 비워 두었다(`PD-271`, `TODO.md`).
 - **Decision (`PD-320`)**
@@ -5665,7 +5665,7 @@
 
 ## PD-321 — 암호화 컨테이너 8종 판별 정합화 및 `save_verify` OLE2 필수 스트림 보강 (2026-11-23)
 
-- **PD-361이 바꿈** OLE2 `EncryptionInfo`·`EncryptedPackage` 판정은 루트 저장소의 스트림만 본다. 중첩 저장소의 같은 이름은 `.doc`가 품은 개체라서 암호화로 보지 않는다.
+- **PD-363이 바꿈** OLE2 `EncryptionInfo`·`EncryptedPackage` 판정은 루트 저장소의 스트림만 본다. 중첩 저장소의 같은 이름은 `.doc`가 품은 개체라서 암호화로 보지 않는다.
 
 - **Context** 기존 포맷 감지와 ZIP/Pages 리더 및 저장 검증에는 네 가지 공백이 있었다(`TODO.md`). (1) `[MS-OFFCRYPTO]` 기반 암호화 `.docx`·`.xlsx`·`.pptx`·`.ppsx`는 `OLE2` 헤더로 감싸여 있어 확장자 힌트가 있으면 `SignatureMismatch`로, 힌트가 없으면 `Doc`으로 오판됐다. (2) 암호화 `.odt`·`.ods`·`.odp`·`.hwpx`·`.hwtx`는 평문 `META-INF/manifest.xml`에 `<manifest:encryption-data>`를 두지만 본문 XML UTF-8 검사에 먼저 걸려 `InvalidUtf8`로 실패했다. (3) `.pages` 판별과 패키지 로더는 `Index/Metadata.iwa`·`Index.zip`·`.iwpv2`·`Doc.pages/index.xml` 접두사를 놓치거나 `!has_iwa`를 먼저 검사해 암호화 패키지를 손상으로 오판했고, `Metadata/Properties.plist`에 `"isEncrypted"` 문자열만 존재해도(`<false/>`·`0x08`) 무조건 암호화로 거부했다. (4) `save_verify.rs` `verify_ole2`는 `.hwp`/`.hwt` 외 `.doc`·`.xls`·`.ppt`에 필수 스트림 검사를 두지 않아 무관계 스트림 1개만 있어도 통과시켰다.
 - **Decision (`PD-321`)**
@@ -5980,7 +5980,7 @@
 
 ## PD-343 — 엔진 시트 PDF 줄바꿈 텍스트 분리·자동 행 높이 계산 지원 (2026-11-25)
 
-- **PD-361이 바꿈** 병합 칸 판정을 칸마다 병합 전체를 훑는 방식에서 행 스윕과 열 Fenwick 색인으로 바꿨다.
+- **PD-363이 바꿈** 병합 칸 판정을 칸마다 병합 전체를 훑는 방식에서 행 스윕과 열 Fenwick 색인으로 바꿨다.
 
 - **Context** `PD-287`·`PD-300` 이후에도 엔진 시트 PDF(`pdf_laid.rs`)는 `CellStyle::wrap` 칸을 한 줄로 잘라(`fit_text_with_width`) 그리고 자동 행 높이를 확장하지 않아 여러 줄·긴 줄바꿈 텍스트가 잘리고 겹쳤다(`TODO.md`).
 - **Decision (`PD-343`)**
@@ -6295,20 +6295,20 @@
 - **Verified by** `crates/easyoffice-app/tests/copilot_overhaul_ipc.rs`, `crates/easyoffice-app/tests/copilot_gaps_pd267.rs`, `crates/easyoffice-app/tests/copilot_engine_pd253.rs`, `crates/easyoffice-app/tests/copilot_stream_pd268.rs`, `scripts/test-webui-copilot-overhaul.mjs`, `scripts/webkit-dom/run.mjs`, `scripts/hwp-studio-harness.mjs`, `scripts/test-hwp-studio.mjs`, `scripts/test-webui-menu-kinds.mjs`, `node scripts/verify-licenses.mjs`, `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-*.mjs`, `cargo fmt --all -- --check`, `cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings`, `cargo test --workspace --exclude easyoffice-desktop`, `cargo run -p easyoffice-app -- --self-test`, `cargo clippy -p easyoffice-desktop --all-targets -- -D warnings`, `cargo test -p easyoffice-desktop`.
 - **Revisit when** `HWP` 표 셀·각주 내부 구조화 코파일럿 편집 RPC나 스트리밍 중 도구 호출 실시간 표시가 필요할 때.
 
-## PD-361 — 외부 파일 CPU 상한 보강(XLSX 수식 `SINGLE`·Pages 공유 개체·`FILTERXML` 네임스페이스)과 열어 본 문서의 기본값 보존 (2026-11-27)
+## PD-363 — 외부 파일 CPU 상한 보강(XLSX 수식 `SINGLE`·Pages 공유 개체·`FILTERXML` 네임스페이스)과 열어 본 문서의 기본값 보존 (2026-11-27)
 
 - **Status** Implemented (심층 리뷰 결함 4건, 모든 입력 파일은 신뢰하지 않는다는 `PD-262` 원칙).
 - **Context** (1) `e04f09c1`에서 들어온 `SINGLE`↔`@` 변환이 재귀이고 호출마다 토큰을 복사해, `_xlfn.SINGLE(`을 3만 번 겹친 `<f>`가 26초 걸렸고 2 MB 스택에서는 2만 번에서 프로세스가 죽었다. (2) Pages 표는 타일·테두리 레이어 개체를 참조하는 항목마다 다시 파싱해, 130 KB 타일 하나를 수백만 항목이 가리키면 17분이 걸렸다. (3) `FILTERXML`은 네임스페이스 선언이 요소마다 되풀이 적재되어 32 KB 문서 20칸이 11초, 144 KB 문서 하나가 38초 걸렸다. (4) DOCX·ODT·RTF 쓰기는 `docDefaults`·`default-style`·`\defpap`을 늘 한국어판 값(`PD-307`)으로 찍어, 다른 워드프로세서가 만든 Calibri 11·왼쪽 맞춤 문서를 열어 저장하면 양쪽 맞춤·문단 뒤 8pt·108% 줄 간격·`맑은 고딕` 10pt로 바뀌었다.
-- **Decision (`PD-361`)**
+- **Decision (`PD-363`)**
   1. **XLSX 수식 변환(`xlsx_single_operator.rs`, `xlsx_formula_text.rs`)**: 수식 한 개는 8,192자(스프레드시트 서식의 수식 길이 한도)까지, 중첩은 64단(같은 서식의 중첩 한도)까지 변환한다. 넘으면 그 수식의 철자 변환만 건너뛰고 원문을 그대로 둔다. 변환은 쓰기 스타일의 표기 정규화일 뿐이어서 수식 하나 때문에 파일 전체를 거부하면 과하고, 원문을 두면 데이터가 잃히지 않는다. 읽기(`from_file_formula`)와 쓰기(`to_file_formula`)가 같은 규칙을 쓴다. 두 방향 모두 호출 스택 대신 명시 스택으로 돌고, 괄호 짝은 한 번 훑어 표로 만들고, `@` 피연산자의 끝은 시작 위치별로 한 번만 구한다. 토큰 복사를 없앴다.
-  2. **Pages 표 파싱 캐시(`pages_table/parsed.rs`)**: 타일과 테두리 레이어는 개체 ID별로 한 번만 파싱하고, 파싱한 payload 바이트를 문서 복원 예산(`DecodeBudget`)에 한 번만 청구한다. 파싱에 실패한 개체도 한 번만 시도한다. 표마다 새 캐시를 두므로 표 수 × payload 크기도 예산이 막는다.
+  2. **Pages 표 파싱 캐시(`pages_table/parsed.rs`)**: 타일과 테두리 레이어는 개체 ID별로 파싱하고 최근 4개만 둔다. 같은 개체를 되풀이해 가리키는 공격은 한 번만 파싱하고, 파싱에 실패한 개체도 캐시에 있는 동안은 다시 시도하지 않는다. 파싱마다 payload 바이트와 만든 필드(`fields.capacity() × size_of::<Field>()`, 64 KiB payload가 약 1 MiB)를 문서 복원 예산(`DecodeBudget`)에 청구한다. 서로 다른 개체가 많으면 결과가 쌓이지 않고 예산에서 `ResourceBudgetExceeded`가 나며, 캐시 크기보다 많은 개체를 번갈아 가리키는 공격은 파싱마다 예산을 쓰다가 막힌다. 표마다 새 캐시를 둔다.
   3. **`FILTERXML`(`functions_filterxml.rs`, `filterxml_cache.rs`)**: XML 안의 `xmlns` 선언이 256개를 넘으면 파싱 전에 `#VALUE!`로 막는다(파서가 요소마다 범위 안 선언을 다시 복사하는 이차 비용). 그다음 `ctx.charge_steps`에 `길이/16 + 선언 수 × 요소 수`를 청구한다(캐시 적중에도 같은 값을 청구). 같은 (XML, XPath) 쌍은 한 번의 계산 안에서 결과를 캐시한다(256개·4 MiB 상한, 성공 결과만. 실패는 그 칸의 step 예산 때문일 수 있어 담지 않는다).
-  4. **문서 기본값 보존(`rich_defaults.rs`, 포맷별 `defaults.rs`)**: `RichDocument::defaults: Option<RichDefaults>`(글꼴·동아시아 글꼴·크기·정렬·문단 앞뒤 간격·줄 간격·탭)를 두었다. 새 문서는 `None`이고 쓰기에서 한국어판 기본값(`PD-307`)을 쓴다. 파일을 열면 읽기 쪽이 채우고, 쓰기는 그 값을 그대로 쓴다. DOCX는 `w:docDefaults` 위에 Normal 스타일을 속성 단위로 겹치고 테마 글꼴(`minorHAnsi` 등)은 `theme1.xml`로 풀며(`a:ea`가 비면 언어의 문자 글꼴, 한국어는 `Hang`) `w:defaultTabStop`도 읽는다. ODT는 문단 `style:default-style` 위에 `Standard` 스타일을 겹치고 글꼴 이름은 `style:font-face` 선언으로 푼다. RTF는 머리부(`\deff`·글꼴 표·`\*\defpap`·`\*\defchp`·스타일 시트의 첫 항목·`\deftab`)만 읽는다. 파일이 아무 기본값도 주지 않으면 서식 자체의 기본(10pt·단일 줄·간격 0·왼쪽·탭 720)을 쓴다.
+  4. **문서 기본값 보존(`rich_defaults.rs`, 포맷별 `defaults.rs`)**: `RichDocument::defaults: Option<RichDefaults>`(글꼴·동아시아 글꼴·크기·정렬·문단 앞뒤 간격·줄 간격·탭)를 두었다. 새 문서는 `None`이고 쓰기에서 한국어판 기본값(`PD-307`)을 쓴다. 파일을 열면 읽기 쪽이 채우고, 쓰기는 그 값을 그대로 쓴다. DOCX는 `w:docDefaults` 위에 Normal 스타일을 속성 단위로 겹치고 테마 글꼴(`minorHAnsi` 등)은 `theme1.xml`로 풀며(`a:ea`가 비면 언어의 문자 글꼴, 한국어는 `Hang`) `w:defaultTabStop`도 읽는다. ODT는 문단 `style:default-style` 위에 `Standard` 스타일을 겹치고 글꼴 이름은 `style:font-face` 선언으로 푼다. RTF는 머리부(`\deff`·글꼴 표·`\*\defpap`·`\*\defchp`·스타일 시트의 첫 항목·`\deftab`)만 읽는다. 글꼴 이름은 항목 안의 하위 그룹(`{\*\falt ..}`)을 빼고, `\'hh` 바이트는 글꼴의 `\fcharset`이나 `\ansicpg`의 코드 페이지로 풀며(표 없는 코드 페이지는 이름을 버린다) 글꼴 수 상한(1,024)에서도 이미 있는 번호는 다시 정의할 수 있다. 줄 간격은 `lineRule`이 `auto`일 때만 240분율로 받고 `exact`·`atLeast`는 무시한다. 글자 크기 상한은 세 포맷이 3,276 half-point로 같다. 파일이 아무 기본값도 주지 않으면 서식 자체의 기본(10pt·단일 줄·간격 0·왼쪽·탭 720)을 쓴다.
   5. **포맷별 확인**: DOCX·ODT·RTF는 위와 같이 고쳤다. HWPX는 읽기가 바탕글 스타일의 맞춤·줄 간격·크기·글꼴을 문단과 런에 풀어 넣어 왕복 때 값이 남으므로 고치지 않았다(시험으로 확인). 한 HWPX의 바탕글이 왼쪽 맞춤·130%·11pt·`바탕`이어도 저장 뒤 그대로다. HWP 5.0은 `RichDocument` 쓰기 경로가 없다(편집기 엔진이 저장). PPTX·ODP·Pages는 같은 유형의 간극이 남아 있다(Trade-offs 3).
   6. **함께 고친 것**: 시트 PDF 줄바꿈 행 높이(`pdf_sheet_wrap.rs`)의 병합 판정을 칸마다 병합 전체를 훑는 방식에서 행 스윕과 열 Fenwick 색인으로 바꿔 병합 10만 × 칸 50만을 0.1초대에 처리한다. 암호화 OLE2 판정(`encrypted_container.rs`)은 루트 저장소의 `EncryptionInfo`·`EncryptedPackage`만 본다. 중첩 저장소의 같은 이름은 `.doc`가 품은 개체이므로 암호화로 보지 않는다.
 - **재사용 판단 (구현 원칙 3단계)** (1) 수식 표기 변환·Pages 표·`FILTERXML`·문서 기본값을 대신할 허용 라이선스 외부 크레이트가 없다. (2) 기존 `DecodeBudget`, `FastU64Map`, `XmlReader`, `RichAlignment::parse`, 읽기 쪽 길이·글자 크기 변환기, `EvalContext::charge_steps`를 그대로 썼고 새 의존성은 없다. (3) 이식한 참조 구현은 없다. 중첩 64단·수식 8,192자는 스프레드시트 서식의 한도, 네임스페이스 256개는 우리 기준(참조 앱에 같은 상한이 없어 실제 문서 사용례에 비해 넉넉한 값으로 정함)이다.
 - **Why** 작은 입력이 분 단위 CPU를 쓰거나 프로세스를 죽이면 안 되고, 다른 프로그램이 만든 문서를 열어 저장해도 서식 기본값이 바뀌지 않아야 한다. 기준 워드프로세서는 기존 문서의 `docDefaults`와 Normal 스타일을 그대로 지킨다.
-- **Trade-offs** (1) 8,192자·64단을 넘는 수식은 `_xlfn.` 접두사 없이 쓰이거나 읽힌다(값은 그대로). (2) 열어 본 DOCX를 다시 쓰면 `w:kern`·`w:szCs`·`w:lang`은 모델에 없어 고정값이다. Normal 스타일의 줄 간격이 `exact`·`atLeast`이면 240분율 값으로 근사한다. DOCX·ODT·RTF 사이의 변환은 기본값을 가져간다(DOCX를 ODT로 바꾸면 Calibri 11이 ODT 기본이 된다). HWPX 쓰기는 다른 포맷에서 온 기본값을 쓰지 않고 한글 워드프로세서 기본값(`PD-311`)을 유지한다. (3) PPTX·ODP는 덱 모델에 마스터·테마 칸이 없어 열어 저장하면 마스터와 테마 글꼴이 우리 것으로 바뀐다. Pages는 스타일을 런에 풀어 넣지만 문단 간격 같은 스타일 기본값은 템플릿 값을 쓴다. 이 둘은 모델 확장이 필요해 `TODO.md`에 남겼다. (4) 암호화 OOXML 래퍼를 확장자 없이 감지하면 오류의 포맷 이름은 여전히 `DOCX`다. 안쪽 문서 종류를 알려 주는 정보가 래퍼에 없어서, 중립 표시를 쓰려면 오류 변형을 바꿔야 한다(QA 결정 대기).
+- **Trade-offs** (1) 8,192자·64단을 넘는 수식은 `_xlfn.` 접두사 없이 쓰이거나 읽힌다(값은 그대로). (2) 열어 본 DOCX를 다시 쓰면 `w:kern`·`w:szCs`·`w:lang`은 모델에 없어 고정값이다. 줄 간격이 `exact`·`atLeast`인 기본값은 읽지 않아 아래 층(또는 단일 줄)이 남는다. DOCX·ODT·RTF 사이의 변환은 기본값을 가져간다(DOCX를 ODT로 바꾸면 Calibri 11이 ODT 기본이 된다). HWPX 쓰기는 다른 포맷에서 온 기본값을 쓰지 않고 한글 워드프로세서 기본값(`PD-311`)을 유지한다. (3) PPTX·ODP는 덱 모델에 마스터·테마 칸이 없어 열어 저장하면 마스터와 테마 글꼴이 우리 것으로 바뀐다. Pages는 스타일을 런에 풀어 넣지만 문단 간격 같은 스타일 기본값은 템플릿 값을 쓴다. 이 둘은 모델 확장이 필요해 `TODO.md`에 남겼다. (4) 암호화 OOXML 래퍼를 확장자 없이 감지하면 오류의 포맷 이름은 여전히 `DOCX`다. 안쪽 문서 종류를 알려 주는 정보가 래퍼에 없어서, 중립 표시를 쓰려면 오류 변형을 바꿔야 한다(QA 결정 대기).
 - **Alternatives rejected** (1) 재귀를 두고 깊이만 막는 방식: 스택 안전은 얻어도 호출마다 복사하는 이차 비용이 남는다. (2) 길이·깊이 초과 수식에 파일 전체 거부: 철자 정규화 하나 때문에 열기를 막는다. (3) `docDefaults`·`default-style` XML을 통째로 보관해 되쓰기: 같은 포맷에는 충실하나 DOCX→ODT·RTF 변환에 쓸 수 없다. (4) 문서마다 기본값을 문단·런에 채워 쓰기: 새 문서의 `None` 상속 불변식과 왕복 동치성이 깨진다(`PD-307`).
-- **Verified by** `crates/easyoffice-formats/tests/xlsx_formula_text_limits_pd361.rs`(스택 256 KiB 스레드에서 3만 단 중첩·`@` 3만 개·`@(` 8천 쌍이 2초 안에 끝나고 원문 유지, 길이·깊이 경계. 구현을 바꿀 때 400,000건 무작위 입력으로 이전 재귀 구현과 같은 결과임을 따로 대조함), `pages_table` 단위 시험(같은 타일을 19,000 항목이 가리켜 한 번만 파싱·예산 청구), `crates/easyoffice-sheet/tests/sheet_filterxml.rs`(선언 폭탄 22칸 거부, 256개 경계, 같은 쌍 200칸), `crates/easyoffice-formats/tests/doc_defaults_roundtrip_pd361.rs`(DOCX·ODT·RTF·HWPX 외부 파일 왕복과 DOCX→ODT·RTF 변환, 새 문서는 한국어판), `encrypted_containers_pd321.rs`의 중첩 저장소 시험, `pdf_sheet_wrap.rs`의 스윕 동치·병합 10만 시험. 전후 시간은 보고서에 있다.
+- **Verified by** `crates/easyoffice-formats/tests/xlsx_formula_text_limits_pd363.rs`(스택 256 KiB 스레드에서 3만 단 중첩·`@` 3만 개·`@(` 8천 쌍이 2초 안에 끝나고 원문 유지, 길이·깊이 경계. 구현을 바꿀 때 400,000건 무작위 입력으로 이전 재귀 구현과 같은 결과임을 따로 대조함), `pages_table/parsed.rs` 단위 시험(같은 개체를 1만 번 가리켜도 파싱 1회, 서로 다른 64 KiB 개체 200개는 예산에서 막히고 캐시는 4개 이하, 캐시보다 많은 개체를 번갈아 가리키면 예산에서 막힘)과 `pages_table` 표 시험(같은 타일을 19,000 항목이 가리켜도 예산 사용 2 MiB 미만), `crates/easyoffice-sheet/tests/sheet_filterxml.rs`(선언 폭탄 22칸 거부, 256개 경계, 같은 쌍 200칸), `crates/easyoffice-formats/tests/doc_defaults_roundtrip_pd363.rs`(DOCX·ODT·RTF·HWPX 외부 파일 왕복과 DOCX→ODT·RTF 변환, 새 문서는 한국어판), `encrypted_containers_pd321.rs`의 중첩 저장소 시험, `pdf_sheet_wrap.rs`의 스윕 동치·병합 10만 시험. 전후 시간은 보고서에 있다.
 - **Revisit when** 슬라이드 덱 모델에 마스터·테마를 담을 때, 암호화 오류 변형에 "OOXML 종류 미상"을 추가할 때, 문서 기본값 모델에 `w:kern`·`w:lang`이 필요해질 때.

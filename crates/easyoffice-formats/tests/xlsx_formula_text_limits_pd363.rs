@@ -1,4 +1,4 @@
-//! PD-361: formula spelling conversion has a length cap and a nesting cap, takes linear time, and
+//! PD-363: formula spelling conversion has a length cap and a nesting cap, takes linear time, and
 //! needs no recursion. Input files are untrusted (PD-262).
 
 use easyoffice_formats::{from_file_formula, to_file_formula};

@@ -1,4 +1,4 @@
-//! Results of `FILTERXML` within one evaluation pass (PD-361). A sheet that repeats one document
+//! Results of `FILTERXML` within one evaluation pass (PD-363). A sheet that repeats one document
 //! and one query in many cells parses and walks the document once. Only successful results are
 //! kept: a failure can come from the step budget of the cell that ran it, and the next cell has a
 //! fresh budget. The cache is bounded and stops taking entries when it is full.

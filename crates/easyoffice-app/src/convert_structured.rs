@@ -237,7 +237,7 @@ pub(crate) fn parse_structured_content(
             notes,
             comments,
             track_changes,
-            // The editor payload carries no document defaults yet (PD-361), so a save from it is
+            // The editor payload carries no document defaults yet (PD-363), so a save from it is
             // written with the new-document defaults.
             defaults: None,
         };

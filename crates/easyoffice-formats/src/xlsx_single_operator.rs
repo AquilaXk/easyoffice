@@ -1,4 +1,4 @@
-//! The implicit intersection operator in a formula (PD-217, PD-361): the page writes `@A1:A5`, a
+//! The implicit intersection operator in a formula (PD-217, PD-363): the page writes `@A1:A5`, a
 //! file writes `_xlfn.SINGLE(A1:A5)`.
 //!
 //! The text of a file is untrusted (PD-262). Both directions run on an explicit stack, never on the

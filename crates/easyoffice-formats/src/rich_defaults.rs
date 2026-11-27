@@ -1,4 +1,4 @@
-//! Document-wide defaults of an opened file (PD-361).
+//! Document-wide defaults of an opened file (PD-363).
 //!
 //! A paragraph or run that names no value of its own takes the document default: the DOCX
 //! `w:docDefaults` merged with the Normal style, the ODT `style:default-style` of the paragraph

@@ -159,7 +159,7 @@ pub(crate) struct EvalContext<'a> {
     /// What the formulas of this pass read through `OFFSET` and `INDIRECT`; `None` when nobody collects it.
     pub(crate) dyn_reads: Option<DynReads>,
     pub(crate) lookup_cache: LookupCache,
-    /// `FILTERXML` results of this pass, by document and query (PD-361).
+    /// `FILTERXML` results of this pass, by document and query (PD-363).
     pub(crate) filterxml_cache: FilterXmlCache,
     /// Virtual single-cell override for zero-mutation evaluations.
     pub(crate) cell_overlay: Option<(u16, PackedCellCoordinate, EvaluatedCellValue)>,

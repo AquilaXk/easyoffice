@@ -115,7 +115,7 @@ fn bplist_root_dict(entries: &[(&str, bool)]) -> Vec<u8> {
 
 #[test]
 fn an_encrypted_ooxml_object_inside_a_doc_does_not_make_the_doc_encrypted() {
-    // PD-361: only the root storage decides; a nested storage is an embedded object.
+    // PD-363: only the root storage decides; a nested storage is an embedded object.
     let doc_with_object = Ole2ContainerCodec::pack(&[
         ("WordDocument".to_string(), vec![0; 64]),
         (

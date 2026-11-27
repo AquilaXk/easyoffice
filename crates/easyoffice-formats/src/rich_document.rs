@@ -587,7 +587,7 @@ pub struct RichDocument {
     pub comments: Vec<RichComment>,
     /// Whether tracked changes (`Insert` / `Delete` revisions) are enabled on this document.
     pub track_changes: bool,
-    /// Document-wide defaults of an opened file (PD-361); `None` for a new document, which gets the
+    /// Document-wide defaults of an opened file (PD-363); `None` for a new document, which gets the
     /// Korean defaults of PD-307 when it is written.
     pub defaults: Option<crate::RichDefaults>,
 }

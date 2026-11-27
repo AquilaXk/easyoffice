@@ -312,7 +312,7 @@ fn join(tokens: &[Tok]) -> String {
     out
 }
 
-/// The longest formula, in characters, the spreadsheet format allows (PD-361). A longer text is a
+/// The longest formula, in characters, the spreadsheet format allows (PD-363). A longer text is a
 /// hostile or damaged file: its spelling is not converted, the text is kept as it is.
 const MAX_FORMULA_CHARS: usize = 8192;
 

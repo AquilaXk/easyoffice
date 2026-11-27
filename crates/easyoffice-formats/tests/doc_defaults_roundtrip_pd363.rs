@@ -1,4 +1,4 @@
-//! PD-361: a file made elsewhere keeps its document defaults (typeface, size, alignment, paragraph
+//! PD-363: a file made elsewhere keeps its document defaults (typeface, size, alignment, paragraph
 //! spacing, line height, tab stop) when it is opened and saved again. The Korean defaults of PD-307
 //! belong to a new document only. Each test builds the file by replacing the style parts of a file
 //! this crate wrote with the parts another word processor writes.
@@ -335,10 +335,14 @@ fn an_opened_rtf_keeps_its_defaults_when_saved() {
 }
 
 #[test]
-fn an_rtf_font_name_in_a_code_page_is_dropped_not_misread() {
-    let rtf = "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fnil\\fcharset129 \\'b8\\'bc\\'c0\\'ba;}}\\pard x\\par}";
+fn an_rtf_with_a_korean_font_name_in_a_code_page_keeps_the_name() {
+    // 맑은 고딕 as a Korean word processor writes it
+    let rtf = "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fnil\\fcharset129 \\'b8\\'bc\\'c0\\'ba \\'b0\\'ed\\'b5\\'f1;}}\\pard x\\par}";
     let opened = decode(rtf.as_bytes(), "korean.rtf");
-    assert_eq!(opened.defaults.map(|d| d.font), Some(None));
+    assert_eq!(
+        opened.defaults.and_then(|d| d.font).as_deref(),
+        Some("맑은 고딕")
+    );
 }
 
 // ---------------------------------------------------------------- HWPX

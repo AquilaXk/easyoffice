@@ -313,7 +313,7 @@ fn namespace_heavy_xml(root: usize, children: usize) -> String {
 #[test]
 fn filterxml_rejects_namespace_declaration_bombs_fast() {
     // Every child sees the root's declarations again: declarations times elements is quadratic in
-    // the size of the file, so the declaration count is capped before the parser runs (PD-361).
+    // the size of the file, so the declaration count is capped before the parser runs (PD-363).
     let started = Instant::now();
     let mut model = new_empty_model();
     // 20 cells of the worst 32 KB shape, then two more ways over the cap

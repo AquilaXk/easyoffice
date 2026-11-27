@@ -20,7 +20,7 @@ fn has_xml_entry_ext(path: &str) -> bool {
 }
 
 /// Returns `true` when `bytes` is a valid OLE2 CFBF container carrying an `[MS-OFFCRYPTO]`
-/// `EncryptionInfo` or `EncryptedPackage` stream in its root storage (PD-361). A stream of those
+/// `EncryptionInfo` or `EncryptedPackage` stream in its root storage (PD-363). A stream of those
 /// names inside a nested storage belongs to an embedded object (a `.doc` can hold an encrypted
 /// OOXML object) and does not encrypt the container. Fails closed to `false` on unpack errors or
 /// oversized inputs under [`Ole2SecurityGuard`](crate::Ole2SecurityGuard) limits.
@@ -252,7 +252,7 @@ mod tests {
         ])
         .unwrap();
         assert!(is_ole2_offcrypto_encrypted(&root));
-        // PD-361: a nested storage holds an embedded object, not the encryption of the container
+        // PD-363: a nested storage holds an embedded object, not the encryption of the container
         let nested = Ole2ContainerCodec::pack(&[
             ("RootSub/encryptioninfo".to_string(), vec![1, 2, 3]),
             ("Other".to_string(), vec![4]),

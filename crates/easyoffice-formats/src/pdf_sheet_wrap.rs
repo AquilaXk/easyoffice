@@ -262,7 +262,7 @@ pub(crate) fn wrap_cell_lines(text: &str, room_pt: f64, font_pt: f64) -> Vec<&st
 }
 
 /// Answers "is this cell inside a merged range" for cells asked in ascending row order, in time
-/// logarithmic in the column count instead of linear in the number of merges (PD-361). A merge
+/// logarithmic in the column count instead of linear in the number of merges (PD-363). A merge
 /// enters the sweep at its first row and leaves after its last; a Fenwick tree over the columns of
 /// the area counts the merges that cover each column (range add, point query).
 struct MergeSweep<'a> {
