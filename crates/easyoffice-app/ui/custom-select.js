@@ -185,7 +185,6 @@
     if (selectLabel) trigger.setAttribute("aria-label", selectLabel);
     const value = el(document, "span", "custom-select-value");
     const arrow = el(document, "span", "custom-select-arrow");
-    arrow.textContent = "▾";
     arrow.setAttribute("aria-hidden", "true");
     const menu = el(document, "div", "custom-select-menu");
     menu.setAttribute("role", "listbox");

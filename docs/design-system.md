@@ -30,7 +30,7 @@ EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 �
 
 - UI 글꼴은 `--font-family-ui`(`-apple-system, BlinkMacSystemFont, '맑은 고딕', 'Malgun Gothic', 'Segoe UI', sans-serif`). 문서용 글꼴은 OFL 번들(PD-081, PD-092)입니다.
 - 아이콘은 `ui/icons.js`의 24x24 선 아이콘 한 벌(`currentColor`)만 씁니다. 이모지·화살표·도형 문자를 아이콘 대용으로 쓰지 않고, 아이콘만 있는 컨트롤은 `aria-label`을 갖습니다.
-- 예외 한 가지. `▾`(콤보 화살표, 색 선택 단추)는 참조 앱과 같은 글리프라 `aria-hidden` 요소 안에 둡니다. 그 자리는 `scripts/design-guard.mjs`의 `SANCTIONED_CARETS`에 줄 단위로 적혀 있고, 그 밖의 글자 화살표(`▸ ▾ → ‹ ›` 등)는 `scripts/test-design-guard.mjs`가 막습니다. 체크·라디오 메뉴 항목은 글리프 없이 참조 앱처럼 `aria-checked="true"`에 `.md-item.active`와 같은 바탕·글자색(`--ui-selected`, `--color-primary-dark`)을 씁니다.
+- 드롭다운 화살표(콤보, 색 선택 단추, 이름 상자, 필터 단추)는 글자가 아니라 Lucide `chevron-down` 그림입니다(`.eo-chevron`, `toolbar.css`, PD-377). 숫자 칸의 위·아래 단추는 `chevron-up`/`chevron-down`입니다. 글자 화살표(`▸ ▾ → ‹ ›` 등)는 `▾`도 예외 없이 `scripts/test-design-guard.mjs`가 막고(`SANCTIONED_CARETS`는 비어 있습니다), CSS `content`의 `"\25BE"` 같은 이스케이프도 같이 봅니다. 체크·라디오 메뉴 항목은 글리프 없이 참조 앱처럼 `aria-checked="true"`에 `.md-item.active`와 같은 바탕·글자색(`--ui-selected`, `--color-primary-dark`)을 씁니다.
 - 포커스는 어디서나 `--color-focus-border` 1px 윤곽을 안쪽에 그립니다(`styles.css`의 `:focus-visible`, rhwp-studio `.sb-btn:focus-visible`). 컨트롤마다 따로 링을 만들지 않습니다(메뉴 항목·홈 화면처럼 참조 앱이 따로 정한 곳 제외).
 - 색 선택은 `ui/color-picker.js`(팔레트 + 최근 색 + 숨긴 네이티브 입력)를 씁니다. 대화상자나 `#board-style-bar`(`board-style-bar.js`, `.sb-color-host.dialog-color-host` + `.dialog-swatch`)에서도 보이는 `<input type="color">`는 두지 않습니다.
 
@@ -54,7 +54,7 @@ EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 �
 | `.dialog-row` `.dialog-stack` | 한 줄(라벨과 컨트롤), 세로 쌓기 | 간격 `--dialog-gap`, 줄 아래 `--dialog-row-gap`, 세로 가운데 맞춤 | dialogs.css 110-119 | PD-098 |
 | `.dialog-label` | 라벨 | 글자 `--font-size-sm`, 최소 폭 `--dialog-label-min-width`, 찾기류 열은 `--dialog-label-width`, 오른쪽 맞춤 | dialogs.css 121-126, find-dialog.css 36-38 | PD-098 |
 | `.dialog-input` `.dialog-text-input` | 숫자·글 입력 | 높이 `--control-height-sm`(찾기 줄은 `--control-height-field`), 글자 `--font-size-sm`(찾기 줄은 `--font-size-base`), 좌우 안쪽 `--space-2` | dialogs.css 128-146·634-646, find-dialog.css 42-47 | PD-098 |
-| `.dialog-select` `.sb-combo` `.native-select-hidden` `.custom-select` `.custom-select-trigger` `.custom-select-value` `.custom-select-arrow` `.custom-select-sizer` `.custom-select-menu` `.custom-select-option` `.custom-select-group` | 콤보(`ui/custom-select.js`가 `<select class="dialog-select">`를 `.custom-select`로 바꾸고 원래 요소는 `.native-select-hidden`) | 높이 `--control-height-sm`, 글자 `--font-size-sm` | dialogs.css 154-169 | PD-098 |
+| `.dialog-select` `.sb-combo` `.native-select-hidden` `.custom-select` `.custom-select-trigger` `.custom-select-value` `.custom-select-arrow` `.custom-select-sizer` `.custom-select-menu` `.custom-select-option` `.custom-select-group` | 콤보(`ui/custom-select.js`가 `<select class="dialog-select">`를 `.custom-select`로 바꾸고 원래 요소는 `.native-select-hidden`) | 높이 `--control-height-sm`, 글자 `--font-size-sm`, 화살표 칸의 구분선은 없고 쉐브론만(`--chevron-size`) | dialogs.css 154-169 | PD-098, PD-377 |
 | `.dialog-checkbox` `.dialog-radio-group` `.dialog-icon-radio-group` | 체크·라디오 | 글자 `--font-size-sm`, 간격 `--space-2` | dialogs.css 176-193·572-584 | PD-098 |
 | `.dialog-unit` | 단위 표기 | 글자 `--font-size-xs` | dialogs.css 171-174 | PD-098 |
 | `.dialog-swatch` `.dialog-swatch-chip` `.dialog-color-host` `.sb-color-host` `.eo-color-input` `.eo-color-palette` `.sb-hl-palette` `.sb-hl-palette-row` `.sb-hl-palette-actions` `.sb-hl-swatch` | 색 선택(`ui/color-picker.js`) | 높이 `--control-height-sm` | toolbar.css 팔레트 | PD-098 |
@@ -63,6 +63,7 @@ EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 �
 | `.dialog-tabs` `.dialog-tab` `.dialog-tab-panel` | 탭 | 안쪽 `--dialog-tab-padding-y` `--dialog-tab-padding-x`, 글자 `--font-size-sm` | dialogs.css 530-570 | PD-098 |
 | `.dialog-list` | 목록 상자 | 글자 `--font-size-sm`, 행 안쪽 `--list-row-padding-y` `--list-row-padding-x` | style-dialog.css 30-50 | PD-098 |
 | `.dialog-grid` `.dialog-grid-wide` `.dialog-field` `.dialog-swatch-text` | 라벨·칸·라벨·칸·단위 열 격자와 칸이 셀을 채우는 폭, 색 단추의 이름 | 간격 `--dialog-row-gap` `--dialog-gap`, 글자 `--font-size-sm`, 미리 보기 `--dialog-preview-height` | char-shape-dialog.css 4-31 | PD-376 |
+| `.eo-stepper` `.eo-stepper-input` `.eo-stepper-buttons` `.eo-stepper-button` `.eo-chevron` `.eo-chevron-up` | 숫자 칸(`ui/number-stepper.js`가 모든 `input[type="number"]`를 `.eo-stepper`로 감싸고, 칸의 클래스는 상자가 이어받는다)과 드롭다운·스텝퍼의 Lucide 쉐브론 | 칸 높이는 칸 그대로(`--control-height-sm`), 단추 셀 폭 `--stepper-width`, 쉐브론 `--chevron-size`, 위·아래 단추 사이에만 줄 | Spectrum CSS `components/stepper/index.css`, Lucide `chevron-down`·`chevron-up` | PD-377 |
 | `.dialog-status-row` `.dialog-status` `.dialog-pdf-note` | 상태·주석 줄 | 최소 높이 `--dialog-status-height`, 글자 `--font-size-sm` | find-dialog.css 59-68, dialogs.css 249-275 | PD-098 |
 
 한 줄(`.dialog-row`, `.dialog-footer`, `.dialog-btn-group`) 안의 컨트롤은 높이와 위쪽 위치가 같고, 높이는 `--control-height-*` 중 하나, 글자 크기는 `--font-size-*` 중 하나입니다(라벨은 제외). 열린 대화상자의 어떤 상자도 내용이 넘쳐 잘리지 않습니다.

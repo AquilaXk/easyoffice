@@ -117,13 +117,11 @@ export function scriptSizeViolations(js) {
 /** Text-glyph arrows. `▾` is the one the standard keeps (docs/design-system.md 3), the rest stand in for icons. */
 const ARROW_GLYPHS = "←↑→↓↔↕↗↘↙↖⇐⇑⇒⇓⇔▲▼◀▶►◄▴▾▸◂▹◃▽△⏴⏵⏶⏷⌄˄˅‹›«»";
 
-/** Where the `▾` of the standard sits: the exact line of text and how often it may occur there. */
-export const SANCTIONED_CARETS = [
-  { file: "index.html", text: '<span aria-hidden="true">▾</span>', count: 28, why: "caret of a color select button (.sb-color-arrow, .dialog-swatch)" },
-  { file: "index.html", text: '<span class="custom-select-arrow" aria-hidden="true">▾</span>', count: 2, why: "caret cell of the color buttons of the font dialog (the combo box's arrow cell, PD-376)" },
-  { file: "custom-select.js", text: 'arrow.textContent = "▾";', count: 1, why: "arrow cell of the combo box" },
-  { file: "board-style-bar.js", text: 'el("span", "", { "aria-hidden": "true" }, "▾")', count: 1, why: "color button caret of the board style bar" },
-];
+/**
+ * Where a `▾` text glyph may stand: the exact line of text and how often it may occur there. Empty since PD-377: every drop-down
+ * arrow is the Lucide chevron (`.eo-chevron`, toolbar.css), so a `▾` anywhere is a violation.
+ */
+export const SANCTIONED_CARETS = [];
 
 const SCRIPT_COMMENT = /^\s*(\/\/|\/\*|\*)/;
 const quotedGlyphs = (line) => [...line.matchAll(/(["'`])([^"'`\n]{1,3})\1/g)].map((m) => m[2]).filter((text) => [...text].some((ch) => ARROW_GLYPHS.includes(ch)));
@@ -142,7 +140,9 @@ export function glyphArrows(file, text, kind) {
   if (kind === "html") {
     for (const m of body.matchAll(/>([^<>]*)</g)) for (const ch of m[1]) if (ARROW_GLYPHS.includes(ch)) note(ch);
   } else if (kind === "css") {
-    for (const m of stripComments(body).matchAll(/content\s*:\s*([^;}]*)/g)) for (const ch of m[1]) if (ARROW_GLYPHS.includes(ch)) note(ch);
+    // A CSS escape (`"\25BE"`) is the glyph too.
+    const unescaped = (value) => value.replaceAll(/\\([0-9a-fA-F]{4,6})\s?/g, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)));
+    for (const m of stripComments(body).matchAll(/content\s*:\s*([^;}]*)/g)) for (const ch of unescaped(m[1])) if (ARROW_GLYPHS.includes(ch)) note(ch);
   } else {
     for (const line of body.split("\n")) {
       if (SCRIPT_COMMENT.test(line)) continue;

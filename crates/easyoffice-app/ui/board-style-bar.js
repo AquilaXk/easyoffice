@@ -135,7 +135,7 @@
       const wrap = el("div", "board-style-field", { id: wrapId });
       const hostEl = el("div", "sb-color-host dialog-color-host", { id: hostId });
       const chip = el("span", "dialog-swatch-chip", { "aria-hidden": "true" });
-      const caret = el("span", "", { "aria-hidden": "true" }, "▾");
+      const caret = el("span", "eo-chevron", { "aria-hidden": "true" });
       const toggleBtn = appendAll(
         el("button", "dialog-swatch", { type: "button", "data-color-toggle": "true", "aria-haspopup": "true", "aria-expanded": "false", title: ariaLabel, "aria-label": ariaLabel }),
         chip, caret

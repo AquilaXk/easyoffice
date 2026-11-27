@@ -22,9 +22,9 @@ const DESIGN_SYSTEM = readText(fileURLToPath(new URL("../docs/design-system.md",
 const TOKENS = ui("tokens.css");
 
 const SIZE_VIOLATION_COUNTS = {
-  "base.css": 9, "board.css": 8, "content.css": 2, "copilot.css": 6, "home.css": 7, "menu-bar.css": 11, "shell.css": 86, "styles.css": 26, "toolbar.css": 35,
+  "base.css": 9, "board.css": 8, "content.css": 2, "copilot.css": 6, "home.css": 7, "menu-bar.css": 11, "shell.css": 83, "styles.css": 26, "toolbar.css": 34,
 };
-const GLYPH_ARROW_COUNT = 11;
+const GLYPH_ARROW_COUNT = 8;
 const WIDGET_CLASS_COUNT = 24;
 
 const sameList = (actual, known, what) => {
@@ -96,15 +96,15 @@ test("arrows made of text glyphs are known and nothing new is added; the caret o
   }
   assert.deepEqual(actual, KNOWN_GLYPH_ARROWS, "text-glyph arrows: draw an icon of ui/icons.js; a fixed one leaves design-guard-known.mjs");
   assert.equal(Object.values(KNOWN_GLYPH_ARROWS).flatMap((glyphs) => Object.values(glyphs)).reduce((a, b) => a + b, 0), GLYPH_ARROW_COUNT);
-  assert.equal(SANCTIONED_CARETS.every((s) => s.text.includes("▾")), true);
 });
 
 test("glyph arrows are told from prose and data", () => {
   assert.deepEqual([...glyphArrows("x.html", '<button title="Alt+↑">위</button><span>→</span><span aria-hidden="true">▾</span>', "html")], [["→", 1], ["▾", 1]]);
-  assert.deepEqual([...glyphArrows("index.html", '<span aria-hidden="true">▾</span>', "html")], [], "the place of the standard");
-  assert.deepEqual([...glyphArrows("other.html", '<span aria-hidden="true">▾</span>', "html")], [["▾", 1]], "outside the places of the standard it counts");
-  assert.deepEqual([...glyphArrows("custom-select.js", 'arrow.textContent = "▾";\nconst glyphs = Array.from("→←↑↓↔↕");\n// "▸"\nconst a = "▸";', "js")], [["▸", 1]]);
+  assert.deepEqual([...glyphArrows("index.html", '<span aria-hidden="true">▾</span>', "html")], [["▾", 1]], "no place keeps the text caret since PD-377");
+  assert.deepEqual([...glyphArrows("custom-select.js", 'arrow.textContent = "▾";\nconst glyphs = Array.from("→←↑↓↔↕");\n// "▸"\nconst a = "▸";', "js")], [["▾", 1], ["▸", 1]]);
   assert.deepEqual([...glyphArrows("x.css", '.a::after { content: "›"; }\n/* content: "»" */', "css")], [["›", 1]]);
+  assert.deepEqual([...glyphArrows("x.css", '.a::after { content: "\\25BE"; }\n.b::after { content: "\\25BC"; }', "css")], [["▾", 1], ["▼", 1]], "a CSS escape is the glyph too");
+  assert.deepEqual(SANCTIONED_CARETS, [], "every drop-down arrow is the chevron of toolbar.css");
 });
 
 test("the kit list names its classes with a PD, and dialogs use only kit classes or the grandfathered ones", () => {

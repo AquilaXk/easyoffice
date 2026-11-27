@@ -922,6 +922,7 @@
   async function initWorkspace() {
     icons.applyIcons(document);
     host.__EASYOFFICE_CUSTOM_SELECT__.enhanceCustomSelects(document);
+    host.__EASYOFFICE_NUMBER_STEPPER__.enhanceNumberFields(document);
     void shellChrome.applyStoredTheme();
     shellChrome.bind();
     copilotUi.bind();

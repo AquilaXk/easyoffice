@@ -178,6 +178,9 @@
   --list-row-padding-x: var(--space-4);
   /* 글꼴 대화상자(PD-376): 미리 보기는 글꼴 크기가 바뀌어도 높이가 같도록 고정 */
   --dialog-preview-height: 48px;
+  /* 드롭다운 화살표와 숫자 칸(PD-377): 쉐브론 그림 상자 14px(선 모양은 가운데 7x3.5px), 숫자 칸의 위·아래 단추 셀 폭 16px(60px 크기 칸에서 입력 영역 44px이 남는다) */
+  --chevron-size: 14px;
+  --stepper-width: 16px;
 
   /* 터치 타겟 (모바일) */
   --touch-target-min: 44px;

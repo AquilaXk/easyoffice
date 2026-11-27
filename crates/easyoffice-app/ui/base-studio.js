@@ -506,7 +506,7 @@
         const inner = appendAll(el("div", "base-th-inner"),
           el("span", "base-th-name", field.name),
           el("span", "base-th-type", M.FIELD_TYPE_LABELS[field.type] || field.type),
-          mkBtn("base-field-edit-btn", "▾", () => openFieldDialog(field), "", `필드 설정: ${field.name}`)
+          appendAll(mkBtn("base-field-edit-btn", "", () => openFieldDialog(field), "", `필드 설정: ${field.name}`), setAttr(el("span", "eo-chevron"), "aria-hidden", "true"))
         );
         appendAll(th, inner, setAttr(el("span", "col-resizer"), "aria-hidden", "true")); headRow.appendChild(th);
       }

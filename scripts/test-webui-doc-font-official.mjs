@@ -57,7 +57,9 @@ test("the value fields are spin fields with the unit beside them, and a pasted n
   fire(kind);
   const value = byId(h, "doc-font-spacing-value");
   assert.deepEqual([value.getAttribute("type"), value.classList.contains("dialog-input")], ["number", true], "the reference's number field");
-  const beside = value.parentNode.children[[...value.parentNode.children].indexOf(value) + 1];
+  const box = value.parentNode;
+  assert.equal(box.classList.contains("eo-stepper"), true, "the field is in the stepper box");
+  const beside = box.parentNode.children[[...box.parentNode.children].indexOf(box) + 1];
   assert.deepEqual([beside.className, beside.textContent], ["dialog-unit", "pt"], "the unit is the label beside the field");
   for (const [pasted, shown] of [["2pt", "2"], ["1,5", "1.5"], ["150 %", "150"]]) {
     value.dispatchEvent({ type: "paste", target: value, bubbles: true, clipboardData: { getData: () => pasted }, preventDefault() {} });

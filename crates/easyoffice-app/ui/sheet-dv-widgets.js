@@ -104,7 +104,10 @@ const ARROW_WIDTH_PX = 15; // the combo box arrow cell
       button.className = "cf-dropdown-btn";
       button.setAttribute("aria-label", "목록에서 선택");
       button.setAttribute("aria-haspopup", "listbox");
-      button.textContent = "▾";
+      const chevron = document.createElement("span");
+      chevron.className = "eo-chevron";
+      chevron.setAttribute("aria-hidden", "true");
+      button.appendChild(chevron);
       button.setAttribute("aria-expanded", "false");
       button.hidden = true;
       // Keep the cell selected while the arrow is pressed.

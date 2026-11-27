@@ -43,7 +43,7 @@
 .base-th-inner { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 .base-th-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-base); font-weight: 700; }
 .base-th-type { flex: 0 0 auto; font-size: var(--font-size-xs); font-weight: 400; line-height: 1.2; color: var(--ui-text-muted); }
-.base-field-edit-btn { position: relative; z-index: 4; flex: 0 0 auto; width: 20px; height: 20px; border: 0; border-radius: 0; background: transparent; color: var(--ui-text-muted); font-size: var(--font-size-sm); font-weight: 400; line-height: 1; padding: 0; cursor: pointer; }
+.base-field-edit-btn { position: relative; z-index: 4; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 20px; height: 20px; border: 0; border-radius: 0; background: transparent; color: var(--ui-text-muted); font-size: var(--font-size-sm); font-weight: 400; line-height: 1; padding: 0; cursor: pointer; }
 .base-field-edit-btn:hover, .base-field-edit-btn:focus-visible { background: var(--ui-hover); color: var(--ui-text); }
 .base-group-row { background: var(--ui-bg-light); }
 .base-group-toggle { border: 0; background: transparent; color: var(--ui-text); font-size: var(--font-size-base); font-weight: 700; cursor: pointer; padding: var(--space-1) var(--space-2); }

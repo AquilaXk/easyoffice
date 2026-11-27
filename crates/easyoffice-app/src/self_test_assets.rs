@@ -85,6 +85,10 @@ pub(super) const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         "__EASYOFFICE_CUSTOM_SELECT__",
     ),
     (
+        include_str!("../ui/number-stepper.js"),
+        "__EASYOFFICE_NUMBER_STEPPER__",
+    ),
+    (
         include_str!("../ui/color-picker.js"),
         "__EASYOFFICE_COLOR_PICKER__",
     ),

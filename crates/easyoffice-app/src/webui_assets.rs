@@ -129,6 +129,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "menu-keyboard.js",
     "menu-kinds.js",
     "module-search.js",
+    "number-stepper.js",
     "office-print.js",
     "pages-ui.js",
     "pdf-edit.js",

@@ -142,7 +142,8 @@ test("a multiple list shows its arrow, marks the chosen items and toggles them i
   h.userClick(button);
   const menu = d.getElementById("sheet-dv-dropdown-menu");
   assert.equal(menu.hidden, false);
-  assert.equal(button.textContent, "▾", "the combo arrow's letter, no icon");
+  assert.equal(button.textContent, "", "no letter: the chevron is a child of the button");
+  assert.equal(button.querySelector(".eo-chevron")?.getAttribute("aria-hidden"), "true", "the combo arrow's chevron");
   assert.equal(button.getAttribute("aria-expanded"), "true", "the open menu gives the arrow its open look");
   // The arrow cell is 15px wide, as tall as the cell inside its bottom border, at the cell's right end.
   assert.equal(button.style.height, "23px");
@@ -208,12 +209,13 @@ test("the list arrow takes the combo box arrow cell's look", () => {
     return css.slice(at, css.indexOf("}", at));
   };
   const arrow = rule(".cf-dropdown-btn");
-  for (const part of [/width: 15px/, /border: 0/, /border-left: 1px solid var\(--color-border-light\)/, /color: var\(--color-text-muted\)/, /font-size: 8px/]) assert.match(arrow, part);
+  for (const part of [/width: 15px/, /border: 0/, /color: var\(--color-text-muted\)/]) assert.match(arrow, part);
+  assert.doesNotMatch(arrow, /border-left|font-size/, "no divider and no letter size: only the chevron");
   assert.match(rule(".cf-dropdown-btn:hover, .cf-dropdown-btn[aria-expanded=\"true\"]"), /background: var\(--color-hover-bg\)/);
   // The reference: the combo's own arrow cell.
   const reference = fs.readFileSync(UI("toolbar.css"), "utf8");
   const cell = reference.slice(reference.indexOf(".custom-select-arrow {"), reference.indexOf("}", reference.indexOf(".custom-select-arrow {")));
-  assert.match(cell, /border-left: 1px solid var\(--color-border-light\)/);
+  assert.doesNotMatch(cell, /border-left/, "the combo's arrow cell has no divider since PD-377");
   assert.match(cell, /color: var\(--color-text-muted\)/);
-  assert.match(cell, /font-size: 8px/);
+  assert.doesNotMatch(cell, /font-size/);
 });

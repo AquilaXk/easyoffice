@@ -760,6 +760,56 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## Lucide (ISC; Feather icons MIT)
+
+Source: https://github.com/lucide-icons/lucide (`icons/chevron-down.svg`, `icons/chevron-up.svg`, Copyright (c) 2026 Lucide Icons and Contributors).
+Nothing is vendored or linked at runtime. The path data of the two chevrons (`m6 9 6 6 6-6`, `m18 15-6-6-6 6`, 24x24 grid, stroke 2, round caps and joins) is embedded as the mask images `--chevron-down-mask` and `--chevron-up-mask` in `crates/easyoffice-app/ui/toolbar.css` (PD-377) and draws every drop-down arrow and the stacked buttons of the number fields. Both icons are among the Lucide icons derived from Feather, so the MIT license below applies to them as well as the ISC license.
+
+```
+ISC License
+
+Copyright (c) 2026 Lucide Icons and Contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+The MIT License (MIT) (for the icons derived from Feather)
+
+Copyright (c) 2013-present Cole Bemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## Spectrum CSS (Apache-2.0)
+
+Source: https://github.com/adobe/spectrum-css (`components/stepper/index.css`, `components/stepper/stories/template.js`, Copyright 2024 Adobe. All rights reserved.). The repository is archived (2026-10); its successor is https://github.com/adobe/spectrum-web-components (Apache-2.0).
+Nothing is vendored or linked at runtime. The structure of the Stepper (a number text field and a column of two stacked in-field buttons, as high as the field, with no line in front of the column, one line between the buttons and only the end-side corners rounded, `.spectrum-Stepper-buttons` lines 299-320) is ported to plain DOM in `crates/easyoffice-app/ui/number-stepper.js` and to the rules `.eo-stepper*` at the end of `crates/easyoffice-app/ui/shell.css` (PD-377). Changed to fit: no Lit template, the colors, sizes and focus are the tokens of `tokens.css`, the buttons carry the Lucide chevrons above. The full Apache License 2.0 text above applies identically.
+
 ## Open XML SDK (MIT)
 
 Source: https://github.com/dotnet/Open-XML-SDK (`data/schemas/schemas_microsoft_com_office_word_2010_wordml.json`, Copyright (c) .NET Foundation and Contributors).

@@ -172,7 +172,7 @@ export const docSteps = [
     await page.fill("#doc-font-spacing-value", "");
     await page.keyboard.type("2pt");
     assert.equal(await page.inputValue("#doc-font-spacing-value"), "2", "a number field takes the digits; the unit is the label beside it");
-    assert.equal(await page.textContent("#doc-font-spacing-value + .dialog-unit"), "pt");
+    assert.equal(await page.textContent(".eo-stepper:has(#doc-font-spacing-value) + .dialog-unit"), "pt");
     await page.selectOption("#doc-font-num-spacing", "2");
     await page.selectOption("#doc-font-num-form", "1");
     await page.selectOption("#doc-font-style-set", "3");
@@ -200,8 +200,8 @@ export const docSteps = [
     for (const tab of ["font", "advanced"]) {
       await page.click(`#doc-font-tab-${tab}`);
       const pane = `#doc-font-pane-${tab}`;
-      const boxes = await page.$$eval(`${pane} input[type="text"], ${pane} .custom-select, ${pane} .dialog-swatch`, (els) => els.filter((el) => el.getBoundingClientRect().height > 0).map((el) => {
-        const text = el.matches(".custom-select") ? el.querySelector(".custom-select-value") : el.matches(".dialog-swatch") ? el.querySelector(".dialog-swatch-text") : el;
+      const boxes = await page.$$eval(`${pane} .eo-stepper, ${pane} .custom-select, ${pane} .dialog-swatch`, (els) => els.filter((el) => el.getBoundingClientRect().height > 0).map((el) => {
+        const text = el.matches(".custom-select") ? el.querySelector(".custom-select-value") : el.matches(".dialog-swatch") ? el.querySelector(".dialog-swatch-text") : el.querySelector("input");
         return { id: el.id || el.dataset.selectId, height: el.getBoundingClientRect().height, font: getComputedStyle(text).fontSize };
       }));
       assert.ok(boxes.length >= 4, `${tab}: the controls are found`);
@@ -211,7 +211,7 @@ export const docSteps = [
     const tops = await page.$$eval('.custom-select[data-select-id="doc-font-family"], .custom-select[data-select-id="doc-font-style"], #doc-font-size', (els) => els.map((el) => el.getBoundingClientRect().top));
     assert.equal(new Set(tops).size, 1, `한글 글꼴, 글꼴 스타일 and 크기 start on one line: ${tops}`);
     // 크기 is the reference's 기준 크기 field (60px) and its spin buttons sit inside it: nothing is cut. The block holds no empty rows: it ends where 영어 글꼴 ends.
-    const size = await page.$eval("#doc-font-size", (el) => ({ width: el.getBoundingClientRect().width, clipped: el.scrollWidth > el.clientWidth }));
+    const size = await page.$eval("#doc-font-size", (el) => ({ width: el.parentNode.getBoundingClientRect().width, clipped: el.scrollWidth > el.clientWidth }));
     assert.deepEqual(size, { width: 60, clipped: false });
     const block = await page.evaluate(() => ({
       end: document.querySelector("#doc-font-pane-font .dialog-font-top").getBoundingClientRect().bottom,
@@ -233,6 +233,55 @@ export const docSteps = [
       return grid.querySelector(".custom-select").getBoundingClientRect().left - range.getBoundingClientRect().right;
     });
     assert.ok(start >= 8 && start < 12, `the controls start ${start}px after the longest label`);
+  }],
+
+  // PD-377: the number field is the stepper (a press steps and clamps in the real engine, the cell is as high as the field with a line
+  // only between its two buttons and no divider in front of it) and the chevrons are drawn and centered, also in the combo box.
+  ["숫자 칸의 위·아래 단추가 값을 바꾸고 단추 열과 쉐브론이 칸과 선택 화살표 칸의 가운데에 맞는다", async (page) => {
+    await typeFirstParagraph(page, "가나다라");
+    await page.evaluate(() => document.querySelector('.md-item[data-studio-menu-cmd="font-dialog"]').click());
+    await page.waitForSelector("#doc-font-dialog[open]");
+    const buttons = ".eo-stepper:has(#doc-font-size) .eo-stepper-button";
+    await page.fill("#doc-font-size", "10");
+    await page.click(`${buttons} >> nth=0`);
+    assert.equal(await page.inputValue("#doc-font-size"), "10.5", "up steps by half a point");
+    await page.click(`${buttons} >> nth=1`);
+    await page.click(`${buttons} >> nth=1`);
+    assert.equal(await page.inputValue("#doc-font-size"), "9.5", "down steps back");
+    await page.fill("#doc-font-size", "1638");
+    await page.click(`${buttons} >> nth=0`);
+    assert.equal(await page.inputValue("#doc-font-size"), "1638", "max clamps");
+    await page.fill("#doc-font-size", "1");
+    await page.click(`${buttons} >> nth=1`);
+    assert.equal(await page.inputValue("#doc-font-size"), "1", "min clamps");
+    const geometry = await page.evaluate(() => {
+      const input = document.querySelector("#doc-font-size");
+      const box = input.parentNode;
+      const cell = box.querySelector(".eo-stepper-buttons");
+      const [up, down] = [...cell.querySelectorAll(".eo-stepper-button")];
+      const rect = (el) => el.getBoundingClientRect();
+      const middle = (r) => [(r.left + r.right) / 2, (r.top + r.bottom) / 2];
+      const line = (el, side) => getComputedStyle(el)[`border${side}Width`];
+      const chevrons = [up, down].map((b) => ({ button: middle(rect(b)), chevron: middle(rect(b.querySelector(".eo-chevron"))) }));
+      const arrow = document.querySelector('.custom-select[data-select-id="doc-font-family"] .custom-select-arrow');
+      const before = getComputedStyle(arrow, "::before");
+      return {
+        box: rect(box).height, cell: rect(cell).height, cellWidth: rect(cell).width, cellRight: rect(cell).right, boxRight: rect(box).right,
+        lines: [line(cell, "Left"), line(up, "Top"), line(down, "Top")], native: getComputedStyle(input).appearance,
+        chevrons,
+        arrowLeft: getComputedStyle(arrow).borderLeftWidth, arrowChevron: [before.width, before.height, before.maskImage || before.webkitMaskImage],
+        arrowCenter: (() => { const a = rect(arrow); return a.left + a.width / 2; })(),
+      };
+    });
+    assert.ok(Math.abs(geometry.box - geometry.cell - 2) <= 1, `the cell is as high as the field inside its frame: ${geometry.box} ${geometry.cell}`);
+    assert.equal(geometry.cellWidth, 16, "the cell has the token width");
+    assert.ok(Math.abs(geometry.boxRight - geometry.cellRight - 1) <= 1, "the cell is at the end of the field");
+    assert.deepEqual(geometry.lines, ["0px", "0px", "1px"], "no line in front of the cell, one between the two buttons");
+    assert.equal(geometry.native, "textfield", "the browser's own spin button is gone");
+    for (const { button, chevron } of geometry.chevrons) assert.ok(Math.abs(button[0] - chevron[0]) <= 1 && Math.abs(button[1] - chevron[1]) <= 1, `a chevron is centered in its button: ${button} ${chevron}`);
+    assert.equal(geometry.arrowLeft, "0px", "no divider in front of the combo box's chevron");
+    assert.deepEqual(geometry.arrowChevron.slice(0, 2), ["14px", "14px"]);
+    assert.match(geometry.arrowChevron[2], /svg/, "the chevron is an image mask");
   }],
 
   // PD-376: the 글꼴 탭's colors, underline style, double strikethrough, capitals, hidden text and emphasis reach the run, its computed style
