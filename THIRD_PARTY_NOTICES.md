@@ -760,6 +760,35 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## Awesomplete (MIT)
+
+Source: https://github.com/LeaVerou/awesomplete (`awesomplete.js`, Copyright (c) 2015 Lea Verou).
+Nothing is vendored or linked at runtime. The editable combo box of the dialogs `crates/easyoffice-app/ui/dialog-combo.js` (PD-373) is ported from it: the instance fields (`index`, `ul`, `container`, `isOpened`), `open`, `close`, `goto`, `next`, `previous` and `select`, the `combobox` / `listbox` / `option` ARIA roles with `aria-expanded`, `aria-controls` and `aria-activedescendant`, the mousedown-then-click pick that keeps the focus in the field, and the Enter / Esc / Up / Down handling (`awesomplete.js` lines 14-141 and 191-319). Changed to fit: plain `{ label, value }` items without the filter, sort, `innerHTML` highlight and status line, `event.key` in place of `keyCode`, a toggle arrow, an inline list and a `change` event after a pick.
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2015 Lea Verou
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Rust dependencies compiled into the rhwp WebAssembly module
 
 These are the crates statically linked into `vendor/rhwp-core/rhwp_bg.wasm` (built from the pinned rhwp commit with Rust 1.93.1 and wasm-pack 0.14.0, see `vendor/rhwp-core/PROVENANCE.json`). The list and texts below are generated offline by `scripts/generate-wasm-notices.mjs` from `cargo metadata` and the crates' own license and NOTICE files, and must be regenerated whenever the WebAssembly package is rebuilt.

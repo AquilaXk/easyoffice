@@ -45,14 +45,14 @@ test("고급 > 문자 간격: 넓게 and 좁게 write the spacing in twips, 표�
   kind.value = "expanded";
   fire(kind);
   assert.equal(value.disabled, false);
-  assert.equal(value.value, "1", "넓게 starts at 1 pt");
+  assert.equal(value.value, "1pt", "넓게 starts at 1 pt");
   value.value = "3";
   h.userClick(byId(h, "btn-doc-font-apply"));
   assert.equal(byId(h, "doc-font-dialog").open, false);
   assert.deepEqual(spacingRuns(h).map((r) => r.letterSpacingTwips), [60], "3 pt is 60 twips");
 
   await openDialog(h, a);
-  assert.deepEqual([kind.value, value.value], ["expanded", "3"], "the dialog shows the selection's spacing");
+  assert.deepEqual([kind.value, value.value], ["expanded", "3pt"], "the dialog shows the selection's spacing with its unit");
   kind.value = "condensed";
   fire(kind);
   value.value = "0,5";

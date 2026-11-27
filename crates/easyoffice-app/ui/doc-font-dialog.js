@@ -34,11 +34,19 @@
 
   const styleKey = (bold, italic) => Object.keys(STYLE_OF).find((k) => STYLE_OF[k].bold === bold && STYLE_OF[k].italic === italic);
 
-  // A number typed in a box: a decimal comma is allowed, an empty or non-numeric text is NaN.
+  const PLAIN_NUMBER_RE = /^-?(\d+\.?\d*|\.\d+)$/;
+  const UNIT_SUFFIX_RE = /\s*(pt|%)$/i;
+  const SAMPLE_NOTE = "화면과 프린터 모두에 같은 글꼴이 사용됩니다.";
+
+  // A number typed in a box, with or without its unit (`3`, `3pt`, `150 %`): a decimal comma is allowed, an empty or
+  // non-numeric text is NaN.
   const numberOf = (text) => {
-    const t = String(text).trim().replace(",", ".");
-    return t === "" ? Number.NaN : Number(t);
+    const t = String(text).trim().replace(",", ".").replace(UNIT_SUFFIX_RE, "");
+    return PLAIN_NUMBER_RE.test(t) ? Number(t) : Number.NaN;
   };
+
+  // A value as the dialog shows it: the unit sits inside the field (`2pt`), and a blank stays blank.
+  const withUnit = (value, unit) => (value === "" || value === null || value === undefined ? "" : `${value}${unit}`);
 
   // The 간격 and 값 the dialog shows for a run spacing in twips.
   function spacingShown(twips) {
@@ -82,6 +90,46 @@
     return Math.round(pt * HALF_PT_PER_PT);
   }
 
+  // A unit field shows its number with the unit inside (`2pt`): leaving it completes a bare number, and a text
+  // that is not a number stays as typed so 확인 can name the box.
+  function bindUnitFields(dialog) {
+    for (const input of dialog.querySelectorAll("input[data-unit]")) {
+      const complete = () => {
+        const n = numberOf(input.value);
+        if (Number.isFinite(n)) input.value = withUnit(n, input.dataset.unit);
+      };
+      input.addEventListener("change", complete);
+      input.addEventListener("blur", complete);
+    }
+  }
+
+  // The preset lists of the combo boxes (`data-presets`: 배율's 200 % ... 33 %).
+  function bindPresetCombos(dialog) {
+    for (const input of dialog.querySelectorAll("input[data-presets]")) {
+      const items = input.dataset.presets.split(",").map((n) => withUnit(n, input.dataset.unit));
+      host.__EASYOFFICE_DIALOG_COMBO__?.attach(input, { items, arrowLabel: "배율 목록 열기" });
+    }
+  }
+
+  // Alt+letter (Option+letter on a Mac, whose `key` is a symbol, so the physical key is read) moves the focus to the control
+  // whose label shows that letter in the visible tab, or to the button that does: a check box flips, a button presses.
+  function accessKeyTarget(dialog, letter) {
+    const visible = (el) => !el.closest("[hidden]");
+    const hit = Array.from(dialog.querySelectorAll("[data-accesskey]")).find((el) => el.dataset.accesskey === letter && visible(el));
+    if (!hit) return null;
+    return hit.tagName === "SELECT" ? dialog.querySelector(`.custom-select[data-select-id="${hit.id}"] .custom-select-trigger`) || hit : hit;
+  }
+
+  function onAccessKey(ev, dialog) {
+    if (!ev.altKey || ev.ctrlKey || ev.metaKey) return;
+    const letter = /^Key[A-Z]$/.test(ev.code || "") ? ev.code.slice(3).toLowerCase() : String(ev.key).toLowerCase();
+    const target = /^[a-z]$/.test(letter) ? accessKeyTarget(dialog, letter) : null;
+    if (!target) return;
+    ev.preventDefault?.();
+    target.focus?.();
+    if (target.getAttribute("type") === "checkbox" || target.tagName === "BUTTON") target.click();
+  }
+
   let bound = false;
   let current = null;
 
@@ -94,7 +142,7 @@
       kind: byId("doc-font-spacing-kind"), value: byId("doc-font-spacing-value"),
       posKind: byId("doc-font-position-kind"), posValue: byId("doc-font-position-value"),
       kern: byId("doc-font-kerning"), kernValue: byId("doc-font-kerning-value"),
-      sample: byId("doc-font-sample"), sampleText: byId("doc-font-sample-text"), status: byId("doc-font-status"),
+      sample: byId("doc-font-sample"), sampleText: byId("doc-font-sample-text"), note: byId("doc-font-sample-note"), status: byId("doc-font-status"),
     };
     const R = host.__EASYOFFICE_DOC_RUNS__;
     const state = runs.getState?.() || {};
@@ -119,7 +167,7 @@
       ]) {
         box.disabled = !on;
         if (!on) box.value = "";
-        else if (!box.value) box.value = String(fallback);
+        else if (!box.value) box.value = withUnit(fallback, "pt");
       }
     };
 
@@ -180,15 +228,16 @@
     els.sub.checked = initial.sub;
     const shown = spacingShown(initial.spacing ?? 0);
     els.kind.value = shown.kind;
-    els.value.value = shown.value;
-    els.scale.value = initial.scale === null ? "" : String(initial.scale);
+    els.value.value = withUnit(shown.value, "pt");
+    els.scale.value = initial.scale === null ? "" : withUnit(initial.scale, "%");
     const shownPosition = positionShown(initial.position ?? 0);
     els.posKind.value = shownPosition.kind;
-    els.posValue.value = shownPosition.value;
+    els.posValue.value = withUnit(shownPosition.value, "pt");
     els.kern.checked = (initial.kerning ?? 0) > 0;
-    els.kernValue.value = els.kern.checked ? String(initial.kerning / HALF_PT_PER_PT) : "";
+    els.kernValue.value = els.kern.checked ? withUnit(initial.kerning / HALF_PT_PER_PT, "pt") : "";
     syncValue();
     els.status.textContent = "";
+    els.note.textContent = SAMPLE_NOTE;
     showPane("font");
     drawSample();
 
@@ -209,8 +258,12 @@
         el.addEventListener("input", () => current.drawSample());
         el.addEventListener("change", () => current.drawSample());
       }
+      bindUnitFields(els.dialog);
+      bindPresetCombos(els.dialog);
       byId("btn-doc-font-apply").addEventListener("click", () => apply());
       els.dialog.addEventListener("keydown", (ev) => {
+        onAccessKey(ev, els.dialog);
+        if (ev.defaultPrevented) return;
         if (ev.key !== "Enter" || ev.target?.tagName === "BUTTON") return;
         ev.preventDefault?.();
         apply();
@@ -236,7 +289,7 @@
     const position = positionHalfPt(els.posKind.value, els.posValue.value);
     if (position === null) return bad(els.posValue);
     if (position !== (initial.position ?? 0)) patch.position = position;
-    const sameKerning = els.kern.checked && initial.kerning && els.kernValue.value.trim() === String(initial.kerning / HALF_PT_PER_PT);
+    const sameKerning = els.kern.checked && initial.kerning && numberOf(els.kernValue.value) === initial.kerning / HALF_PT_PER_PT;
     const kerning = sameKerning ? initial.kerning : kerningHalfPt(els.kern.checked, els.kernValue.value);
     if (kerning === null) return bad(els.kernValue);
     if (kerning !== (initial.kerning ?? 0)) patch.kerning = kerning;

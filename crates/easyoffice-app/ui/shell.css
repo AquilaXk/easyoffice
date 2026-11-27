@@ -174,14 +174,39 @@
 #doc-toc-dialog .dialog-body:has(.dialog-status:empty) .dialog-row:nth-last-of-type(2) { margin-bottom: 0; }
 #doc-toc-dialog .dialog-checkbox { margin-left: 72px; }
 /* Font dialog of the word processor (doc-font-dialog.js): the tab bodies keep one height so the dialog does not jump between 글꼴 and 고급. */
-#doc-font-dialog { width: min(420px, calc(100vw - 32px)); }
-#doc-font-dialog .dialog-label { min-width: 96px; }
+#doc-font-dialog { width: min(440px, calc(100vw - 32px)); }
 #doc-font-dialog .dialog-body[data-font-pane] { min-height: 196px; }
 #doc-font-dialog #doc-font-sample-text { display: inline-block; transform-origin: left center; }
 #doc-font-dialog #doc-font-kerning { margin: 0; accent-color: var(--color-primary); }
 #doc-font-dialog .doc-font-preview-body { padding-top: 0; }
-#doc-font-dialog #doc-font-sample { overflow: hidden; width: 100%; box-sizing: border-box; }
 #doc-font-dialog .dialog-status-row:has(> :empty) { display: none; }
+/* Group frames of the dialog: the reference's `.cs-fieldset` (`char-shape-dialog.css` 34-46, MIT, see THIRD_PARTY_NOTICES.md), same values. */
+.tool-dialog .dialog-group { border: 1px solid var(--color-border); border-radius: var(--radius-sm); margin: 0 0 6px; padding: 6px 8px 8px; min-width: 0; }
+.tool-dialog .dialog-group legend { font-size: var(--font-size-sm); font-weight: bold; color: var(--color-text); padding: 0 4px; }
+/* Label, field, label, field: the rows of a group line up in four columns (Word's 간격 [표준] 값 [ ] pairs). */
+.tool-dialog .dialog-grid { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px 8px; }
+.tool-dialog .dialog-grid > .dialog-label { text-align: left; white-space: nowrap; }
+.tool-dialog .dialog-grid > .custom-select.dialog-select { justify-self: start; }
+.tool-dialog .dialog-grid > .dialog-field, .tool-dialog .dialog-grid > .dialog-combo { width: 96px; }
+.tool-dialog .dialog-grid .dialog-combo .dialog-field { width: 100%; }
+.tool-dialog .dialog-inline-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.tool-dialog .dialog-label-left { text-align: left; white-space: nowrap; }
+.tool-dialog .dialog-field { text-align: left; }
+.tool-dialog .dialog-key { text-decoration: underline; }
+/* Editable combo box (dialog-combo.js): the field with the arrow cell of a combo box; the list drops below it. */
+.tool-dialog .dialog-combo { position: relative; display: inline-flex; align-items: stretch; box-sizing: border-box; }
+.tool-dialog .dialog-combo .dialog-input { flex: 1; min-width: 0; border-right: 0; border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.tool-dialog .dialog-combo-arrow { width: 15px; height: 22px; padding: 0; border: 1px solid var(--color-border); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: var(--color-surface); color: var(--color-text-muted); font-size: 8px; line-height: 1; cursor: pointer; }
+.tool-dialog .dialog-combo-arrow:hover { background: var(--color-accent-bg); }
+.tool-dialog .dialog-combo-list { position: absolute; z-index: 5; top: 100%; left: 0; right: 0; list-style: none; margin: 0; padding: 0; max-height: 132px; overflow-y: auto; border: 1px solid var(--color-border-dark); background: var(--color-surface); box-shadow: var(--shadow-dropdown); font-size: var(--font-size-sm); }
+.tool-dialog .dialog-combo-list li { padding: 3px 8px; cursor: pointer; white-space: nowrap; }
+.tool-dialog .dialog-combo-list li:hover, .tool-dialog .dialog-combo-list li[aria-selected="true"] { background: var(--color-selected-bg); }
+.tool-dialog .dialog-combo-inline { display: flex; flex-direction: column; }
+.tool-dialog .dialog-combo-inline .dialog-input { border-right: 1px solid var(--color-border); border-radius: var(--radius-sm); width: 100%; text-align: left; }
+.tool-dialog .dialog-combo-inline .dialog-combo-list { position: static; box-shadow: none; max-height: 96px; border-color: var(--color-border); margin-top: -1px; }
+/* The preview: a framed sample (the reference's `.cs-preview`, `char-shape-dialog.css` 86-92) and the line under it. */
+#doc-font-dialog .doc-font-sample { display: flex; align-items: center; justify-content: center; overflow: hidden; box-sizing: border-box; width: 100%; height: 48px; padding: 0 12px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); }
+#doc-font-dialog #doc-font-sample-note { display: block; margin-top: 6px; min-height: 16px; }
 .dialog-status-row { min-height: 18px; line-height: 18px; text-align: right; }
 .dialog-status { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 /* After every display rule above, so `hidden` wins at equal specificity. */

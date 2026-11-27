@@ -81,6 +81,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "copilot-ui.js",
     "custom-select.js",
     "desktop-bridge.js",
+    "dialog-combo.js",
     "doc-clipboard-images.js",
     "doc-dialogs-ext.js",
     "doc-font-dialog.js",
