@@ -34,7 +34,8 @@
 
   const styleKey = (bold, italic) => Object.keys(STYLE_OF).find((k) => STYLE_OF[k].bold === bold && STYLE_OF[k].italic === italic);
 
-  const PLAIN_NUMBER_RE = /^-?(\d+\.?\d*|\.\d+)$/;
+  const OT = host.__EASYOFFICE_DOC_OPEN_TYPE__;
+  const PLAIN_NUMBER_RE =/^-?(\d+\.?\d*|\.\d+)$/;
   const UNIT_SUFFIX_RE = /\s*(pt|%)$/i;
   const SAMPLE_NOTE = "화면과 프린터 모두에 같은 글꼴이 사용됩니다.";
 
@@ -142,10 +143,13 @@
       kind: byId("doc-font-spacing-kind"), value: byId("doc-font-spacing-value"),
       posKind: byId("doc-font-position-kind"), posValue: byId("doc-font-position-value"),
       kern: byId("doc-font-kerning"), kernValue: byId("doc-font-kerning-value"),
+      grid: byId("doc-font-grid"), ot: OT.controls(document),
       sample: byId("doc-font-sample"), sampleText: byId("doc-font-sample-text"), note: byId("doc-font-sample-note"), status: byId("doc-font-status"),
     };
     const R = host.__EASYOFFICE_DOC_RUNS__;
     const state = runs.getState?.() || {};
+    // The OpenType controls (and the line-grid box) the user touched: only those replace what the selection had.
+    const touched = new Set();
 
     // Tabs: one pane shows at a time.
     const showPane = (name) => {
@@ -191,6 +195,7 @@
       const shift = half ? Math.max(-SAMPLE_MAX_SHIFT_PX, Math.min(SAMPLE_MAX_SHIFT_PX, (half / HALF_PT_PER_PT) * (4 / 3))) : 0;
       text.verticalAlign = shift ? `${shift}px` : "";
       css.fontKerning = els.kern.checked ? "normal" : "";
+      Object.assign(text, OT.css(OT.compose(els.ot, initial.opentype, touched)));
     };
 
     // The font list is the style bar's, so the dialog offers what the bar does.
@@ -220,6 +225,9 @@
       scale: state.scale === MIXED ? null : (integer(state.scale) ?? NORMAL_SCALE),
       position: integer(state.position),
       kerning: integer(state.kerning),
+      // A mixed selection (null) shows the defaults and keeps each part it did not touch.
+      opentype: state.opentype === MIXED ? null : (integer(state.opentype) ?? 0),
+      nogrid: state.nogrid === MIXED ? null : state.nogrid === 1,
     };
     els.style.value = initial.style || "regular";
     els.size.value = initial.size;
@@ -235,6 +243,9 @@
     els.posValue.value = withUnit(shownPosition.value, "pt");
     els.kern.checked = (initial.kerning ?? 0) > 0;
     els.kernValue.value = els.kern.checked ? withUnit(initial.kerning / HALF_PT_PER_PT, "pt") : "";
+    OT.show(els.ot, initial.opentype);
+    els.grid.checked = initial.nogrid !== true;
+    els.grid.indeterminate = initial.nogrid === null;
     syncValue();
     els.status.textContent = "";
     els.note.textContent = SAMPLE_NOTE;
@@ -243,7 +254,7 @@
 
     // A modal dialog takes the selection from the editor (WebKit collapses it), so 확인 applies to the range the dialog opened on.
     current = {
-      els, R, initial, runs, document, drawSample, syncValue, showPane, range: runs.getLastRange?.() ?? null,
+      els, R, initial, runs, document, drawSample, syncValue, showPane, touched, range: runs.getLastRange?.() ?? null,
     };
     if (!bound) {
       bound = true;
@@ -257,6 +268,13 @@
       for (const el of [els.family, els.style, els.size, els.value, els.scale, els.posValue, els.kernValue, els.strike, els.sup, els.sub]) {
         el.addEventListener("input", () => current.drawSample());
         el.addEventListener("change", () => current.drawSample());
+      }
+      for (const [key, el] of [...Object.entries(els.ot), ["grid", els.grid]]) {
+        el.addEventListener("change", () => {
+          current.touched.add(key);
+          if (key === "grid") current.els.grid.indeterminate = false;
+          current.drawSample();
+        });
       }
       bindUnitFields(els.dialog);
       bindPresetCombos(els.dialog);
@@ -275,7 +293,7 @@
 
   // The 고급 tab's values the user changed as a patch, or the box whose value is out of range. A 배율 left blank on a mixed
   // selection, and a 글꼴 커닝 size the selection already had, are not read again.
-  function advancedPatch(els, initial) {
+  function advancedPatch(els, initial, touched) {
     const patch = {};
     const bad = (box) => ({ box });
     const twips = spacingTwips(els.kind.value, els.value.value);
@@ -293,6 +311,10 @@
     const kerning = sameKerning ? initial.kerning : kerningHalfPt(els.kern.checked, els.kernValue.value);
     if (kerning === null) return bad(els.kernValue);
     if (kerning !== (initial.kerning ?? 0)) patch.kerning = kerning;
+    const openType = OT.compose(els.ot, initial.opentype, touched);
+    const openTypeTouched = [...touched].some((key) => key !== "grid");
+    if (initial.opentype === null ? openTypeTouched : openType !== initial.opentype) patch.opentype = openType;
+    if (touched.has("grid")) patch.nogrid = els.grid.checked ? null : 1;
     return { patch };
   }
 
@@ -312,7 +334,7 @@
     if (els.strike.checked !== initial.strike) patch.strike = els.strike.checked ? true : null;
     if (els.sup.checked !== initial.sup) patch.superscript = els.sup.checked ? true : null;
     if (els.sub.checked !== initial.sub) patch.subscript = els.sub.checked ? true : null;
-    const advanced = advancedPatch(els, initial);
+    const advanced = advancedPatch(els, initial, current.touched);
     if (advanced.box) {
       els.status.textContent = MSG_RANGE;
       current.showPane("advanced");

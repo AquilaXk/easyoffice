@@ -789,6 +789,35 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## Open XML SDK (MIT)
+
+Source: https://github.com/dotnet/Open-XML-SDK (`data/schemas/schemas_microsoft_com_office_word_2010_wordml.json`, Copyright (c) .NET Foundation and Contributors).
+Nothing is vendored or linked at runtime. The OpenType run features of DOCX in `crates/easyoffice-formats/src/rich_char_open_type.rs` (PD-373) follow its schema data: the 16 values of `w14:ST_Ligatures`, the values of `w14:ST_NumSpacing` and `w14:ST_NumForm`, and the elements `w14:ligatures`, `w14:numSpacing`, `w14:numForm`, `w14:stylisticSets` > `w14:styleSet` (`w14:id`, `w14:val`) and `w14:cntxtAlts`. The ligature names are read as a bit set of the four words `standard`, `contextual`, `historical` and `discretional` instead of a table of 16 strings, and every read value is clamped.
+
+```
+The MIT License (MIT)
+
+Copyright (c) .NET Foundation and Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Rust dependencies compiled into the rhwp WebAssembly module
 
 These are the crates statically linked into `vendor/rhwp-core/rhwp_bg.wasm` (built from the pinned rhwp commit with Rust 1.93.1 and wasm-pack 0.14.0, see `vendor/rhwp-core/PROVENANCE.json`). The list and texts below are generated offline by `scripts/generate-wasm-notices.mjs` from `cargo metadata` and the crates' own license and NOTICE files, and must be regenerated whenever the WebAssembly package is rebuilt.

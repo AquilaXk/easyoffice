@@ -1672,6 +1672,45 @@
               <input id="doc-font-kerning-value" class="dialog-input dialog-field" type="text" data-accesskey="o" data-unit="pt" aria-labelledby="doc-font-kerning-unit" />
               <label id="doc-font-kerning-unit" class="dialog-label dialog-label-left" for="doc-font-kerning-value">포인트 이상(<span class="dialog-key">O</span>)</label>
             </div>
+            <div class="dialog-inline-row">
+              <label class="dialog-checkbox" for="doc-font-grid"><input id="doc-font-grid" type="checkbox" data-accesskey="w" /><span>문서 눈금이 지정되어 있으면 줄 눈금에 맞춤(<span class="dialog-key">W</span>)</span></label>
+            </div>
+          </fieldset>
+          <fieldset class="dialog-group">
+            <legend>OpenType 기능</legend>
+            <div class="dialog-grid dialog-grid-wide">
+              <label class="dialog-label" for="doc-font-ligatures">합자(<span class="dialog-key">L</span>):</label>
+              <select id="doc-font-ligatures" class="sb-combo dialog-select" data-accesskey="l">
+                <option value="0">없음</option>
+                <option value="1">표준만</option>
+                <option value="3">표준 및 상황에 맞는</option>
+                <option value="12">기본 및 사용자 지정</option>
+                <option value="15">모두</option>
+              </select>
+              <label class="dialog-label" for="doc-font-num-spacing">숫자 간격(<span class="dialog-key">M</span>):</label>
+              <select id="doc-font-num-spacing" class="sb-combo dialog-select" data-accesskey="m">
+                <option value="0">기본</option>
+                <option value="1">비례</option>
+                <option value="2">표 형식</option>
+              </select>
+              <label class="dialog-label" for="doc-font-num-form">숫자 형식(<span class="dialog-key">F</span>):</label>
+              <select id="doc-font-num-form" class="sb-combo dialog-select" data-accesskey="f">
+                <option value="0">기본</option>
+                <option value="1">기준선 맞춤</option>
+                <option value="2">기존 스타일 맞춤</option>
+              </select>
+              <label class="dialog-label" for="doc-font-style-set">스타일 세트(<span class="dialog-key">T</span>):</label>
+              <select id="doc-font-style-set" class="sb-combo dialog-select" data-accesskey="t">
+                <option value="0">기본</option>
+                <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+                <option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option>
+                <option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option>
+                <option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option>
+              </select>
+            </div>
+            <div class="dialog-inline-row">
+              <label class="dialog-checkbox" for="doc-font-alternates"><input id="doc-font-alternates" type="checkbox" data-accesskey="a" /><span>상황별 대체 사용(<span class="dialog-key">A</span>)</span></label>
+            </div>
           </fieldset>
         </div>
         <div class="dialog-body doc-font-preview-body">
@@ -3241,6 +3280,7 @@
     <script src="./sheet-spill.js"></script>
     <script src="./sheet-store.js"></script>
     <script src="./ribbon-catalog.js"></script>
+    <script src="./doc-open-type.js"></script>
     <script src="./doc-runs.js"></script>
     <script src="./doc-ime.js"></script>
     <script src="./doc-paste-sanitize.js"></script>

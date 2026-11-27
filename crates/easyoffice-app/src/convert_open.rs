@@ -985,6 +985,8 @@ impl EasyOfficeIpcRouter {
 #[cfg(test)]
 mod char_advanced_tests;
 #[cfg(test)]
+mod char_open_type_tests;
+#[cfg(test)]
 mod font_face_tests;
 #[cfg(test)]
 mod page_break_tests;

@@ -31,6 +31,7 @@ pub(crate) fn docx_run_properties(run: &RichRun) -> String {
     if run.strike {
         xml.push_str("<w:strike/>");
     }
+    xml.push_str(run.advanced.docx_snap_xml());
     if let Some(color) = run.color.as_deref() {
         xml.push_str(&format!("<w:color w:val=\"{color}\"/>"));
     }
@@ -59,6 +60,7 @@ pub(crate) fn docx_run_properties(run: &RichRun) -> String {
         RichScript::Superscript => xml.push_str("<w:vertAlign w:val=\"superscript\"/>"),
         RichScript::Subscript => xml.push_str("<w:vertAlign w:val=\"subscript\"/>"),
     }
+    xml.push_str(&run.advanced.open_type.docx_xml());
     if xml.is_empty() {
         xml
     } else {

@@ -19,12 +19,12 @@ use easyoffice_formats::{
     char_kerning, char_position, char_scale, check_document_images, clean_font_name,
     code_within_bounds, font_face, frame_paragraph, letter_spacing, normalize_hex_color,
     safe_link_target, CellStyle, CharAdvanced, DefaultFont, EasyOfficeError, FontTable,
-    ImageBudget, NumFmtTable, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock,
-    RichColumns, RichDocument, RichField, RichListKind, RichListNumber, RichPageFrame,
+    ImageBudget, NumFmtTable, OdsUnpacked, OoxmlCodec, OpenType, PdfWriteOptions, RichAlignment,
+    RichBlock, RichColumns, RichDocument, RichField, RichListKind, RichListNumber, RichPageFrame,
     RichParagraph, RichRun, RichScript, RichSlideDeck, RichToc, SheetStyling, StrictJsonValue,
     MAX_COLUMN_PX, MAX_FONT_FACES, MAX_KERNING_HALF_PT, MAX_LETTER_SPACING_TWIPS, MAX_NUM_FMTS,
-    MAX_PAGE_FRAME_PARAGRAPHS, MAX_PARA_SPACING_TWIPS, MAX_POSITION_HALF_PT, MAX_SCALE_PERCENT,
-    MAX_SIZE_PT, MAX_TOC_LEVEL, MAX_TOC_PAGE, MIN_COLUMN_PX, MIN_SIZE_PT,
+    MAX_PACKED_OPEN_TYPE, MAX_PAGE_FRAME_PARAGRAPHS, MAX_PARA_SPACING_TWIPS, MAX_POSITION_HALF_PT,
+    MAX_SCALE_PERCENT, MAX_SIZE_PT, MAX_TOC_LEVEL, MAX_TOC_PAGE, MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
@@ -574,11 +574,27 @@ pub(crate) fn opt_bounded(
         .transpose()
 }
 
-/// Width scale, raised or lowered position and kerning threshold of a run (PD-372). Each key is an integer
-/// inside the model's bounds or absent; a value outside them rejects the save.
+/// Width scale, raised or lowered position and kerning threshold of a run (PD-372), its packed OpenType
+/// features and its line-grid switch (PD-373). Each number is an integer inside the model's bounds or absent,
+/// `snapToGrid` is a boolean (`false` turns the grid off); a value outside them rejects the save.
 fn opt_advanced(run: &JsonObject) -> Result<CharAdvanced, EasyOfficeError> {
     let max_position = i64::from(MAX_POSITION_HALF_PT);
+    let open_type = match opt_bounded(run, "openType", 1, i64::from(MAX_PACKED_OPEN_TYPE))? {
+        None => OpenType::default(),
+        Some(packed) => u32::try_from(packed)
+            .ok()
+            .and_then(OpenType::unpack)
+            .ok_or_else(|| invalid("구조화 저장: 'openType'의 칸 값이 범위를 벗어났습니다."))?,
+    };
+    let grid_snap_off = match field(run, "snapToGrid") {
+        None => false,
+        Some(v) => !v
+            .as_bool()
+            .ok_or_else(|| invalid("구조화 저장: 'snapToGrid'는 true/false여야 합니다."))?,
+    };
     Ok(CharAdvanced {
+        open_type,
+        grid_snap_off,
         scale_percent: opt_bounded(run, "scalePercent", 1, i64::from(MAX_SCALE_PERCENT))?
             .and_then(char_scale),
         position_half_pt: opt_bounded(run, "positionHalfPt", -max_position, max_position)?

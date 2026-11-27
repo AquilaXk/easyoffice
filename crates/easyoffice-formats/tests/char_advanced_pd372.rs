@@ -13,6 +13,7 @@ fn adv(scale: Option<u16>, position: Option<i16>, kerning: Option<u16>) -> CharA
         scale_percent: scale,
         position_half_pt: position,
         kerning_half_pt: kerning,
+        ..CharAdvanced::default()
     }
 }
 

@@ -156,4 +156,39 @@ export const docSteps = [
     const runs = await page.evaluate(() => window.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(document.querySelector("#doc-editor")).flatMap((b) => b.runs || []));
     assert.deepEqual(runs.filter((r) => r.scalePercent).map((r) => [r.text, r.scalePercent, r.positionHalfPt, r.kerningHalfPt]), [["다라", 150, 8, 24]]);
   }],
+
+  // PD-373: 글꼴 > 고급 > OpenType 기능 and the 줄 눈금에 맞춤 box reach the run, its computed style in the real WebKit and the save JSON;
+  // the 배율 combo opens its preset list and the unit sits inside the value field.
+  ["글꼴 대화상자 OpenType 기능과 줄 눈금 상자가 런과 저장 JSON에 닿고 값 칸에 단위가 든다", async (page) => {
+    await typeFirstParagraph(page, "가나다라 1234");
+    await page.keyboard.press("Shift+ArrowLeft");
+    await page.keyboard.press("Shift+ArrowLeft");
+    await page.evaluate(() => document.querySelector('.md-item[data-studio-menu-cmd="font-dialog"]').click());
+    await page.waitForSelector("#doc-font-dialog[open]");
+    await page.click("#doc-font-tab-advanced");
+    await page.click("#doc-font-dialog .dialog-combo-arrow");
+    assert.deepEqual(await page.$$eval("#doc-font-dialog .dialog-combo-list li", (rows) => rows.map((r) => r.textContent)), ["200%", "150%", "100%", "90%", "80%", "66%", "50%", "33%"]);
+    await page.click('#doc-font-dialog .dialog-combo-list li:nth-child(2)');
+    assert.equal(await page.inputValue("#doc-font-scale"), "150%");
+    await page.selectOption("#doc-font-spacing-kind", "expanded");
+    await page.fill("#doc-font-spacing-value", "2");
+    await page.keyboard.press("Tab");
+    assert.equal(await page.inputValue("#doc-font-spacing-value"), "2pt", "a bare number takes its unit");
+    await page.selectOption("#doc-font-num-spacing", "2");
+    await page.selectOption("#doc-font-num-form", "1");
+    await page.selectOption("#doc-font-style-set", "3");
+    await page.uncheck("#doc-font-grid");
+    await page.click("#btn-doc-font-apply");
+    await page.waitForSelector(`${EDITOR} .eo-run`);
+    const style = await page.$eval(`${EDITOR} .eo-run`, (el) => ({ numeric: getComputedStyle(el).fontVariantNumeric, features: getComputedStyle(el).fontFeatureSettings }));
+    assert.match(style.numeric, /lining-nums/);
+    assert.match(style.numeric, /tabular-nums/);
+    assert.match(style.features, /ss03/);
+    const runs = await page.evaluate(() => window.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(document.querySelector("#doc-editor")).flatMap((b) => b.runs || []));
+    const hit = runs.filter((r) => r.openType);
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].snapToGrid, false);
+    assert.equal(hit[0].letterSpacingTwips, 40);
+    assert.equal(hit[0].scalePercent, 150);
+  }],
 ];

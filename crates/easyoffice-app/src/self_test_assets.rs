@@ -268,6 +268,10 @@ pub(super) const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         include_str!("../ui/slide-studio.js"),
         "__EASYOFFICE_CREATE_SLIDE_STUDIO__",
     ),
+    (
+        include_str!("../ui/doc-open-type.js"),
+        "__EASYOFFICE_DOC_OPEN_TYPE__",
+    ),
     (include_str!("../ui/doc-runs.js"), "__EASYOFFICE_DOC_RUNS__"),
     (
         include_str!("../ui/doc-runs-ui.js"),

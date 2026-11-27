@@ -127,6 +127,8 @@
           run.scalePercent !== undefined ||
           run.positionHalfPt !== undefined ||
           run.kerningHalfPt !== undefined ||
+          run.openType !== undefined ||
+          run.snapToGrid !== undefined ||
           run.font !== undefined ||
           run.fontFace !== undefined ||
           run.color !== undefined ||

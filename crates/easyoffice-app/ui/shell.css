@@ -189,6 +189,7 @@
 .tool-dialog .dialog-grid > .custom-select.dialog-select { justify-self: start; }
 .tool-dialog .dialog-grid > .dialog-field, .tool-dialog .dialog-grid > .dialog-combo { width: 96px; }
 .tool-dialog .dialog-grid .dialog-combo .dialog-field { width: 100%; }
+.tool-dialog .dialog-grid-wide { grid-template-columns: auto minmax(0, 1fr); }
 .tool-dialog .dialog-inline-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .tool-dialog .dialog-label-left { text-align: left; white-space: nowrap; }
 .tool-dialog .dialog-field { text-align: left; }

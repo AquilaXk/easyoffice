@@ -5,7 +5,11 @@
 //! Units follow DOCX and RTF (percent, half-points, half-points). ODT and HWPX keep the position as
 //! a percent of the font size and keep kerning as a switch only, so those two convert with the run's
 //! size and read the switch back as [`DEFAULT_KERNING_HALF_PT`]. HWPX also limits the scale to 10-200 %.
+//!
+//! PD-373 adds the rest of the 고급 tab: the OpenType features ([`OpenType`], DOCX only) and the
+//! "문서 눈금이 지정되어 있으면 줄 눈금에 맞춤" switch (DOCX `w:snapToGrid`, on unless the run turns it off).
 
+use crate::rich_char_open_type::OpenType;
 use crate::xml_stream::{attr, Attrs};
 
 /// Largest width scale in percent (`w:w` is 1 to 600).
@@ -30,9 +34,13 @@ const TWIPS_PER_HALF_POINT: i64 = 10;
 /// Largest per-mille a file's position is read at (1000 times the size) so the arithmetic cannot overflow.
 const MAX_PERMILLE: i64 = 1_000_000;
 
-/// Scale, position and kerning of one run.
+/// Scale, position, kerning, grid snapping and OpenType features of one run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct CharAdvanced {
+    /// OpenType features (ligatures, number spacing and form, stylistic sets, contextual alternates).
+    pub open_type: OpenType,
+    /// The run does not snap to the document's line grid (`w:snapToGrid` off); snapping is the default.
+    pub grid_snap_off: bool,
     /// Width of the glyphs in percent of normal (1 to 600, never 100).
     pub scale_percent: Option<u16>,
     /// Raise (positive) or lowering (negative) from the baseline, in half-points (never 0).
@@ -113,6 +121,12 @@ impl CharAdvanced {
         for (key, value) in pairs.into_iter().filter_map(|(k, v)| v.map(|v| (k, v))) {
             out.push_str(&format!(",\"{key}\":{value}"));
         }
+        if !self.open_type.is_none() {
+            out.push_str(&format!(",\"openType\":{}", self.open_type.pack()));
+        }
+        if self.grid_snap_off {
+            out.push_str(",\"snapToGrid\":false");
+        }
     }
 
     /// The settings of `self`, each filled from `inherited` where `self` names none.
@@ -121,6 +135,12 @@ impl CharAdvanced {
             scale_percent: self.scale_percent.or(inherited.scale_percent),
             position_half_pt: self.position_half_pt.or(inherited.position_half_pt),
             kerning_half_pt: self.kerning_half_pt.or(inherited.kerning_half_pt),
+            open_type: if self.open_type.is_none() {
+                inherited.open_type
+            } else {
+                self.open_type
+            },
+            grid_snap_off: self.grid_snap_off || inherited.grid_snap_off,
         }
     }
 
@@ -154,6 +174,15 @@ impl CharAdvanced {
         out
     }
 
+    /// `w:snapToGrid` when the run turns the line grid off; it goes before `w:color` in `w:rPr`.
+    pub(crate) fn docx_snap_xml(&self) -> &'static str {
+        if self.grid_snap_off {
+            "<w:snapToGrid w:val=\"0\"/>"
+        } else {
+            ""
+        }
+    }
+
     /// The DOCX run properties `w:w`, `w:kern` and `w:position`, in the order the schema lists them.
     pub(crate) fn docx_xml(&self) -> String {
         let mut xml = String::new();
@@ -169,10 +198,11 @@ impl CharAdvanced {
         xml
     }
 
-    /// Applies a DOCX run property (`w:w`, `w:kern`, `w:position`) with its `w:val`; any other is ignored.
+    /// Applies a DOCX run property (`w:w`, `w:kern`, `w:position`, `w:snapToGrid`) with its `w:val`; any other is ignored.
     pub(crate) fn apply_docx_property(&mut self, name: &str, val: Option<&str>) {
         let number = val.and_then(|v| v.trim().parse::<i64>().ok());
         match name {
+            "w:snapToGrid" => self.grid_snap_off = !crate::rich_xml::toggle_on(val),
             "w:w" => self.scale_percent = number.and_then(char_scale),
             "w:kern" => self.kerning_half_pt = number.and_then(char_kerning),
             "w:position" => self.position_half_pt = number.and_then(char_position),
@@ -195,6 +225,7 @@ impl CharAdvanced {
                 .and_then(|p| position_from_permille((p * 10.0).round() as i64, size_half_pt)),
             kerning_half_pt: matches!(value("style:letter-kerning").as_deref(), Some("true" | "1"))
                 .then_some(DEFAULT_KERNING_HALF_PT),
+            ..Self::default()
         }
     }
 
@@ -322,6 +353,7 @@ mod tests {
             scale_percent: scale,
             position_half_pt: position,
             kerning_half_pt: kerning,
+            ..CharAdvanced::default()
         };
         assert_eq!(adv(None, None, None).hwpx_values(Some(24)), (100, 0, false));
         assert_eq!(adv(Some(5), None, None).hwpx_values(Some(24)).0, 10);

@@ -92,6 +92,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "doc-link.js",
     "doc-notes-ui.js",
     "doc-notes.js",
+    "doc-open-type.js",
     "doc-page-frame.js",
     "doc-page-print.js",
     "doc-page-setup.js",
