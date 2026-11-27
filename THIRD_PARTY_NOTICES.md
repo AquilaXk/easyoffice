@@ -820,8 +820,8 @@ SOFTWARE.
 
 ## docx-rs (MIT)
 
-Source: https://github.com/bokuweb/docx-rs (`docx-core/src/documents/elements/{caps,dstrike,vanish,underline}.rs` and `docx-core/src/reader/run_property.rs`, Copyright (c) 2020 bokuweb).
-Nothing is vendored or linked at runtime. The run text effects of `crates/easyoffice-formats/src/rich_char_fx.rs` (PD-374) take from it which DOCX run property elements carry them (`w:caps`, `w:dstrike`, `w:vanish`, `w:u`) and how its run property reader dispatches on the element name. Its `w:u` keeps the value as an unchecked string and drops `w:color`; here the 17 names of `ST_Underline` are an index, the colour is read, and every read value is checked.
+Source: https://github.com/bokuweb/docx-rs (`docx-core/src/documents/elements/{caps,dstrike,vanish,underline,run_fonts}.rs` and `docx-core/src/reader/run_property.rs`, Copyright (c) 2020 bokuweb).
+Nothing is vendored or linked at runtime. The Latin and East Asian font pair of a run (`CharFmt::set_fonts` in `crates/easyoffice-formats/src/rich_xml.rs`, the DOCX `w:rFonts` reader and writer, PD-374) follows its `w:rFonts` attribute set (`ascii`, `hAnsi`, `eastAsia`, `cs`: Latin from the first of `ascii`, `hAnsi`, `cs`, East Asian from `eastAsia`); its reader drops the unnamed and empty attributes unchecked, here empty names read as none and a pair that is one face reads as one font. The run text effects of `crates/easyoffice-formats/src/rich_char_fx.rs` (PD-374) take from it which DOCX run property elements carry them (`w:caps`, `w:dstrike`, `w:vanish`, `w:u`) and how its run property reader dispatches on the element name. Its `w:u` keeps the value as an unchecked string and drops `w:color`; here the 17 names of `ST_Underline` are an index, the colour is read, and every read value is checked.
 
 ```
 MIT License

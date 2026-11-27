@@ -138,6 +138,8 @@ pub(crate) struct HwpxCharShape {
     pub strike: bool,
     pub height: u32,
     pub font: usize,
+    /// Font table index of the East Asian (Hangul, Hanja, Japanese) slots; the same as `font` for one font.
+    pub font_east: usize,
     pub text_color: Option<u32>,
     pub shade_color: Option<u32>,
     pub script: RichScript,
@@ -160,6 +162,7 @@ impl Default for HwpxCharShape {
             strike: false,
             height: DEFAULT_CHAR_HEIGHT,
             font: 0,
+            font_east: 0,
             text_color: None,
             shade_color: None,
             script: RichScript::Normal,
@@ -222,9 +225,10 @@ fn char_pr_xml(id: usize, shape: &HwpxCharShape) -> String {
         shape.text_color.unwrap_or(0),
         u8::from(shape.kerning)
     );
+    // The Hangul, Hanja and Japanese slots take the East Asian face, the others the Latin one (the same for one font).
+    let (latin, east) = (shape.font.to_string(), shape.font_east.to_string());
     xml.push_str(&format!(
-        "<hh:fontRef {}/>",
-        per_lang_attrs(&shape.font.to_string())
+        "<hh:fontRef hangul=\"{east}\" latin=\"{latin}\" hanja=\"{east}\" japanese=\"{east}\" other=\"{latin}\" symbol=\"{latin}\" user=\"{latin}\"/>"
     ));
     xml.push_str(&format!(
         "<hh:ratio {}/>",

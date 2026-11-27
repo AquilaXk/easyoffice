@@ -41,6 +41,8 @@ pub(super) struct StyleInfo {
 pub(super) struct Header {
     /// Hangul-slot font faces by id (the writer repeats the same face in every language slot).
     pub(super) fonts: HashMap<String, String>,
+    /// Latin-slot font faces by id.
+    pub(super) latin_fonts: HashMap<String, String>,
     pub(super) chars: HashMap<String, CharFmt>,
     pub(super) paras: HashMap<String, ParaShape>,
     pub(super) styles: HashMap<String, StyleInfo>,
@@ -99,7 +101,8 @@ struct HeaderBuilder {
     cur_char: Option<(String, CharFmt)>,
     cur_para: Option<(String, ParaShape, bool)>,
     intent_seen: bool,
-    hangul_slot: bool,
+    /// The language slot of the `hh:fontface` being read: `Some(true)` Hangul, `Some(false)` Latin, `None` another.
+    font_slot: Option<bool>,
 }
 
 impl HeaderBuilder {
@@ -123,10 +126,21 @@ impl HeaderBuilder {
     /// Fonts and character shapes; `false` when `name` is not one of them.
     fn on_char_start(&mut self, name: &str, attrs: &Attrs<'_>) -> bool {
         match name {
-            "hh:fontface" => self.hangul_slot = attr(attrs, "lang").as_deref() == Some("HANGUL"),
-            "hh:font" if self.hangul_slot => {
+            "hh:fontface" => {
+                self.font_slot = match attr(attrs, "lang").as_deref() {
+                    Some("HANGUL") => Some(true),
+                    Some("LATIN") => Some(false),
+                    _ => None,
+                }
+            }
+            "hh:font" if self.font_slot.is_some() => {
                 if let (Some(id), Some(face)) = (attr(attrs, "id"), attr(attrs, "face")) {
-                    self.header.fonts.insert(id.to_string(), face.to_string());
+                    let table = if self.font_slot == Some(true) {
+                        &mut self.header.fonts
+                    } else {
+                        &mut self.header.latin_fonts
+                    };
+                    table.insert(id.to_string(), face.to_string());
                 }
             }
             "hh:charPr" => {
@@ -134,13 +148,24 @@ impl HeaderBuilder {
                     attr(attrs, "id").map(|id| (id.to_string(), char_fmt_from_attrs(attrs)))
             }
             "hh:fontRef" => {
-                let font = attr(attrs, "hangul")
-                    .as_deref()
-                    .and_then(|id| self.header.fonts.get(id))
-                    .filter(|face| face.as_str() != DEFAULT_FONT_FACE)
-                    .cloned();
+                // The Latin slot names the Latin face and the Hangul slot the East Asian one; a file that
+                // declares no Latin table (an older writer) repeats the Hangul one.
+                let face = |slot: &str, table: &HashMap<String, String>| {
+                    attr(attrs, slot)
+                        .as_deref()
+                        .and_then(|id| table.get(id))
+                        .filter(|face| face.as_str() != DEFAULT_FONT_FACE)
+                        .cloned()
+                };
+                let east = face("hangul", &self.header.fonts);
+                let latin_table = if self.header.latin_fonts.is_empty() {
+                    &self.header.fonts
+                } else {
+                    &self.header.latin_fonts
+                };
+                let latin = face("latin", latin_table);
                 if let Some(f) = self.char_fmt_mut() {
-                    f.font = font;
+                    f.set_fonts(latin, east);
                 }
             }
             "hh:spacing" => {

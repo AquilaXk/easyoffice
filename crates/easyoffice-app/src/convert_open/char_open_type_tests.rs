@@ -126,3 +126,46 @@ fn effect_values_outside_the_bounds_or_of_the_wrong_kind_reject_the_save() {
         assert!(save("docx", &ok).is_ok(), "{ok}");
     }
 }
+
+// The East Asian font of a run (`fontEastAsia`, next to `font` for the Latin one).
+
+#[test]
+fn the_east_asian_font_survives_save_and_open_and_one_font_stays_one() {
+    let docx = save(
+        "docx",
+        ",\"font\":\"Calibri\",\"fontEastAsia\":\"맑은 고딕\"",
+    )
+    .unwrap();
+    let blocks = open("a.docx", &docx);
+    assert!(blocks.contains("\"font\":\"Calibri\""), "{blocks}");
+    assert!(
+        blocks.contains("\"fontEastAsia\":\"맑은 고딕\""),
+        "{blocks}"
+    );
+    let one = open("b.docx", &save("docx", ",\"font\":\"Arial\"").unwrap());
+    assert!(!one.contains("fontEastAsia"), "{one}");
+    let same = open(
+        "c.docx",
+        &save("docx", ",\"font\":\"Arial\",\"fontEastAsia\":\"Arial\"").unwrap(),
+    );
+    assert!(
+        !same.contains("fontEastAsia"),
+        "the same face is one font: {same}"
+    );
+}
+
+#[test]
+fn a_bad_east_asian_font_name_rejects_the_save() {
+    let long = format!(",\"fontEastAsia\":\"{}\"", "가".repeat(65));
+    for bad in [
+        long.as_str(),
+        ",\"fontEastAsia\":\"a\\u0007b\"",
+        ",\"fontEastAsia\":12",
+        ",\"fontEastAsia\":true",
+    ] {
+        assert!(save("docx", bad).is_err(), "{bad}");
+    }
+    for ok in [",\"fontEastAsia\":\"\"", ",\"fontEastAsia\":\"바탕\""] {
+        assert!(save("docx", ok).is_ok(), "{ok}");
+    }
+}

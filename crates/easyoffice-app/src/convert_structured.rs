@@ -143,18 +143,15 @@ fn opt_link(obj: &JsonObject) -> Result<Option<String>, EasyOfficeError> {
 }
 
 /// Font family name: 1-64 characters without control characters.
-fn opt_font(obj: &JsonObject) -> Result<Option<String>, EasyOfficeError> {
-    match opt_str(obj, "font")?
-        .map(str::trim)
-        .filter(|f| !f.is_empty())
-    {
+fn opt_font(obj: &JsonObject, key: &str) -> Result<Option<String>, EasyOfficeError> {
+    match opt_str(obj, key)?.map(str::trim).filter(|f| !f.is_empty()) {
         None => Ok(None),
         Some(f) if f.chars().count() <= 64 && !f.chars().any(char::is_control) => {
             Ok(Some(f.to_string()))
         }
-        Some(_) => Err(invalid(
-            "구조화 저장: 'font'는 제어 문자 없는 64자 이하 이름이어야 합니다.",
-        )),
+        Some(_) => Err(invalid(format!(
+            "구조화 저장: '{key}'는 제어 문자 없는 64자 이하 이름이어야 합니다."
+        ))),
     }
 }
 
@@ -385,7 +382,9 @@ pub(crate) fn parse_runs(
                 underline: opt_bool(run, "underline")?,
                 strike: opt_bool(run, "strike")?,
                 size_half_pt: opt_size_half_pt(run)?,
-                font: opt_font(run)?,
+                font: opt_font(run, "font")?,
+                // The East Asian face when it differs from `font` (PD-374); the same name is the one font.
+                font_east_asia: opt_font(run, "fontEastAsia")?,
                 // A face that is too long or has control characters reads as none (PD-368).
                 font_face: opt_str(run, "fontFace")?.and_then(font_face),
                 color: opt_color(run, "color")?,

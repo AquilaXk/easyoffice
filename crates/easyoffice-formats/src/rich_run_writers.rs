@@ -16,11 +16,24 @@ const RTF_FALLBACK_FONT: &str = "Times New Roman";
 pub(crate) fn docx_run_properties(run: &RichRun) -> String {
     let named_highlight = run.highlight.as_deref().and_then(hex_to_highlight_name);
     let mut xml = String::new();
-    if let Some(font) = run.font.as_deref() {
-        let f = XmlSanitizer::escape(font);
-        xml.push_str(&format!(
-            "<w:rFonts w:ascii=\"{f}\" w:hAnsi=\"{f}\" w:eastAsia=\"{f}\" w:cs=\"{f}\"/>"
-        ));
+    if run.font.is_some() || run.font_east_asia.is_some() {
+        // The Latin face is `ascii`, `hAnsi` and `cs`; `eastAsia` is the East Asian face, the Latin one when none is named.
+        let escaped = |f: &Option<String>| f.as_deref().map(XmlSanitizer::escape);
+        let (latin, east) = (
+            escaped(&run.font),
+            escaped(&run.font_east_asia).or_else(|| escaped(&run.font)),
+        );
+        let mut attrs = String::new();
+        if let Some(f) = &latin {
+            attrs.push_str(&format!(" w:ascii=\"{f}\" w:hAnsi=\"{f}\""));
+        }
+        if let Some(f) = &east {
+            attrs.push_str(&format!(" w:eastAsia=\"{f}\""));
+        }
+        if let Some(f) = &latin {
+            attrs.push_str(&format!(" w:cs=\"{f}\""));
+        }
+        xml.push_str(&format!("<w:rFonts{attrs}/>"));
     }
     if run.bold {
         xml.push_str("<w:b/>");
@@ -85,6 +98,7 @@ pub(crate) type OdtTextKey = (
     RichScript,
     Option<i16>,
     CharAdvanced,
+    Option<String>,
 );
 
 pub(crate) fn odt_text_key(run: &RichRun) -> OdtTextKey {
@@ -97,6 +111,7 @@ pub(crate) fn odt_text_key(run: &RichRun) -> OdtTextKey {
         run.script,
         run.letter_spacing_twips,
         run.advanced,
+        run.font_east_asia.clone(),
     )
 }
 
@@ -109,6 +124,7 @@ pub(crate) fn odt_text_key_is_plain(key: &OdtTextKey) -> bool {
         && key.5 == RichScript::Normal
         && key.6.is_none()
         && key.7.is_none()
+        && key.8.is_none()
 }
 
 fn odt_points(half_pt: u16) -> String {
@@ -121,8 +137,17 @@ fn odt_points(half_pt: u16) -> String {
 
 /// `<style:style family="text">` for the `index`-th (1-based) automatic text style.
 pub(crate) fn odt_text_style_xml(index: usize, key: &OdtTextKey) -> String {
-    let ((bold, italic, underline, strike), size, font, color, highlight, script, spacing, adv) =
-        key;
+    let (
+        (bold, italic, underline, strike),
+        size,
+        font,
+        color,
+        highlight,
+        script,
+        spacing,
+        adv,
+        font_east_asia,
+    ) = key;
     let mut xml = format!(
         "<style:style style:name=\"T{index}\" style:family=\"text\"><style:text-properties"
     );
@@ -132,6 +157,12 @@ pub(crate) fn odt_text_style_xml(index: usize, key: &OdtTextKey) -> String {
     if let Some(font) = font {
         xml.push_str(&format!(
             " style:font-name=\"{}\"",
+            XmlSanitizer::escape(font)
+        ));
+    }
+    if let Some(font) = font_east_asia {
+        xml.push_str(&format!(
+            " style:font-name-asian=\"{}\"",
             XmlSanitizer::escape(font)
         ));
     }
@@ -177,11 +208,11 @@ pub(crate) fn odt_font_face_decls(keys: &[OdtTextKey], defaults: &RichDefaults) 
         defaults.font.as_deref(),
         defaults.east_asian_font.as_deref(),
     ];
-    for font in default_fonts
-        .into_iter()
-        .flatten()
-        .chain(keys.iter().filter_map(|k| k.2.as_deref()))
-    {
+    for font in default_fonts.into_iter().flatten().chain(
+        keys.iter()
+            .flat_map(|k| [k.2.as_deref(), k.8.as_deref()])
+            .flatten(),
+    ) {
         if seen.insert(font) {
             fonts.push(font);
         }
@@ -212,7 +243,10 @@ impl RtfRunTables {
     pub(crate) fn collect<'a>(runs: impl Iterator<Item = &'a RichRun>) -> Self {
         let mut t = Self::default();
         for run in runs.filter(|r| !r.text.is_empty()) {
-            if let Some(f) = run.font.as_ref() {
+            for f in [run.font.as_ref(), run.font_east_asia.as_ref()]
+                .into_iter()
+                .flatten()
+            {
                 if !t.font_map.contains_key(f) {
                     let idx = t.fonts.len() + 1;
                     t.font_map.insert(f.clone(), idx);
@@ -274,6 +308,14 @@ impl RtfRunTables {
                 out.push_str(&format!("\\f{idx} "));
             }
         }
+        // The associated font (`\af`) is the one East Asian text uses when it is not the Latin face.
+        if let Some(&idx) = run
+            .font_east_asia
+            .as_ref()
+            .and_then(|font| self.font_map.get(font))
+        {
+            out.push_str(&format!("\\af{idx} "));
+        }
         if let Some(size) = run.size_half_pt {
             out.push_str(&format!("\\fs{size} "));
         }
@@ -300,6 +342,7 @@ pub(crate) fn has_extra_run_format(run: &RichRun) -> bool {
         || run.letter_spacing_twips.is_some()
         || !run.advanced.is_none()
         || run.font.is_some()
+        || run.font_east_asia.is_some()
         || run.color.is_some()
         || run.highlight.is_some()
         || run.script != RichScript::Normal

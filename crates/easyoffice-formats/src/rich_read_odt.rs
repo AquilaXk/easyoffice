@@ -164,18 +164,8 @@ fn char_fmt_from_text_properties(attrs: &Attrs<'_>) -> CharFmt {
         size_half_pt: ["style:font-size-asian", "fo:font-size"]
             .into_iter()
             .find_map(|k| attr(attrs, k).as_deref().and_then(parse_points)),
-        font: [
-            "style:font-name-asian",
-            "style:font-family-asian",
-            "style:font-name",
-            "fo:font-family",
-        ]
-        .into_iter()
-        .find_map(|k| {
-            attr(attrs, k)
-                .map(|f| f.trim().trim_matches('\'').to_string())
-                .filter(|f| !f.is_empty())
-        }),
+        font: None,
+        font_east_asia: None,
         color: attr(attrs, "fo:color")
             .as_deref()
             .and_then(normalize_hex_color),
@@ -189,6 +179,12 @@ fn char_fmt_from_text_properties(attrs: &Attrs<'_>) -> CharFmt {
             .and_then(|t| letter_spacing(i64::from(t))),
         advanced: CharAdvanced::default(),
     };
+    // The Latin face is `style:font-name` (or `fo:font-family`), the East Asian one `style:font-name-asian`.
+    let keys: (&[&str], &[&str]) = (
+        &["style:font-name", "fo:font-family"],
+        &["style:font-name-asian", "style:font-family-asian"],
+    );
+    fmt.set_fonts_from_attrs(attrs, keys, true);
     fmt.advanced = CharAdvanced::from_odt(attrs, fmt.size_half_pt);
     // A double line is its own effect: the single strikethrough stays off.
     fmt.strike &= !fmt.advanced.fx.double_strike;
@@ -441,13 +437,20 @@ struct OdtWalker<'a> {
 
 /// Merges a span's character format into the enclosing format.
 fn merge_span_fmt(cur: CharFmt, add: CharFmt) -> CharFmt {
+    let names_font = add.font.is_some() || add.font_east_asia.is_some();
     CharFmt {
         bold: cur.bold || add.bold,
         italic: cur.italic || add.italic,
         underline: cur.underline || add.underline,
         strike: cur.strike || add.strike,
         size_half_pt: add.size_half_pt.or(cur.size_half_pt),
-        font: add.font.or(cur.font),
+        // A span that names a font (Latin or East Asian) replaces both of the enclosing format's.
+        font: if names_font { add.font } else { cur.font },
+        font_east_asia: if names_font {
+            add.font_east_asia
+        } else {
+            cur.font_east_asia
+        },
         color: add.color.or(cur.color),
         highlight: add.highlight.or(cur.highlight),
         script: if add.script == RichScript::Normal {
@@ -660,6 +663,7 @@ impl<'a> OdtWalker<'a> {
                 strike: fmt.strike,
                 size_half_pt: fmt.size_half_pt,
                 font: fmt.font,
+                font_east_asia: fmt.font_east_asia,
                 color: fmt.color,
                 highlight: fmt.highlight,
                 script: fmt.script,

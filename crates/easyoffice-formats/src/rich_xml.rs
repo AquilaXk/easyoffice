@@ -3,6 +3,7 @@
 
 use crate::rich_document::{RichToc, MAX_TOC_LEVEL, MAX_TOC_PAGE};
 use crate::rich_notes::RichRevision;
+use crate::xml_stream::{attr, Attrs};
 use crate::{EasyOfficeError, RichRun, RichScript};
 
 /// Deepest open-paragraph stack a reader keeps (a paragraph inside a text box inside a paragraph, and
@@ -36,6 +37,7 @@ pub(crate) struct CharFmt {
     pub strike: bool,
     pub size_half_pt: Option<u16>,
     pub font: Option<String>,
+    pub font_east_asia: Option<String>,
     pub color: Option<String>,
     pub highlight: Option<String>,
     pub script: RichScript,
@@ -53,6 +55,7 @@ impl From<&RichRun> for CharFmt {
             strike: run.strike,
             size_half_pt: run.size_half_pt,
             font: run.font.clone(),
+            font_east_asia: run.font_east_asia.clone(),
             color: run.color.clone(),
             highlight: run.highlight.clone(),
             script: run.script,
@@ -63,6 +66,49 @@ impl From<&RichRun> for CharFmt {
 }
 
 impl CharFmt {
+    /// Sets the Latin and the East Asian font a file names (`None`: it names none). A file that names only one gives it to
+    /// both, and a pair that is the same font is one font, so a document with a single font keeps its single value (PD-374).
+    pub(crate) fn set_fonts(&mut self, latin: Option<String>, east_asia: Option<String>) {
+        match (latin, east_asia) {
+            (None, east) => {
+                self.font = east;
+                self.font_east_asia = None;
+            }
+            (latin, east) => {
+                self.font_east_asia = east.filter(|e| Some(e) != latin.as_ref());
+                self.font = latin;
+            }
+        }
+    }
+
+    /// [`Self::set_fonts`] on a format built with no fonts.
+    pub(crate) fn with_fonts(mut self, latin: Option<String>, east_asia: Option<String>) -> Self {
+        self.set_fonts(latin, east_asia);
+        self
+    }
+
+    /// Sets the fonts from the attributes of one element: the first non-empty of `latin_keys` and of `east_keys`
+    /// (`unquote` strips the single quotes an ODT font family may carry).
+    pub(crate) fn set_fonts_from_attrs(
+        &mut self,
+        attrs: &Attrs<'_>,
+        (latin_keys, east_keys): (&[&str], &[&str]),
+        unquote: bool,
+    ) {
+        let named = |keys: &[&str]| {
+            keys.iter().find_map(|k| {
+                let name = attr(attrs, k)?;
+                let name = if unquote {
+                    name.trim().trim_matches('\'')
+                } else {
+                    name.trim()
+                };
+                (!name.is_empty()).then(|| name.to_string())
+            })
+        };
+        self.set_fonts(named(latin_keys), named(east_keys));
+    }
+
     #[inline]
     pub(crate) fn style_bits(&self) -> u8 {
         let script_bits = match self.script {
@@ -92,6 +138,7 @@ impl CharFmt {
         self.style_bits() == run_bits
             && self.size_half_pt == run.size_half_pt
             && self.font == run.font
+            && self.font_east_asia == run.font_east_asia
             && self.color == run.color
             && self.highlight == run.highlight
             && self.letter_spacing_twips == run.letter_spacing_twips
@@ -149,6 +196,7 @@ pub(crate) fn push_annotated_run(
         strike: fmt.strike,
         size_half_pt: fmt.size_half_pt,
         font: fmt.font.clone(),
+        font_east_asia: fmt.font_east_asia.clone(),
         font_face: None,
         color: fmt.color.clone(),
         highlight: fmt.highlight.clone(),

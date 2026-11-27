@@ -258,6 +258,7 @@ fn rtf_paragraph_line(
                 strike: run.strike,
                 size_half_pt: run.size_half_pt,
                 font: run.font.clone(),
+                font_east_asia: run.font_east_asia.clone(),
                 color: run.color.clone(),
                 highlight: run.highlight.clone(),
                 script: RichScript::Superscript,

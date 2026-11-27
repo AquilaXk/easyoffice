@@ -289,6 +289,10 @@ impl ShapeTables {
             });
             for run in visible {
                 let font = run.font.as_ref().map_or(0, |f| self.font_index(f));
+                let font_east = run
+                    .font_east_asia
+                    .as_ref()
+                    .map_or(font, |f| self.font_index(f));
                 let size = run
                     .size_half_pt
                     .or_else(|| u16::try_from(base.height / 50).ok());
@@ -300,6 +304,7 @@ impl ShapeTables {
                     strike: run.strike,
                     height: run.size_half_pt.map_or(base.height, |s| u32::from(s) * 50),
                     font,
+                    font_east,
                     text_color: run.color.as_deref().and_then(hex_rgb),
                     shade_color: run.highlight.as_deref().and_then(hex_rgb),
                     script: run.script,

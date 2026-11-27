@@ -3,9 +3,12 @@
 //! `\colortbl`, paragraph alignment, outline levels, and `\trowd` table rows in position.
 //! Unknown destinations (`\*`, style sheets, pictures, headers) are skipped.
 
+mod char_state;
 mod defaults;
 
 use std::collections::HashMap;
+
+use char_state::CharState;
 
 use crate::code_pages::CodePage;
 use crate::decode_budget::DecodeBudget;
@@ -62,22 +65,6 @@ const NFC_NONE: i32 = 255;
 const DEFAULT_CODE_PAGE: u32 = 949;
 /// `\ansicpgN` is written in the first control words; the raw-byte sniff looks this far.
 const ANSICPG_SNIFF_BYTES: usize = 512;
-
-/// Character state of one RTF group (resolved against the tables when text is emitted).
-#[derive(Clone, Default)]
-struct CharState {
-    bold: bool,
-    italic: bool,
-    underline: bool,
-    strike: bool,
-    size: Option<u16>,
-    font: Option<i32>,
-    color: Option<usize>,
-    highlight: Option<usize>,
-    script: RichScript,
-    spacing: Option<i16>,
-    advanced: crate::CharAdvanced,
-}
 
 #[derive(Clone)]
 struct Group {
@@ -266,22 +253,28 @@ impl Reader {
     fn resolve(&self, st: &CharState) -> CharFmt {
         // Index 0 of the color table is "auto" and stored as `None`.
         let color_at = |i: Option<usize>| i.and_then(|i| self.colors.get(i)).and_then(Clone::clone);
+        // A face the font table lacks or the default one is no name; an `\af` that is the `\f` face (Word writes `\af0` next
+        // to every `\f0`) is one font.
+        let face = |id: Option<i32>| {
+            self.fonts
+                .get(&id.filter(|f| *f != self.default_font)?)
+                .cloned()
+        };
         CharFmt {
             bold: st.bold,
             italic: st.italic,
             underline: st.underline,
             strike: st.strike,
             size_half_pt: st.size,
-            font: st
-                .font
-                .filter(|f| *f != self.default_font)
-                .and_then(|f| self.fonts.get(&f).cloned()),
+            font: None,
+            font_east_asia: None,
             color: color_at(st.color),
             highlight: color_at(st.highlight),
             script: st.script,
             letter_spacing_twips: st.spacing,
             advanced: st.advanced,
         }
+        .with_fonts(face(st.font), face(st.font_ea))
     }
 
     fn emit(&mut self, text: &str) -> Result<(), EasyOfficeError> {
@@ -712,6 +705,7 @@ impl Reader {
             "expndtw" => st.spacing = param.and_then(|v| letter_spacing(i64::from(v))),
             "expnd" => st.spacing = param.and_then(|v| letter_spacing(i64::from(v) * 5)),
             "f" => st.font = param,
+            "af" => st.font_ea = param,
             "cf" => st.color = param.and_then(|v| usize::try_from(v).ok()),
             "highlight" | "chcbpat" | "cb" => {
                 st.highlight = param.and_then(|v| usize::try_from(v).ok());

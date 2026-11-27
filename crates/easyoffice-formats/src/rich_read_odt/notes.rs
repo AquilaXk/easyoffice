@@ -588,6 +588,7 @@ impl OdtNotesState {
                                     strike: fmt.strike,
                                     size_half_pt: fmt.size_half_pt,
                                     font: fmt.font,
+                                    font_east_asia: fmt.font_east_asia,
                                     color: fmt.color,
                                     highlight: fmt.highlight,
                                     script: fmt.script,

@@ -97,6 +97,7 @@ pub(crate) fn write_runs_json(out: &mut String, runs: &[RichRun]) {
         }
         for (value, key) in [
             (&r.font, "font"),
+            (&r.font_east_asia, "fontEastAsia"),
             (&r.font_face, "fontFace"),
             (&r.color, "color"),
             (&r.highlight, "highlight"),

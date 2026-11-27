@@ -85,7 +85,7 @@ fn minimal_odt(content_xml: &str) -> Vec<u8> {
 }
 
 #[test]
-fn docx_reads_east_asia_font_before_ascii_and_keeps_default_runs_none() {
+fn docx_reads_east_asia_font_apart_from_ascii_and_keeps_default_runs_none() {
     let xml = concat!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
         r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>"#,
@@ -101,21 +101,26 @@ fn docx_reads_east_asia_font_before_ascii_and_keeps_default_runs_none() {
     let RichBlock::Paragraph(p) = &doc.blocks[0] else {
         panic!("expected paragraph");
     };
-    let fonts: Vec<Option<&str>> = p.runs.iter().map(|r| r.font.as_deref()).collect();
+    // The Latin face (`ascii`, `hAnsi`, `cs`) and the East Asian one (`eastAsia`) are apart since PD-374.
+    let fonts: Vec<(Option<&str>, Option<&str>)> = p
+        .runs
+        .iter()
+        .map(|r| (r.font.as_deref(), r.font_east_asia.as_deref()))
+        .collect();
     assert_eq!(
         fonts,
         vec![
-            Some("맑은 고딕"),
-            Some("Georgia"),
-            Some("Tahoma"),
-            Some("Arial"),
-            None,
+            (Some("Calibri"), Some("맑은 고딕")),
+            (Some("Georgia"), None),
+            (Some("Tahoma"), None),
+            (Some("Arial"), None),
+            (None, None),
         ]
     );
 }
 
 #[test]
-fn odt_reads_asian_font_and_size_before_western_and_keeps_default_none() {
+fn odt_reads_asian_font_apart_from_western_and_size_before_western_and_keeps_default_none() {
     let content = concat!(
         r#"<?xml version="1.0" encoding="UTF-8"?>"#,
         r#"<office:document-content "#,
@@ -138,11 +143,14 @@ fn odt_reads_asian_font_and_size_before_western_and_keeps_default_none() {
     let RichBlock::Paragraph(p0) = &doc.blocks[0] else {
         panic!("expected paragraph 0");
     };
-    assert_eq!(p0.runs[0].font.as_deref(), Some("함초롬바탕"));
+    assert_eq!(p0.runs[0].font.as_deref(), Some("Liberation Serif"));
+    assert_eq!(p0.runs[0].font_east_asia.as_deref(), Some("함초롬바탕"));
     assert_eq!(p0.runs[0].size_half_pt, Some(28));
-    assert_eq!(p0.runs[1].font.as_deref(), Some("바탕"));
+    assert_eq!(p0.runs[1].font.as_deref(), Some("Arial"));
+    assert_eq!(p0.runs[1].font_east_asia.as_deref(), Some("바탕"));
     assert_eq!(p0.runs[1].size_half_pt, Some(24));
     assert_eq!(p0.runs[2].font.as_deref(), Some("Consolas"));
+    assert_eq!(p0.runs[2].font_east_asia, None);
 
     let RichBlock::Paragraph(p1) = &doc.blocks[1] else {
         panic!("expected paragraph 1");

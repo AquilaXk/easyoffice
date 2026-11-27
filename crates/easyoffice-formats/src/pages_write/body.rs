@@ -78,6 +78,7 @@ fn parse_rgb(raw: &str) -> Option<[u8; 3]> {
 /// What the writer still drops from a run or a paragraph (counted for the save warning).
 pub(super) fn run_loses_format(run: &RichRun) -> bool {
     !run.advanced.is_none()
+        || run.font_east_asia.is_some()
         || run
             .link
             .as_deref()

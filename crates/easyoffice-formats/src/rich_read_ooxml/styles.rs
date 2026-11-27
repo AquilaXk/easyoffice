@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::letter_spacing;
@@ -224,10 +223,9 @@ pub(super) fn apply_run_property(fmt: &mut CharFmt, name: &str, attrs: &Attrs<'_
             fmt.advanced.fx.apply_docx_property(name, attrs);
         }
         "w:rFonts" => {
-            fmt.font = ["w:eastAsia", "w:ascii", "w:hAnsi", "w:cs"]
-                .iter()
-                .find_map(|k| attr(attrs, k).filter(|f| !f.trim().is_empty()))
-                .map(Cow::into_owned);
+            // The Latin face is `ascii`, `hAnsi` or `cs` (the first named); `eastAsia` is the East Asian one.
+            let keys: (&[&str], &[&str]) = (&["w:ascii", "w:hAnsi", "w:cs"], &["w:eastAsia"]);
+            fmt.set_fonts_from_attrs(attrs, keys, false);
         }
         "w:sz" => fmt.size_half_pt = val.and_then(|v| v.parse::<u16>().ok()).filter(|v| *v > 0),
         "w:spacing" => {

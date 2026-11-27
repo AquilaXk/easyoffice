@@ -372,6 +372,7 @@ impl DocxWalker {
                 strike: self.fmt.strike,
                 size_half_pt: self.fmt.size_half_pt,
                 font: self.fmt.font.clone(),
+                font_east_asia: self.fmt.font_east_asia.clone(),
                 color: self.fmt.color.clone(),
                 highlight: self.fmt.highlight.clone(),
                 script: self.fmt.script,
