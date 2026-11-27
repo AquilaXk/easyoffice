@@ -21,8 +21,8 @@
 //! previous sheet; only a span with no sheet left becomes `#REF!`. The tab order comes with the
 //! change; without the sheets in it the span cannot be followed and fails closed to `#REF!`.
 //!
-//! A moved end follows the same page's "Move an endpoint" rule (see [`span_after_move`]): the
-//! text stays while the two ends keep their order and changes only when the move reverses them.
+//! A moved end follows that page's "Move an endpoint" rule (see `span_after_move`): the text stays
+//! while the two ends keep their order and changes only when the move reverses them.
 
 use super::formula::scan_refs;
 
@@ -153,7 +153,10 @@ fn span_after_move(
 
 /// Sheet names compare without case (ASCII and the common Unicode folds), as in every file format.
 fn same_sheet(a: &str, b: &str) -> bool {
-    a.eq_ignore_ascii_case(b) || a.to_lowercase() == b.to_lowercase()
+    if a.is_ascii() && b.is_ascii() {
+        return a.eq_ignore_ascii_case(b);
+    }
+    a.to_lowercase() == b.to_lowercase()
 }
 
 /// `name` as it is written in front of `!` in a formula.

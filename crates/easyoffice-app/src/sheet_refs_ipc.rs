@@ -3,7 +3,8 @@
 //!
 //! Request: `{session, op: "rename"|"delete", sheet, newName, rules}` (`newName` for a rename) or
 //! `{session, op: "move", sheets, order, rules}` (`sheets` the moved sheets, `order` every sheet
-//! name in tab order after the move; the session holds the order before it) and the rules `{sheet: {cf, dv}}` of every sheet, whose operand formulas may name the sheet too, and
+//! name in tab order after the move; the session holds the order before it), plus the rules
+//! `{sheet: {cf, dv}}` of every sheet, whose operand formulas may name the sheet too, and
 //! `linkTargets` `{sheet: ["#Old!B5", ...]}`, the in-workbook targets of the cell links (`sheet_links_json`).
 //! The engine checks the name (`sheet_name_problem`, no other sheet has it) and that a deletion
 //! leaves a sheet. It does not change the session: the page applies the answer and its sheet set
