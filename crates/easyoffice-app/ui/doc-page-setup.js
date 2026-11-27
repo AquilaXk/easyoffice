@@ -336,7 +336,7 @@
 
     // The dialog of each product: the items and words of its own page setup (the engine model is shared).
     //  - HWP (편집 용지, as the reference editor): 용지 종류, 폭·길이, 용지 방향, 제본 (한쪽 · 맞쪽 · 위로), 용지 여백, 제본.
-    //  - Word (용지 설정): 용지 크기, 너비·높이, 용지 방향, 여러 페이지 (기본 · 여백 미러), 제본용 여백 위치, 여백, 제본용 여백.
+    //  - Word (페이지 설정): 용지 크기, 너비·높이, 용지 방향, 여러 페이지 (기본 · 여백 미러), 제본용 여백 위치, 여백, 제본용 여백.
     //  - Pages (페이지 설정): 용지 크기, 용지 방향, 문서 여백 (상단 · 하단 · 왼쪽 · 오른쪽), 페이지 마주보기. No gutter, no top binding.
     function syncDialogLabels() {
       const hwp = isHwp();
@@ -345,7 +345,7 @@
         const el = byId(id);
         if (el) el.hidden = !on;
       };
-      setTxt("doc-page-setup-title", hwp ? "편집 용지" : pages ? "페이지 설정" : "용지 설정");
+      setTxt("doc-page-setup-title", hwp ? "편집 용지" : "페이지 설정");
       setTxt("doc-ps-paper-title", hwp ? "용지 종류" : "용지 크기");
       setTxt("doc-ps-width-label", hwp ? "폭" : "너비");
       setTxt("doc-ps-height-label", hwp ? "길이" : "높이");
@@ -411,7 +411,7 @@
       };
       if (withUndo) withUndo(run);
       else run();
-      setFeedback?.(mod === "HWP" ? "편집 용지 적용" : pages ? "페이지 설정 적용" : "용지 설정 적용");
+      setFeedback?.(mod === "HWP" ? "편집 용지 적용" : "페이지 설정 적용");
       editor.focus?.();
       return true;
     }

@@ -63,7 +63,7 @@ const enabledMenuItems = (document) =>
 
 // The ribbon commands (suffix after the module prefix) a window kind has no menu item for.
 const PALETTE_ONLY = {
-  DOC: ["data-validation"],
+  DOC: ["data-autosum", "data-fn-browser", "data-validation"],
   HWP: [
     "insert-chart", "layout-orientation", "layout-margins",
     "data-autosum", "data-fn-browser", "data-sort", "data-validation",
@@ -304,7 +304,7 @@ test("menu and toolbar labels name what their command does", async () => {
   const buttonsOf = (doc, cmd) => doc.querySelectorAll(`#icon-toolbar [data-studio-cmd="${cmd}"]`);
   assert.deepEqual(labelsOf(document, "home-style"), ["스타일 적용"]);
   assert.deepEqual(buttonsOf(document, "home-style").map((el) => [el.getAttribute("title"), el.getAttribute("aria-label")]), [["스타일 적용", "스타일 적용"]]);
-  assert.deepEqual(labelsOf(document, "layout-paper"), ["용지 설정", "용지 설정"]);
+  assert.deepEqual(labelsOf(document, "layout-paper"), ["페이지 설정", "페이지 설정"]);
   assert.deepEqual(labelsOf(document, "layout-orientation"), ["용지 방향"]);
   assert.deepEqual(labelsOf(document, "layout-margins"), ["여백"]);
   assert.equal(buttonsOf(document, "layout-paper").length, 0, "no toolbar button called object properties");
@@ -313,8 +313,8 @@ test("menu and toolbar labels name what their command does", async () => {
   assert.deepEqual(labelsOf(document, "para-shape"), ["양쪽 맞춤"]);
   assert.deepEqual(buttonsOf(document, "para-shape").map((el) => el.getAttribute("title")), ["양쪽 맞춤"]);
   assert.deepEqual(["btn-align-left", "btn-align-center", "btn-align-right", "btn-align-justify"].map((id) => document.getElementById(id).getAttribute("title")), ["왼쪽 맞춤", "가운데 맞춤", "오른쪽 맞춤", "양쪽 맞춤"]);
-  assert.deepEqual(labelsOf(document, "ctrl-marks"), ["서식 기호"]);
-  assert.deepEqual(labelsOf(document, "para-marks"), ["편집 기호"]);
+  assert.deepEqual(labelsOf(document, "ctrl-marks"), ["모든 서식 표시"]);
+  assert.deepEqual(labelsOf(document, "para-marks"), ["단락 표시"]);
   assert.deepEqual(labelsOf(document, "doc-grid"), ["눈금선"]);
   assert.deepEqual(labelsOf(document, "mod-header"), ["머리글"]);
   assert.deepEqual(labelsOf(document, "mod-footer"), ["바닥글"]);
@@ -326,7 +326,7 @@ test("menu and toolbar labels name what their command does", async () => {
   assert.deepEqual(labelsOf(document, "doc-mod-mailmerge"), ["편지 병합"]);
   assert.deepEqual(labelsOf(document, "palette"), ["명령 검색", "환경 설정 및 명령 검색"]);
   assert.deepEqual(labelsOf(document, "find"), ["찾기"]);
-  assert.deepEqual(labelsOf(document, "replace"), ["찾기 및 바꾸기"]);
+  assert.deepEqual(labelsOf(document, "replace"), ["바꾸기"]);
   assert.deepEqual(labelsOf(document, "print"), ["인쇄…"]);
   const docVisibleNames = [
     ...document.querySelectorAll(".md-item").filter(shown).map((el) => el.querySelector(".md-label")?.textContent || ""),

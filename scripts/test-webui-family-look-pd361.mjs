@@ -137,7 +137,7 @@ test("PD-361: START and CONV keep a minimal 5-menu chrome and clear docFlavor ac
   await flushAsyncTurns(16);
   const app = h.document.getElementById("app");
   assert.equal(app.dataset.docFlavor, "pages");
-  assert.deepEqual(visibleMenus(h.document), ["파일", "편집", "보기", "삽입", "포맷", "정렬", "도구", "도움말"]);
+  assert.deepEqual(visibleMenus(h.document), ["파일", "편집", "보기", "삽입", "포맷", "표", "도구", "도움말"]);
   assert.equal(h.document.getElementById("pages-inspector").hidden, false);
 
   // The toolbar's 문서 button opens the document sidebar in place of the format sidebar; its button again closes it.
@@ -385,8 +385,8 @@ test("Official Korean terminology separation holds across DOC, PAGES, SHEET, SLI
   assert.equal(shownLabel("para-shape"), "양쪽 맞춤");
   assert.equal(shownLabel("indent-in"), "들여쓰기 늘림");
   assert.equal(shownLabel("indent-out"), "들여쓰기 줄임");
-  assert.equal(shownLabel("ctrl-marks"), "서식 기호");
-  assert.equal(shownLabel("para-marks"), "편집 기호");
+  assert.equal(shownLabel("ctrl-marks"), "모든 서식 표시");
+  assert.equal(shownLabel("para-marks"), "단락 표시");
   assert.equal(shownLabel("doc-grid"), "눈금선");
 
   // PAGES (Apple Pages macOS Korean)
@@ -675,7 +675,7 @@ test("The page setup dialog shows each product's own items and words", async () 
 
   // Word
   await openDialog();
-  assert.equal(text("doc-page-setup-title"), "용지 설정");
+  assert.equal(text("doc-page-setup-title"), "페이지 설정");
   assert.deepEqual(["doc-ps-paper-title", "doc-ps-width-label", "doc-ps-height-label", "doc-ps-margin-title", "doc-ps-gutter-label"].map(text), ["용지 크기", "너비", "높이", "여백", "제본용 여백"]);
   assert.deepEqual(["doc-ps-binding-word", "doc-ps-gutter", "doc-ps-binding-cards", "doc-ps-binding-title", "doc-ps-facing-row"].map(shown), [true, true, false, false, false]);
   assert.deepEqual([...byId("doc-ps-multi").querySelectorAll("option")].map((o) => o.textContent), ["기본", "여백 미러"]);

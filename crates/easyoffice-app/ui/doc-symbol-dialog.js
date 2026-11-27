@@ -10,6 +10,13 @@
     { id: "enclosed", label: "원문자", glyphs: Array.from("①②③④⑤⑥⑦⑧⑨⑩ⓐⓑⓒⓓⓔⓕⓖⓗⓘⓙ㉠㉡㉢㉣㉤㉥㉦㉧㉨㉩") },
   ];
 
+  // The symbol dialog of the Word program has two tabs: 기호 and 특수 문자.
+  const glyphsOf = (...ids) => SYMBOL_CATEGORIES.filter((c) => ids.includes(c.id)).flatMap((c) => c.glyphs);
+  const WORD_CATEGORIES = [
+    { id: "symbols", label: "기호", glyphs: glyphsOf("general", "arrow", "math", "unit", "enclosed") },
+    { id: "special", label: "특수 문자", glyphs: glyphsOf("punct") },
+  ];
+
   const DEFAULT_CHAR = "※";
   const GRID_COLS = 10;
 
@@ -38,6 +45,7 @@
     let bound = false;
 
     const $ = (id) => document.getElementById(id);
+    const categories = () => (isWordDoc(getActiveModule()) ? WORD_CATEGORIES : SYMBOL_CATEGORIES);
 
     function formatCodePoint(ch) {
       const cp = String(ch || DEFAULT_CHAR).codePointAt(0) || 0;
@@ -67,7 +75,8 @@
     function renderGrid() {
       const grid = $("symbol-picker-grid");
       if (!grid) return;
-      const cat = SYMBOL_CATEGORIES.find((c) => c.id === activeCatId) || SYMBOL_CATEGORIES[0];
+      const cats = categories();
+      const cat = cats.find((c) => c.id === activeCatId) || cats[0];
       const buttons = cat.glyphs.map((ch, idx) => {
         const btn = document.createElement("button");
         btn.type = "button";
@@ -108,7 +117,7 @@
     function renderTabs() {
       const tabs = $("symbol-picker-tabs");
       if (!tabs) return;
-      const els = SYMBOL_CATEGORIES.map((cat) => {
+      const els = categories().map((cat) => {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "symbol-cat-tab" + (cat.id === activeCatId ? " active" : "");
@@ -288,8 +297,10 @@
     function openSymbolDialog() {
       bind();
       savedTarget = captureTargetContext();
-      if (!SYMBOL_CATEGORIES.some((c) => c.glyphs.includes(selectedChar))) {
-        activeCatId = "general";
+      const cats = categories();
+      if (!cats.some((c) => c.id === activeCatId)) activeCatId = cats[0].id;
+      if (!cats.some((c) => c.glyphs.includes(selectedChar))) {
+        activeCatId = cats[0].id;
         selectedChar = DEFAULT_CHAR;
       }
       renderTabs();
@@ -324,18 +335,25 @@
       } else if (mod === "PDF") {
         pageValue = Math.max(1, Number(document.getElementById("pdf-page-count")?.textContent) || 1);
       }
-      const sentences = Number(smartRes?.sentenceCount ?? (trimmed ? trimmed.split(/[.!?。\n]+/).filter((s) => s.trim()).length : 0));
-      const readSeconds = words > 0 ? Math.max(1, Math.ceil((words / 220) * 60)) : 0;
-      return [
+      const counts = [
         ["글자 수 (공백 포함)", String(charsWithSpaces)],
         ["글자 수 (공백 제외)", String(charsWithoutSpaces)],
         ["단어 수", String(words)],
         [unitLabel, String(unitValue)],
+      ];
+      // The word-count dialog of the Word program lists only counts, so DOC leaves out the sentence count and the reading time.
+      if (isWordDoc(mod)) return [...counts, [pageLabel, String(pageValue)]];
+      const sentences = Number(smartRes?.sentenceCount ?? (trimmed ? trimmed.split(/[.!?。\n]+/).filter((s) => s.trim()).length : 0));
+      const readSeconds = words > 0 ? Math.max(1, Math.ceil((words / 220) * 60)) : 0;
+      return [
+        ...counts,
         ["문장 수", String(sentences)],
         [pageLabel, String(pageValue)],
         ["예상 읽기 시간", readSeconds > 0 ? readSeconds + "초" : "0초"],
       ];
     }
+
+    const isWordDoc = (mod) => mod === "DOC" && document.getElementById("doc-editor")?.dataset?.eoDocFlavor !== "pages";
 
     function openStatsDialog(smartRes) {
       const grid = $("doc-stats-grid");
@@ -350,6 +368,8 @@
         children.push(dt, dd);
       }
       grid.replaceChildren(...children);
+      const title = $("doc-stats-title");
+      if (title) title.textContent = isWordDoc(getActiveModule()) ? "단어 개수" : "문서 통계";
       const statusEl = $("doc-stats-status");
       if (statusEl) {
         statusEl.textContent = "공백 포함 " + rows[0][1] + "자 · 공백 제외 " + rows[1][1] + "자 · 단어 " + rows[2][1] + "개";

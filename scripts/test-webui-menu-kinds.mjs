@@ -17,7 +17,7 @@ const read = (rel) => readText(fileURLToPath(new URL(rel, REPO)));
 const KINDS = ["DOC", "PAGES", "HWP", "SHEET", "SLIDE", "PDF", "BASE", "BOARD", "START", "CONV"];
 const TITLES = {
   DOC: ["파일", "편집", "보기", "삽입", "서식", "레이아웃", "표", "도구", "도움말"],
-  PAGES: ["파일", "편집", "보기", "삽입", "포맷", "정렬", "도구", "도움말"],
+  PAGES: ["파일", "편집", "보기", "삽입", "포맷", "표", "도구", "도움말"],
   HWP: ["파일", "편집", "보기", "입력", "서식", "쪽", "표", "도구", "도움말"],
   SHEET: ["파일", "편집", "보기", "삽입", "서식", "시트", "수식", "데이터", "도구", "도움말"],
   SLIDE: ["파일", "편집", "보기", "삽입", "서식", "슬라이드", "슬라이드 쇼", "도구", "도움말"],
@@ -111,7 +111,7 @@ test("the presentation has 슬라이드 and 슬라이드 쇼 menus and the PDF h
 test("the document window keeps its menus and the Hangul window's fallback editor adds its own items", async () => {
   const doc = await open("DOC");
   await flushAsyncTurns(10);
-  assert.deepEqual(commandsOf(doc.document, "표"), ["insert-table", "table-row-above", "table-add-row", "table-col-left", "table-col-right", "table-row-delete", "table-col-delete", "table-split", "table-merge", "table-col-equal", "table-border-bg", "table-cell-props", "table-sum", "doc-mod-tableformula", "data-autosum", "data-fn-browser", "data-sort"]);
+  assert.deepEqual(commandsOf(doc.document, "표"), ["insert-table", "table-row-above", "table-add-row", "table-col-left", "table-col-right", "table-row-delete", "table-col-delete", "table-split", "table-merge", "table-col-equal", "table-border-bg", "table-cell-props", "doc-mod-tableformula", "data-sort"]);
   const hwp = await open("HWP");
   await flushAsyncTurns(10);
   assert.ok(commandsOf(hwp.document, "입력").includes("hwp-mod-field"));

@@ -452,7 +452,9 @@ test("the symbol table opens a picker dialog, inserts at the caret and keeps the
     await flushAsyncTurns();
     const symDlg = document.getElementById("symbol-picker-dialog");
     assert.equal(symDlg.open, true, moduleName + ": opens symbol picker dialog");
-    assert.ok(document.querySelectorAll("#symbol-picker-tabs [data-sym-cat]").length >= 5, "has symbol categories");
+    const tabs = [...document.querySelectorAll("#symbol-picker-tabs [data-sym-cat]")].map((tab) => tab.textContent);
+    if (moduleName === "DOC") assert.deepEqual(tabs, ["기호", "특수 문자"], "the Word symbol dialog has two tabs");
+    else assert.ok(tabs.length >= 5, "has symbol categories");
     userClick(document.getElementById("btn-symbol-insert"));
     await flushAsyncTurns();
     assert.equal(symDlg.open, false);

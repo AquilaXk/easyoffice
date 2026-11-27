@@ -64,7 +64,7 @@ test("Slice 2: HWP vs Office vs .pages official Korean terminology and lossless 
 
   // 1. DOC (Word official terms)
   assert.deepEqual(styles(), ["표준", "제목 1", "제목 2", "제목 3", "제목 4", "제목 5", "제목 6"]);
-  assert.equal(paperMenuLabel(), "용지 설정");
+  assert.equal(paperMenuLabel(), "페이지 설정");
   assert.equal(document.getElementById("btn-stylebar-bold").getAttribute("title"), "굵게 (Ctrl+B)");
   assert.equal(document.getElementById("btn-stylebar-italic").getAttribute("title"), "기울임꼴 (Ctrl+I)");
   document.querySelector('.md-item[data-studio-menu-cmd="clip-cut"]').click();

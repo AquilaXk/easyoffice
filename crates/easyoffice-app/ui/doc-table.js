@@ -61,10 +61,10 @@
     "table-sum": "블록 합계",
   };
   const DOC_COMMAND_LABELS = {
-    "table-row-above": "위쪽에 행 추가",
-    "table-add-row": "아래쪽에 행 추가",
-    "table-col-left": "왼쪽에 열 추가",
-    "table-col-right": "오른쪽에 열 추가",
+    "table-row-above": "위에 삽입",
+    "table-add-row": "아래에 삽입",
+    "table-col-left": "왼쪽에 삽입",
+    "table-col-right": "오른쪽에 삽입",
     "table-row-delete": "행 삭제",
     "table-col-delete": "열 삭제",
     "table-split": "셀 분할",
@@ -280,7 +280,7 @@
     function bind() {
       editor()?.addEventListener("keydown", onKeydown);
       document.addEventListener?.("selectionchange", syncMenu);
-      for (const menu of document.querySelectorAll('.menu-item[data-menu="table"], .menu-item[data-menu="arrange"]')) {
+      for (const menu of document.querySelectorAll('.menu-item[data-menu="table"], .menu-item[data-menu="table-pages"]')) {
         for (const type of ["mouseenter", "focusin", "click"]) menu.addEventListener(type, syncMenu);
       }
       docImage?.bind();

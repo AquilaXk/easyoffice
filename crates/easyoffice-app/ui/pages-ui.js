@@ -237,11 +237,11 @@
         hwp ? "한 수준\n감소" : isPages ? "들여쓰기\n감소" : "들여쓰기\n줄임",
         hwp ? "한 수준 감소" : isPages ? "들여쓰기 단계 감소" : "들여쓰기 줄임",
       );
-      btnText('#icon-toolbar #btn-toggle-ctrl-marks', hwp ? "조판\n부호" : "서식\n기호", hwp ? "조판 부호 표시" : "서식 기호 표시");
+      btnText('#icon-toolbar #btn-toggle-ctrl-marks', hwp ? "조판\n부호" : isPages ? "서식\n기호" : "모든\n서식 표시", hwp ? "조판 부호 표시" : isPages ? "서식 기호 표시" : "모든 서식 표시");
       btnText(
         '#icon-toolbar #btn-toggle-para-marks',
-        hwp ? "문단\n부호" : isPages ? "보이지\n않는 요소" : "편집\n기호",
-        hwp ? "문단 부호 표시" : isPages ? "보이지 않는 요소 보기" : "편집 기호 표시",
+        hwp ? "문단\n부호" : isPages ? "보이지\n않는 요소" : "단락\n표시",
+        hwp ? "문단 부호 표시" : isPages ? "보이지 않는 요소 보기" : "단락 표시",
       );
       btnText('#icon-toolbar #btn-toggle-doc-grid', hwp ? "격자\n보기" : "눈금선", hwp ? "격자 보기" : "눈금선 보기");
       btnText('#icon-toolbar [data-studio-cmd="insert-table"]', "표", hwp ? "표 만들기" : "표 삽입");
@@ -264,6 +264,34 @@
         if (!el) continue;
         el.setAttribute("title", title);
         el.setAttribute("aria-label", title);
+      }
+      syncWordTerms(mod === "DOC" && !isPages, hwp);
+    }
+
+    // Word terms of the style bar, the zoom buttons and the header/footer tools (DOC only); the other products keep the base words.
+    function syncWordTerms(word, hwp) {
+      const colorWord = word ? "글꼴 색" : "글자 색";
+      const highlightWord = word ? "텍스트 강조 색" : "형광펜";
+      const sizeWord = hwp ? "글꼴 크기" : "글자 크기";
+      const labels = [
+        ["#btn-stylebar-textcolor", `${colorWord} 적용`, colorWord],
+        ["#doc-textcolor-host .sb-color-arrow", `${colorWord} 선택`],
+        ["#doc-textcolor-input", `${colorWord} 선택`],
+        ["#btn-stylebar-highlight", `${highlightWord} 적용`, highlightWord],
+        ["#doc-highlight-host .sb-color-arrow", `${highlightWord} 선택`],
+        ["#doc-highlight-input", `${highlightWord} 선택`],
+        ["#btn-size-up", `${sizeWord} 크게`],
+        ["#btn-size-down", `${sizeWord} 작게`],
+        ["#btn-zoom-fit-width", word ? "페이지 너비" : "폭 맞춤"],
+        ["#btn-zoom-fit-page", word ? "한 페이지" : "쪽 맞춤"],
+        ['[data-hf-action="page-number"]', word ? "페이지 번호 삽입" : "쪽 번호 삽입"],
+        ['[data-hf-action="total-pages"]', word ? "총 페이지 수 삽입" : "총 쪽수 삽입"],
+      ];
+      for (const [selector, label, title = label] of labels) {
+        const el = doc.querySelector(selector);
+        if (!el) continue;
+        el.setAttribute("title", title);
+        el.setAttribute("aria-label", label);
       }
     }
 

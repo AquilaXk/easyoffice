@@ -93,7 +93,7 @@ test("switching between DOC and HWP updates fallback font, line spacing, and 편
 
   h.userClick(studioItem(document, "layout-paper"));
   await flushAsyncTurns(4);
-  assert.equal(document.getElementById("doc-page-setup-title").textContent, "용지 설정");
+  assert.equal(document.getElementById("doc-page-setup-title").textContent, "페이지 설정");
   assert.equal(document.getElementById("doc-ps-header-label").textContent, "머리글");
   assert.equal(document.getElementById("doc-ps-footer-label").textContent, "바닥글");
   assert.deepEqual(
