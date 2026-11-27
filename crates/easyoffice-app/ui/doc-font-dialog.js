@@ -43,7 +43,6 @@
   const FX = host.__EASYOFFICE_DOC_TEXT_FX__;
   // The color boxes by the run value they set, and the controls that set a part of the packed text effects.
   const COLOR_HOST = { color: "#doc-font-color-host", ucolor: "#doc-font-underline-color-host" };
-  const FX_KEYS = ["ulstyle", "emphasis", "dstrike", "smallcaps", "allcaps", "hidden"];
   // What the sample takes from the effects besides the decoration line (the sample box holds the caps, dimming and marks).
   const FX_SAMPLE_KEYS = ["textDecorationStyle", "textDecorationColor", "textDecorationThickness", "fontVariantCaps", "textTransform", "opacity", "textEmphasisStyle", "textEmphasisPosition"];
 
@@ -282,6 +281,7 @@
     const initial = {
       family: els.family.value,
       latin: els.latin.value,
+      fontsMixed: state.font === MIXED || state.eastfont === MIXED,
       style: state.bold === MIXED || state.italic === MIXED ? "" : styleKey(state.bold === true, state.italic === true),
       size: Number.isInteger(state.size) ? String(state.size / 2) : "",
       strike: state.strike === true, sup: state.superscript === true, sub: state.subscript === true,
@@ -417,9 +417,9 @@
     const kerning = sameKerning ? initial.kerning : kerningHalfPt(els.kern.checked, els.kernValue.value);
     if (kerning === null) return bad(els.kernValue);
     if (kerning !== (initial.kerning ?? 0)) patch.kerning = kerning;
-    const openType = OT.compose(els.ot, initial.opentype, touched);
-    const openTypeTouched = [...touched].some((key) => key !== "grid");
-    if (initial.opentype === null ? openTypeTouched : openType !== initial.opentype) patch.opentype = openType;
+    // The OpenType choices the user touched are a `{ mask, value }` patch: every run takes those bits and keeps the rest.
+    const otMask = OT.maskOf(touched);
+    if (otMask) patch.opentype = { mask: otMask, value: OT.compose(els.ot, 0, touched) };
     if (touched.has("grid")) patch.nogrid = els.grid.checked ? null : 1;
     return { patch };
   }
@@ -445,17 +445,30 @@
     });
   }
 
+  // The font part of the patch. Another font drops the variant, as the style bar's font list does (`setFont`, PD-368). When the
+  // selection is uniform the patch names both faces (the East Asian one kept apart only when it differs); when the faces are mixed
+  // it names only the one the user changed, so each run keeps the other (`keepEast` keeps the East Asian face of a run with one font).
+  function fontPatch(els, initial) {
+    const latinChanged = Boolean(els.latin.value) && els.latin.value !== initial.latin;
+    const eastChanged = Boolean(els.family.value) && els.family.value !== initial.family;
+    if (!latinChanged && !eastChanged) return {};
+    if (!initial.fontsMixed) {
+      const latinFont = els.latin.value || els.family.value;
+      const eastFont = els.family.value || latinFont;
+      return { font: latinFont, eastfont: eastFont === latinFont ? null : eastFont, face: null };
+    }
+    const patch = { face: null };
+    if (latinChanged) patch.font = els.latin.value;
+    if (eastChanged) patch.eastfont = els.family.value;
+    else patch.keepEast = true;
+    return patch;
+  }
+
   // 확인: the patch has only what differs from what the selection had; a value out of range keeps the dialog open.
   function apply() {
     const { els, initial, runs } = current;
     const patch = {};
-    // Another font drops the variant, as the style bar's font list does (`setFont`, PD-368).
-    // 한글 글꼴 or 영어 글꼴 changed: the patch names both, so the East Asian one is kept apart only when it differs.
-    if ((els.family.value && els.family.value !== initial.family) || (els.latin.value && els.latin.value !== initial.latin)) {
-      const latinFont = els.latin.value || els.family.value;
-      const eastFont = els.family.value || latinFont;
-      Object.assign(patch, { font: latinFont, eastfont: eastFont === latinFont ? null : eastFont, face: null });
-    }
+    Object.assign(patch, fontPatch(els, initial));
     const chosen = styleOfText(els.style.value);
     if (chosen && chosen !== (initial.style || "regular")) {
       const style = STYLE_OF[chosen];
@@ -471,9 +484,8 @@
     if (underlined !== initial.underline) patch.underline = underlined ? true : null;
     if (current.touched.has("color")) patch.color = current.colors.color || null;
     if (current.touched.has("ucolor")) patch.ucolor = current.colors.ucolor || null;
-    const fxPacked = current.fxNow();
-    const fxTouched = FX_KEYS.some((key) => current.touched.has(key));
-    if (initial.textfx === null ? fxTouched : fxPacked !== initial.textfx) patch.textfx = fxPacked || null;
+    const fxMask = FX.maskOf(current.touched);
+    if (fxMask) patch.textfx = { mask: fxMask, value: composeFx(els, 0, current.touched) };
     const advanced = advancedPatch(els, initial, current.touched);
     if (advanced.box) {
       els.status.textContent = MSG_RANGE;

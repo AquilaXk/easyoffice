@@ -92,6 +92,11 @@
     ctl.alternates.checked = u.alternates;
   }
 
+  // The bits of the packed value the controls in `keys` (`ligatures`, `spacing`, `form`, `alternates`, `set`) own, for a
+  // `{ mask, value }` patch: a mixed selection takes only these bits and keeps the rest.
+  const KEY_MASK = { ligatures: 15, spacing: 3 << SPACING_SHIFT, form: 3 << FORM_SHIFT, alternates: ALTERNATES_BIT, set: (2 ** MAX_STYLE_SET - 1) << SETS_SHIFT };
+  const maskOf = (keys) => [...keys].reduce((mask, key) => mask | (KEY_MASK[key] || 0), 0);
+
   // The packed value of the controls on top of `base` (the selection's value): only a control in `touched` replaces its part,
   // so a custom ligature mix or several stylistic sets the controls cannot show stay as the file had them.
   function compose(ctl, base, touched) {
@@ -105,5 +110,5 @@
     });
   }
 
-  host.__EASYOFFICE_DOC_OPEN_TYPE__ = { MAX_PACKED, MAX_STYLE_SET, LIGATURE_CHOICES, valid, pack, unpack, css, controls, show, compose };
+  host.__EASYOFFICE_DOC_OPEN_TYPE__ = { MAX_PACKED, MAX_STYLE_SET, LIGATURE_CHOICES, valid, pack, unpack, css, controls, show, compose, maskOf };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

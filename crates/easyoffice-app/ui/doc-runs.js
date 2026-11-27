@@ -89,6 +89,22 @@
     return Number.isInteger(n) && n >= min && n <= max ? n : undefined;
   }
 
+  // `opentype` and `textfx` pack several settings in one integer. A patch may name only some bits as `{ mask, value }`: each run
+  // takes `value`'s bits inside `mask` and keeps its own bits outside it (a mixed selection keeps what the user did not touch).
+  const BIT_PROPS = new Set(["opentype", "textfx"]);
+  function bitsValue(prop, { mask, value }) {
+    const [, max] = ADVANCED_RANGE[prop];
+    const whole = (n) => Number.isInteger(n) && n >= 0 && n <= max;
+    return whole(mask) && mask > 0 && whole(value) ? { mask, value: value & mask } : undefined;
+  }
+
+  // The run value after a `{ mask, value }` patch, `undefined` when the result is not a value the engine accepts.
+  function applyBits(prop, old, { mask, value }) {
+    const next = ((old || 0) & ~mask) | value;
+    if (next === 0) return null;
+    return advancedValue(prop, next) ?? undefined;
+  }
+
   // Returns the normalized value of one property, `null` to clear it, or `undefined` if invalid.
   function normalizeProp(prop, value) {
     if (value === null || value === false || value === "") return null;
@@ -102,6 +118,7 @@
       if (n === 0) return null;
       return Number.isInteger(n) && Math.abs(n) <= MAX_SPACING_TWIPS ? n : undefined;
     }
+    if (BIT_PROPS.has(prop) && value && typeof value === "object") return bitsValue(prop, value);
     if (ADVANCED_RANGE[prop]) return advancedValue(prop, value);
     if (prop === "font" || prop === "eastfont") return normalizeFont(value) ?? undefined;
     if (prop === "face") return FACE_RE.test(String(value)) ? String(value) : undefined;
@@ -120,7 +137,9 @@
       any = true;
     });
     // A font named without the East Asian one is for both (the style bar's font list, a pasted font); the 글꼴 dialog names both.
-    if (Object.hasOwn(out, "font") && !Object.hasOwn(out, "eastfont")) out.eastfont = null;
+    // `keepEast`: only the Latin font changes, so each run keeps the East Asian face it has (see `mergePatch`).
+    if (patch?.keepEast === true && Object.hasOwn(out, "font") && !Object.hasOwn(out, "eastfont")) out.keepEast = true;
+    else if (Object.hasOwn(out, "font") && !Object.hasOwn(out, "eastfont")) out.eastfont = null;
     if (out.superscript === true && !Object.hasOwn(out, "subscript")) out.subscript = null;
     if (out.subscript === true && !Object.hasOwn(out, "superscript")) out.superscript = null;
     return any ? out : null;
@@ -580,10 +599,13 @@
 
   function mergePatch(fmt, patch) {
     const next = { ...fmt };
+    // A run with one font keeps it for its East Asian text when only the Latin font changes.
+    if (patch.keepEast === true && next.eastfont === undefined && next.font) next.eastfont = next.font;
     PROPS.forEach((p) => {
       if (!Object.hasOwn(patch, p)) return;
-      if (patch[p] === null) delete next[p];
-      else next[p] = patch[p];
+      const value = BIT_PROPS.has(p) && patch[p] && typeof patch[p] === "object" ? applyBits(p, fmt[p], patch[p]) : patch[p];
+      if (value === null) delete next[p];
+      else if (value !== undefined) next[p] = value;
     });
     return next;
   }

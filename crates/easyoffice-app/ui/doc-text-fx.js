@@ -49,6 +49,11 @@
       | (emphasis << EMPHASIS_SHIFT) | (underline << UNDERLINE_SHIFT);
   }
 
+  // The bits of the packed value the dialog's controls in `keys` (`dstrike`, `smallcaps`, `allcaps`, `hidden`, `emphasis`,
+  // `ulstyle`) own, for a `{ mask, value }` patch.
+  const KEY_MASK = { dstrike: DOUBLE_STRIKE, smallcaps: SMALL_CAPS, allcaps: ALL_CAPS, hidden: HIDDEN, emphasis: 7 << EMPHASIS_SHIFT, ulstyle: 31 << UNDERLINE_SHIFT };
+  const maskOf = (keys) => [...keys].reduce((mask, key) => mask | (KEY_MASK[key] || 0), 0);
+
   // Screen drawing of a run format `fmt` (`underline`, `strike`, `textfx`, `ucolor`): every key is set, empty when it does not
   // apply. `textDecoration` stays empty for a run without effects, so the run's plain decoration is kept. Hidden text is drawn
   // dimmed (a word processor hides it unless it shows hidden text; the editor keeps it visible so it can be selected).
@@ -78,5 +83,5 @@
     return out;
   }
 
-  host.__EASYOFFICE_DOC_TEXT_FX__ = { MAX_PACKED, MAX_UNDERLINE_STYLE, valid, pack, parts, css };
+  host.__EASYOFFICE_DOC_TEXT_FX__ = { MAX_PACKED, MAX_UNDERLINE_STYLE, valid, pack, parts, css, maskOf };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
