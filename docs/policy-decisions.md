@@ -6538,4 +6538,40 @@
 - **Why** 공식 항목이 있는데 지원하지 않으면 숨기지 말고 넣는다는 QA 원칙(2026-11-27).
 - **Trade-offs** `글꼴` 탭이 공식 대화상자보다 작다. 문서 근거는 `고급` 탭뿐이라 `글꼴` 탭 낱말은 한국어판 화면 기억에 기댔다(확인하지 못한 항목: `글꼴 스타일(Y)`의 접근 키 글자).
 - **Verified by** `scripts/test-webui-doc-font-dialog.mjs`(탭, 넓게·좁게·표준, 범위 거부, 변경분만 적용), `scripts/test-webui-menu-kinds.mjs`·`test-webui-native-menu.mjs`(페이지 메뉴와 네이티브 메뉴 동일), 헤드리스 WebKit 전·후 캡처(밝은·어두운 테마).
-- **Revisit when** 엔진이 글자 배율·위치·커닝을 다룰 때.
+- **Revisit when** 엔진이 글자 배율·위치·커닝을 다룰 때(`PD-372`가 넣었다).
+
+## PD-372 — 글꼴 대화상자 고급 탭의 배율·위치·글꼴 커닝을 모델과 DOCX·ODT·RTF·HWPX에 넣음 (2026-11-27)
+
+- **Status** Implemented (QA 요청 2026-11-27). 브랜치 `feat/font-advanced`.
+- **Context** `PD-371`이 엔진 모델이 없어 뺀 `고급` 탭의 `배율`, `위치`(`표준`·`올림`·`내림`), `글꼴 커닝`(체크 상자와 `포인트 이상` 값)을 넣는다. 공식 항목이 있는데 엔진이 모르면 숨기지 말고 구현한다는 QA 원칙에 따랐다. 근거는 워드프로세서 한국어판 글꼴 대화상자와 OOXML 표준(ECMA-376 1부: `w:w`는 `ST_TextScale`, `w:position`은 `ST_SignedHpsMeasure`, `w:kern`은 `ST_HpsMeasure`로 반 포인트 단위, 0이면 커닝 끔, 17.3.2.19)이다. 이 값들을 담는 다른 포맷은 ODF(`style:text-scale`, `style:text-position`, `style:letter-kerning`), RTF(`\charscalex`, `\up`·`\dn`, `\kerning`), HWPX(`hh:ratio`, `hh:offset`, `useKerning`)다.
+- **Decision (`PD-372`)**
+  1. **모델(`rich_char_adv.rs`)**: `RichRun::advanced: CharAdvanced`는 `scale_percent`(1~600), `position_half_pt`(±3,168, 양수가 올림), `kerning_half_pt`(1~3,276)를 `Option`으로 갖는다. 중립값(배율 100, 위치 0, 커닝 끔)은 지정 없음이다. 배율 상한 600은 표준과 같다. 위치 ±1,584pt와 커닝 1~1,638pt는 QA가 준 대화상자 한계이고, 표준은 이 두 범위를 정하지 않으며 공식 문서에서 수치를 확인하지 못했다. 모델의 커닝 하한은 파일의 `w:kern="1"`(0.5pt)을 잃지 않으려 0.5pt이고, 대화상자는 1pt부터 받는다. 파일에서 읽은 범위 밖 값은 자르고(배율 0 이하는 없음) 0은 없음이다.
+  2. **포맷별 대응**
+
+     | | 배율 | 위치 | 커닝 |
+     |---|---|---|---|
+     | DOCX | `w:w`(%) | `w:position`(반 포인트) | `w:kern`(반 포인트) |
+     | ODT | `style:text-scale`(%) | `style:text-position`(글자 크기 대비 %, `20% 100%`) | `style:letter-kerning`(스위치) |
+     | RTF | `\charscalex` | `\up`·`\dn`(반 포인트, 값 없으면 6) | `\kerning`(반 포인트) |
+     | HWPX | `hh:ratio`(10~200 %, 쓸 때 모든 언어 칸, 읽을 때 한글 칸) | `hh:offset`(글자 크기 대비 %, -100~100) | `useKerning`(스위치) |
+     | Pages | 쓰지 않음 | 쓰지 않음 | 쓰지 않음 |
+
+     DOCX의 쓰는 순서는 스키마 순서(`w:spacing`, `w:w`, `w:kern`, `w:position`, `w:sz`)다.
+  3. **Pages**: 공개 `.proto`(`TSWP.CharacterStylePropertiesArchive`)에서 `baseline_shift = 14`, `kerning = 15` 번호는 확인했다. 참조 구현의 표는 14번에 "6pt 올림 → 12"를 적어 단위가 문서와 어긋나고, 15번이 무엇인지 설명이 없다. 가로 배율은 참조 구현이 "가져온 뒤 저장되지 않았다"고 적는다. 번호·단위를 확인하지 못한 값은 쓰지 않는다는 기준에 따라 셋 모두 쓰지 않고, 저장 손실 경고(`Pages 저장에서 빠진 서식 N곳`)에 센다. 출처는 `THIRD_PARTY_NOTICES.md`에 적었고 남은 확인은 `TODO.md`에 있다.
+  4. **열기·저장 JSON**: 런의 키는 `scalePercent`, `positionHalfPt`, `kerningHalfPt`다. 저장은 각 키가 모델 범위(1~600, ±3,168, 1~3,276)의 정수가 아니면 거부한다(JS의 `doc-runs.js`가 같은 범위로 먼저 걸러 낸다). 키가 없는 문서는 그대로 열리고 저장된다. 열기 JSON은 지정된 값만 내보낸다.
+  5. **편집기 표시**: 런은 `data-eo-scale`·`data-eo-position`·`data-eo-kerning`을 갖는다. 위치는 `vertical-align`의 길이로 그리고 위·아래 첨자를 같이 지정하면 첨자가 이긴다. 배율은 `font-stretch`(50~200 %로 자름)로 그려 폭 변형이 있는 서체에서만 모양이 바뀐다(`transform: scaleX`는 인라인 런에 줄 바꿈과 폭을 맞춰 줄 방법이 없어 뺐다). 커닝은 켜졌을 때 `font-kerning: normal`로 그리고 크기 문턱은 CSS에 대응이 없어 화면에 반영하지 않는다. 대화상자 미리 보기는 자기 상자라 `scaleX`로 실제 배율을 보인다.
+  6. **대화상자**: `고급` 탭은 `배율(C)`(%, 목록에 200·150·100·90·80·66·50·33·10), `간격(S)`·`값(B)`, `위치(P)`·`값(Y)`(0.5~1,584pt), `글꼴 커닝(K)`·`포인트 이상`(1~1,638pt)이다. 위치 `값`의 시작값은 3pt, 커닝 시작값은 1pt다. 범위 밖이거나 숫자가 아닌 값은 `PD-371`처럼 대화상자를 닫지 않고 `값이 범위를 벗어났습니다`를 보인다. `확인`은 열 때와 달라진 항목만 적용한다(섞인 선택의 `배율` 칸은 비어 있고 비운 채 두면 그대로다). 위치 이름은 공식 지원 문서가 `글자 위치 올림`·`글자 위치 내림`으로 적었으나 대화상자 선택 목록은 `올림`·`내림`이다(QA 브리프의 항목 이름을 따랐고 화면으로 확인하지 못했다).
+  7. **WebKit 선택 유실 수정**: 모달 대화상자가 열리면 WebKit이 편집기 선택을 접어, 확인이 아무것도 바꾸지 못했다(`PD-371`의 간격도 같았다). 대화상자가 열릴 때 범위를 기억하고 `확인`이 그 범위에 적용한다. 헤드리스 WebKit 단계가 이 결함을 먼저 잡았다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 포맷별 변환에 허용 라이선스 크레이트가 없다(`w:w`·`w:kern` 등은 기존 XML 읽기·쓰기 경로의 몇 줄이다). (2) 기존 `CharFmt`·`RichRun`·`StrictJsonValue`·`doc-runs.js`의 `applyPatch`와 `PD-367`의 크기 대비 환산 방식을 그대로 썼다. (3) 이식한 코드는 없다. Pages 번호만 공개 `.proto`로 확인했다.
+- **Why** 자간·배율·위치는 제목과 표지에서 줄 길이와 모양을 맞추는 데 쓰여, 열고 저장할 때 사라지면 레이아웃이 달라진다.
+- **Trade-offs**
+  1. **HWPX 배율**: `hh:ratio`는 10~200 %라 1~9 %는 10으로, 201~600 %는 200으로 잘려 저장된다. 읽을 때는 한글 칸만 본다.
+  2. **크기 대비 %로 바뀌는 위치(ODT·HWPX)**: 런 크기(없으면 문단 기본, ODT는 10pt)로 나눠 쓰고 읽을 때 같은 크기로 곱한다. ODT는 0.1 % 단위, HWPX는 1 % 단위로 반올림하고 HWPX는 ±100 %로 자른다(12pt 글자의 12pt 넘는 올림은 12pt가 된다. 글자 크기의 0.5 % 미만 위치는 0이 되어 사라진다). 크기가 다른 서식으로 옮기면 값이 크기에 비례해 바뀐다. ODT 글자 스타일이 크기를 다른 스타일에서 상속받으면 읽을 때 10pt로 곱해 어긋난다.
+  3. **커닝 문턱(ODT·HWPX)**: 스위치만 있어 크기 문턱을 잃고, 읽으면 1pt(`DEFAULT_KERNING_HALF_PT`)가 된다.
+  4. **ODT 위치와 첨자**: 한 런이 위·아래 첨자와 위치를 함께 가지면 `style:text-position`이 하나뿐이라 첨자를 쓰고 위치를 뺀다. 읽을 때 `style:text-position`이 글자 크기를 바꾸지 않는 값(`20%`, `-20% 100%`)이면 첨자가 아니라 위치로 읽는다. 이전에는 `20%`를 위 첨자로 읽었다. 글자 크기를 함께 줄이는 값(`33% 58%`)과 `super`·`sub`는 그대로 첨자다.
+  5. **RTF**: `\up`·`\dn`은 서로를 덮어쓰고 `\plain`이 셋을 모두 지운다. 값이 없으면 6 반 포인트다.
+  6. **Pages·편집기**: Pages 저장에서 셋이 빠지고(경고로 알린다) 편집기는 배율을 폭 변형이 있는 서체에서만 그린다. 위 첨자와 위치를 같이 지정하면 화면은 첨자만 그린다.
+  7. **JSON 거부 대상**: 범위 안 정수만 받는다. `0`과 배율 `100`은 키 없음과 같으므로 JS가 보내지 않는다(Rust는 `scalePercent: 100`을 받아 지정 없음으로 둔다).
+- **Alternatives rejected** (1) 배율을 `transform: scaleX`와 `display: inline-block`으로 그리기: 인라인 흐름과 줄 바꿈이 깨진다. (2) 배율 차이를 글자 간격으로 보정하기: 100 % 미만에서 글자가 겹친다. (3) 위치를 글자 크기 대비 %로 모델에 두기: DOCX·RTF가 절대 길이라 왕복이 크기를 알아야 한다(`PD-367` 2항과 같은 이유). (4) Pages에 추정 번호·단위로 쓰기: 확인하지 못했다.
+- **Verified by** `crates/easyoffice-formats/tests/char_advanced_pd372.rs`(포맷별 왕복, 포맷의 낱말, HWPX 범위 자름, ODT 첨자·위치 구분, Pages 손실 경고, 변조 값: 거대·음수·NaN·오버플로·빈 값), `rich_char_adv.rs` 단위 시험, `crates/easyoffice-app/src/convert_open/char_advanced_tests.rs`(JSON 키와 범위 거부), `scripts/test-webui-doc-font-advanced-pd372.mjs`(항목, 변경분만 적용, 범위 거부, 런 CSS, 변조 데이터, 접힌 선택), `scripts/webkit-dom/doc.mjs`의 WebKit 단계(대화상자에서 런 스타일과 저장 JSON까지), 헤드리스 WebKit 전·후 캡처(밝은·어두운 테마).
+- **Revisit when** 실제 Pages 문서로 `baseline_shift`·`kerning` 단위를 확인할 때, 편집기가 폭 변형 없이 글자 배율을 그릴 방법이 생길 때.
