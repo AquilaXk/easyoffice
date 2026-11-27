@@ -16,6 +16,8 @@ pub(crate) struct DocxSettings {
     pub(crate) mirror_margins: bool,
     pub(crate) gutter_at_top: bool,
     pub(crate) track_revisions: bool,
+    /// `w:defaultTabStop`, in twips.
+    pub(crate) default_tab_stop: Option<u32>,
 }
 
 /// Parses `w:cols` attributes into [`RichColumns`] (`None` when single-column).
@@ -52,6 +54,9 @@ pub(super) fn read_word_settings(settings: Option<&str>) -> Result<DocxSettings,
                 "w:mirrorMargins" => s.mirror_margins = on,
                 "w:gutterAtTop" => s.gutter_at_top = on,
                 "w:trackRevisions" => s.track_revisions = on,
+                "w:defaultTabStop" => {
+                    s.default_tab_stop = attr(&attrs, "w:val").and_then(|v| v.trim().parse().ok());
+                }
                 _ => {}
             }
         }

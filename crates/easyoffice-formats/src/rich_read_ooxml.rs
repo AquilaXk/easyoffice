@@ -28,6 +28,8 @@ use crate::{
     MAX_TOTAL_IMAGE_BYTES,
 };
 
+#[path = "rich_read_ooxml/defaults.rs"]
+mod defaults;
 #[path = "rich_read_ooxml/frame.rs"]
 mod frame;
 #[path = "rich_read_ooxml/notes.rs"]
@@ -809,6 +811,15 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         &mut walker.text_budget,
     )?;
     let settings = read_word_settings(checked_part(&parts, "word/settings.xml"))?;
+    let theme = match checked_part(&parts, "word/theme/theme1.xml") {
+        Some(xml) => defaults::ThemeFonts::read(xml)?,
+        None => defaults::ThemeFonts::default(),
+    };
+    let defaults = defaults::read_doc_defaults(
+        checked_part(&parts, "word/styles.xml"),
+        &theme,
+        settings.default_tab_stop,
+    )?;
     let (mut page_frame, frame_warnings) = read_page_frame_with_targets(
         &docx_rels.frame_targets,
         &parts,
@@ -849,6 +860,7 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
             notes,
             comments,
             track_changes: settings.track_revisions,
+            defaults: Some(defaults),
         },
         warnings,
     ))

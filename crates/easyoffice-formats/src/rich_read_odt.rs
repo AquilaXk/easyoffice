@@ -1,6 +1,7 @@
 //! ODT reader producing a [`RichDocument`] from `content.xml` automatic styles: span formats,
 //! paragraph alignment, `text:h` outline levels, list paragraphs, and tables in position.
 
+mod defaults;
 mod frame;
 mod notes;
 mod table;

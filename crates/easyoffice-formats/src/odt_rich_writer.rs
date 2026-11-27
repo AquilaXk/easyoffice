@@ -5,6 +5,7 @@
 //! are generated and packed into a standard ODF ZIP container.
 
 use crate::odt_notes_writer::OdtNotesContext;
+use crate::rich_defaults::RichDefaults;
 use crate::rich_document::frame_paragraph;
 use crate::rich_image::check_document_images;
 use crate::rich_image_writers::{odt_image_paragraph, MediaParts, ODT_PICTURE_NAMESPACES};
@@ -189,7 +190,8 @@ pub(crate) fn odt_rich_entries(
     styles.push_str(&table_auto_styles);
     styles.push_str(&odt_list_styles_xml(&lists));
     styles.push_str("</office:automatic-styles>");
-    let font_decls = odt_font_face_decls(&text_styles.keys);
+    let defaults = RichDefaults::of(doc);
+    let font_decls = odt_font_face_decls(&text_styles.keys, &defaults);
     let styles = format!("{font_decls}{styles}");
 
     let tracked_changes_xml = notes_ctx.tracked_changes_xml();
@@ -229,7 +231,7 @@ pub(crate) fn odt_rich_entries(
         binding: page.binding,
         columns: None,
     });
-    let styles_xml = odt_styles_xml(&font_decls, &run_styles, &layout, &master);
+    let styles_xml = odt_styles_xml(&font_decls, &run_styles, &layout, &master, &defaults);
     XmlSanitizer::validate_safe_xml(&styles_xml)?;
     let mut entries = vec![
         (

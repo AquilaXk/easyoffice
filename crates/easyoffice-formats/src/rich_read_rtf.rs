@@ -3,6 +3,8 @@
 //! `\colortbl`, paragraph alignment, outline levels, and `\trowd` table rows in position.
 //! Unknown destinations (`\*`, style sheets, pictures, headers) are skipped.
 
+mod defaults;
+
 use std::collections::HashMap;
 
 use crate::code_pages::CodePage;
@@ -980,6 +982,7 @@ pub(crate) fn read_rtf(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
             title,
             blocks: reader.blocks,
             official_agency: None,
+            defaults: Some(defaults::read_rtf_defaults(text_cow.as_ref())),
             ..RichDocument::default()
         },
         warnings,

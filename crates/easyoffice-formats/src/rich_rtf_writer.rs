@@ -7,15 +7,12 @@
 
 use std::collections::HashMap;
 
+use crate::rich_defaults::RichDefaults;
 use crate::rich_document::{
     RichAlignment, RichBindingKind, RichBlock, RichDocument, RichListKind, RichPageMargins,
     RichPaper, RichParagraph, RichRun, RichScript,
 };
 use crate::rich_notes::{collect_note_ordinals, is_deleted_run, RichNoteKind};
-use crate::rich_page_frame::{
-    DOC_DEFAULT_AFTER_TWIPS, DOC_DEFAULT_HALF_PT, DOC_DEFAULT_LINE_240THS,
-    DOC_DEFAULT_TAB_STOP_TWIPS,
-};
 use crate::rich_rtf_table::rtf_table_lines;
 use crate::rich_run_writers::{has_extra_run_format, RtfRunTables};
 use crate::rich_writers::heading_half_points;
@@ -295,6 +292,24 @@ fn push_rtf_run(line: &mut String, run: &RichRun, tables: &RtfRunTables, base: &
     }
 }
 
+/// The paragraph control words of the default paragraph: alignment, spacing and line height.
+fn rtf_default_paragraph(defaults: &RichDefaults) -> String {
+    let align = match defaults.alignment {
+        Some(RichAlignment::Justify) => "\\qj",
+        Some(RichAlignment::Center) => "\\qc",
+        Some(RichAlignment::Right) => "\\qr",
+        Some(RichAlignment::Left) | None => "\\ql",
+    };
+    let before = match defaults.space_before_twips {
+        0 => String::new(),
+        twips => format!("\\sb{twips}"),
+    };
+    format!(
+        "{align}{before}\\sa{}\\sl{}\\slmult1",
+        defaults.space_after_twips, defaults.line_240ths
+    )
+}
+
 pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
     let (notes, ordinals) = collect_note_ordinals(doc);
     let mut lines: Vec<String> = Vec::with_capacity(doc.blocks.len() + notes.len() + 10);
@@ -312,12 +327,14 @@ pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
             })
             .filter(|r| !is_deleted_run(r)),
     );
-    lines.extend(tables.header_lines());
+    let defaults = RichDefaults::of(doc);
+    lines.extend(tables.header_lines(&defaults));
+    let (para, half_pt) = (rtf_default_paragraph(&defaults), defaults.size_half_points);
     lines.push(format!(
-        "{{\\*\\defchp \\fs{DOC_DEFAULT_HALF_PT}}}{{\\*\\defpap \\qj\\sa{DOC_DEFAULT_AFTER_TWIPS}\\sl{DOC_DEFAULT_LINE_240THS}\\slmult1}}"
+        "{{\\*\\defchp \\fs{half_pt}}}{{\\*\\defpap {para}}}"
     ));
     lines.push(format!(
-        "{{\\stylesheet{{\\s0\\qj\\sa{DOC_DEFAULT_AFTER_TWIPS}\\sl{DOC_DEFAULT_LINE_240THS}\\slmult1\\f0\\fs{DOC_DEFAULT_HALF_PT} Normal;}}}}"
+        "{{\\stylesheet{{\\s0{para}\\f0\\fs{half_pt} Normal;}}}}"
     ));
     let has_list = doc
         .blocks
@@ -347,8 +364,16 @@ pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
         String::new()
     };
     lines.push(format!(
-        "\\paperw{}\\paperh{}{orient}\\margl{}\\margr{}\\margt{}\\margb{}\\headery{}\\footery{}{gutter}{facing}\\deftab{DOC_DEFAULT_TAB_STOP_TWIPS}",
-        paper.width, paper.height, m.left, m.right, m.top, m.bottom, m.header, m.footer
+        "\\paperw{}\\paperh{}{orient}\\margl{}\\margr{}\\margt{}\\margb{}\\headery{}\\footery{}{gutter}{facing}\\deftab{}",
+        paper.width,
+        paper.height,
+        m.left,
+        m.right,
+        m.top,
+        m.bottom,
+        m.header,
+        m.footer,
+        defaults.tab_stop_twips
     ));
     let mut table_idx = 0usize;
     for block in &doc.blocks {

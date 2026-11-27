@@ -3,15 +3,17 @@
 //! the HWPX `hp:header`/`hp:footer` controls of the first paragraph. The readers live next to each
 //! format's body reader; this module holds what the writers and the readers share.
 
+use crate::rich_defaults::RichDefaults;
 use crate::rich_document::{
-    RichBinding, RichBindingKind, RichColumns, RichField, RichPageMargins, RichPaper, RichParagraph,
+    RichAlignment, RichBinding, RichBindingKind, RichColumns, RichField, RichPageMargins,
+    RichPaper, RichParagraph,
 };
 use crate::rich_run_writers::docx_run_properties;
+use crate::XmlSanitizer;
 
 pub(crate) const DOC_DEFAULT_FONT: &str = "맑은 고딕";
 pub(crate) const DOC_DEFAULT_HALF_PT: u16 = 20;
 pub(crate) const DOC_DEFAULT_LINE_240THS: u32 = 259;
-pub(crate) const DOC_DEFAULT_LINE_PERCENT: u16 = 108;
 pub(crate) const DOC_DEFAULT_AFTER_TWIPS: u32 = 160;
 pub(crate) const DOC_DEFAULT_TAB_STOP_TWIPS: u32 = 800;
 pub(crate) const DOC_DEFAULT_COL_SPACE_TWIPS: u32 = 425;
@@ -136,12 +138,12 @@ pub(crate) fn page_text_width_twips(frame: &crate::RichPageFrame) -> usize {
         .max(1) as usize
 }
 
-/// `word/settings.xml` carrying binding/header/revision flags and the default tab stop (`800`
-/// twips), in `CT_Settings` schema order, together with its relationship and content-type override.
+/// `word/settings.xml` carrying binding/header/revision flags and the default tab stop, in `CT_Settings` schema order, together with its relationship and content-type override.
 pub(crate) fn docx_settings(
     binding: RichBinding,
     even_odd_different: bool,
     track_changes: bool,
+    tab_stop_twips: u32,
 ) -> (String, String, String) {
     let mut flags = String::new();
     match binding.kind {
@@ -152,9 +154,7 @@ pub(crate) fn docx_settings(
     if track_changes {
         flags.push_str("<w:trackRevisions/>");
     }
-    flags.push_str(&format!(
-        "<w:defaultTabStop w:val=\"{DOC_DEFAULT_TAB_STOP_TWIPS}\"/>"
-    ));
+    flags.push_str(&format!("<w:defaultTabStop w:val=\"{tab_stop_twips}\"/>"));
     if even_odd_different {
         flags.push_str("<w:evenAndOddHeaders/>");
     }
@@ -532,10 +532,20 @@ pub(crate) fn odt_styles_xml(
     automatic_styles: &str,
     page_layout: &str,
     master_styles: &str,
+    defaults: &RichDefaults,
 ) -> String {
-    let tab_pt = odt_pt(DOC_DEFAULT_TAB_STOP_TWIPS);
-    let after_pt = odt_pt(DOC_DEFAULT_AFTER_TWIPS);
-    let size_pt = odt_pt(u32::from(DOC_DEFAULT_HALF_PT) * 10);
+    let size_pt = odt_pt(u32::from(defaults.size_half_points) * 10);
+    let align = match defaults.alignment {
+        Some(RichAlignment::Justify) => "justify",
+        Some(RichAlignment::Center) => "center",
+        Some(RichAlignment::Right) => "end",
+        Some(RichAlignment::Left) | None => "start",
+    };
+    let font_attr = |key: &str, font: Option<&str>| {
+        font.map_or_else(String::new, |f| {
+            format!("{key}=\"{}\" ", XmlSanitizer::escape(f))
+        })
+    };
     format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-styles ",
@@ -545,19 +555,21 @@ pub(crate) fn odt_styles_xml(
             "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" ",
             "xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" ",
             "office:version=\"1.2\">{}<office:styles><style:default-style style:family=\"paragraph\">",
-            "<style:paragraph-properties fo:text-align=\"justify\" fo:margin-top=\"0pt\" ",
+            "<style:paragraph-properties fo:text-align=\"{}\" fo:margin-top=\"{}\" ",
             "fo:margin-bottom=\"{}\" fo:line-height=\"{}%\" style:tab-stop-distance=\"{}\"/>",
-            "<style:text-properties style:font-name=\"{}\" style:font-name-asian=\"{}\" ",
+            "<style:text-properties {}{}",
             "fo:font-size=\"{}\" style:font-size-asian=\"{}\" fo:language=\"en\" fo:country=\"US\" ",
             "style:language-asian=\"ko\" style:country-asian=\"KR\"/></style:default-style>",
             "</office:styles><office:automatic-styles>{}{}</office:automatic-styles>{}</office:document-styles>"
         ),
         font_decls,
-        after_pt,
-        DOC_DEFAULT_LINE_PERCENT,
-        tab_pt,
-        DOC_DEFAULT_FONT,
-        DOC_DEFAULT_FONT,
+        align,
+        odt_pt(defaults.space_before_twips),
+        odt_pt(defaults.space_after_twips),
+        defaults.line_percent(),
+        odt_pt(defaults.tab_stop_twips),
+        font_attr("style:font-name", defaults.font.as_deref()),
+        font_attr("style:font-name-asian", defaults.east_asian_font.as_deref()),
         size_pt,
         size_pt,
         automatic_styles,

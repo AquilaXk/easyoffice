@@ -13,6 +13,7 @@ use crate::pdf_writer::{
     text_entries, PdfImagePage, PdfPageEntry, PdfWriteOptions, PDF_IMAGE_MARGIN_PT,
     PDF_PAGE_HEIGHT_PT, PDF_PAGE_WIDTH_PT,
 };
+use crate::rich_defaults::RichDefaults;
 use crate::rich_document::{
     RichAlignment, RichBlock, RichColumns, RichDocument, RichListKind, RichParagraph,
     MAX_PARA_SPACING_TWIPS, TOC_BOOKMARK_PREFIX,
@@ -30,8 +31,7 @@ pub(crate) use crate::rich_markdown_writer::render_markdown_rich;
 use crate::rich_notes::{collect_note_ordinals, is_deleted_run, RichNoteKind};
 use crate::rich_page_frame::{
     docx_cols_xml, docx_frame_parts_and_refs, docx_page_margins, docx_paper, docx_settings,
-    page_text_width_twips, DOCX_SETTINGS_PART, DOC_DEFAULT_AFTER_TWIPS, DOC_DEFAULT_FONT,
-    DOC_DEFAULT_HALF_PT, DOC_DEFAULT_LINE_240THS,
+    page_text_width_twips, DOCX_SETTINGS_PART,
 };
 use crate::rich_rtf_writer::line_spacing_240ths;
 use crate::rich_run_writers::OdtTextKey;
@@ -55,20 +55,51 @@ pub(crate) fn heading_half_points(level: u8) -> u32 {
 
 const DOCX_NUMBERING_REL_ID: &str = "rIdNumbering";
 
-fn docx_styles_xml(has_toc: bool) -> String {
+/// `<w:rFonts>` of the document defaults: the Latin face for `ascii`/`hAnsi`, the East Asian one
+/// for `eastAsia`; none when the file names no typeface.
+fn docx_default_fonts(defaults: &RichDefaults) -> String {
+    let mut attrs = String::new();
+    if let Some(latin) = defaults.font.as_deref() {
+        let f = XmlSanitizer::escape(latin);
+        attrs.push_str(&format!(" w:ascii=\"{f}\" w:hAnsi=\"{f}\""));
+    }
+    if let Some(asian) = defaults.east_asian_font.as_deref() {
+        attrs.push_str(&format!(" w:eastAsia=\"{}\"", XmlSanitizer::escape(asian)));
+    }
+    format!("<w:rFonts{attrs} w:cs=\"Times New Roman\"/>")
+}
+
+/// `w:pPr` of the document defaults: spacing and, when it is not the start edge, `w:jc`.
+fn docx_default_paragraph(defaults: &RichDefaults) -> String {
+    let jc = match defaults.alignment {
+        Some(RichAlignment::Justify) => "<w:jc w:val=\"both\"/>",
+        Some(RichAlignment::Center) => "<w:jc w:val=\"center\"/>",
+        Some(RichAlignment::Right) => "<w:jc w:val=\"right\"/>",
+        Some(RichAlignment::Left) | None => "",
+    };
+    let before = match defaults.space_before_twips {
+        0 => String::new(),
+        twips => format!(" w:before=\"{twips}\""),
+    };
+    format!(
+        "<w:spacing{before} w:after=\"{}\" w:line=\"{}\" w:lineRule=\"auto\"/>{jc}",
+        defaults.space_after_twips, defaults.line_240ths
+    )
+}
+
+fn docx_styles_xml(has_toc: bool, defaults: &RichDefaults) -> String {
     let mut xml = format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
             "<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">",
-            "<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii=\"{f}\" w:hAnsi=\"{f}\" w:eastAsia=\"{f}\" w:cs=\"Times New Roman\"/>",
+            "<w:docDefaults><w:rPrDefault><w:rPr>{fonts}",
             "<w:kern w:val=\"2\"/><w:sz w:val=\"{sz}\"/><w:szCs w:val=\"22\"/><w:lang w:val=\"en-US\" w:eastAsia=\"ko-KR\" w:bidi=\"ar-SA\"/></w:rPr></w:rPrDefault>",
-            "<w:pPrDefault><w:pPr><w:spacing w:after=\"{after}\" w:line=\"{line}\" w:lineRule=\"auto\"/><w:jc w:val=\"both\"/></w:pPr></w:pPrDefault></w:docDefaults>",
+            "<w:pPrDefault><w:pPr>{ppr}</w:pPr></w:pPrDefault></w:docDefaults>",
             "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:qFormat/></w:style>"
         ),
-        f = DOC_DEFAULT_FONT,
-        sz = DOC_DEFAULT_HALF_PT,
-        after = DOC_DEFAULT_AFTER_TWIPS,
-        line = DOC_DEFAULT_LINE_240THS,
+        fonts = docx_default_fonts(defaults),
+        sz = defaults.size_half_points,
+        ppr = docx_default_paragraph(defaults),
     );
     for level in 1..=6u8 {
         let size = heading_half_points(level);
@@ -270,7 +301,8 @@ pub(crate) fn docx_rich_entries(
         "</Relationships>"
     );
     let core_xml = crate::ooxml_shared_parts::core_properties_xml(&doc.display_title());
-    let styles = docx_styles_xml(doc.blocks.iter().any(is_toc_block));
+    let defaults = RichDefaults::of(doc);
+    let styles = docx_styles_xml(doc.blocks.iter().any(is_toc_block), &defaults);
     let lists = plan_lists(&doc.blocks);
 
     let mut body = String::with_capacity(1024);
@@ -364,6 +396,7 @@ pub(crate) fn docx_rich_entries(
         doc.page_frame.binding,
         doc.page_frame.even_odd_different,
         doc.track_changes,
+        defaults.tab_stop_twips,
     );
     frame.relationships.push_str(&settings.1);
     frame.content_types.push_str(&settings.2);

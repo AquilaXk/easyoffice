@@ -2,9 +2,12 @@
 //! points), font family, text color, and highlight color. Every value is validated or escaped for
 //! the target syntax; none is ever parsed as markup.
 
+use crate::rich_defaults::RichDefaults;
 use crate::rich_document::hex_to_highlight_name;
-use crate::rich_page_frame::DOC_DEFAULT_FONT;
 use crate::{RichRun, RichScript, RtfCodec, XmlSanitizer};
+
+/// The `\f0` face of an RTF file whose defaults name no typeface.
+const RTF_FALLBACK_FONT: &str = "Times New Roman";
 
 // ---------------------------------------------------------------- DOCX
 
@@ -142,11 +145,18 @@ pub(crate) fn odt_text_style_xml(index: usize, key: &OdtTextKey) -> String {
 }
 
 /// `<office:font-face-decls>` declaring the default document font and every distinct run font.
-pub(crate) fn odt_font_face_decls(keys: &[OdtTextKey]) -> String {
-    let mut seen: std::collections::HashSet<&str> =
-        std::collections::HashSet::from([DOC_DEFAULT_FONT]);
-    let mut fonts: Vec<&str> = vec![DOC_DEFAULT_FONT];
-    for font in keys.iter().filter_map(|k| k.2.as_deref()) {
+pub(crate) fn odt_font_face_decls(keys: &[OdtTextKey], defaults: &RichDefaults) -> String {
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut fonts: Vec<&str> = Vec::new();
+    let default_fonts = [
+        defaults.font.as_deref(),
+        defaults.east_asian_font.as_deref(),
+    ];
+    for font in default_fonts
+        .into_iter()
+        .flatten()
+        .chain(keys.iter().filter_map(|k| k.2.as_deref()))
+    {
         if seen.insert(font) {
             fonts.push(font);
         }
@@ -199,11 +209,11 @@ impl RtfRunTables {
     }
 
     /// `{\fonttbl…}` (always declaring `\f0` default font) and optional `{\colortbl;…}` header lines.
-    pub(crate) fn header_lines(&self) -> Vec<String> {
+    pub(crate) fn header_lines(&self, defaults: &RichDefaults) -> Vec<String> {
         let mut lines = Vec::new();
         let mut font_line = format!(
             "{{\\fonttbl{{\\f0\\fnil\\fcharset129 {};}}",
-            RtfCodec::escape_rtf_text(DOC_DEFAULT_FONT)
+            RtfCodec::escape_rtf_text(defaults.font.as_deref().unwrap_or(RTF_FALLBACK_FONT))
         );
         for (i, font) in self.fonts.iter().enumerate() {
             font_line.push_str(&format!(
