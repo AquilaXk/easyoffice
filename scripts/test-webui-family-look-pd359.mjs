@@ -204,6 +204,8 @@ test("PD-359: SHEET uses spreadsheet labels, BOARD omits duplicate zoom chrome, 
   assert.doesNotMatch(stylesCss, /\.slide-thumb-title\.is-empty\s*\{[^}]*opacity:/);
   assert.match(copilotCss, /:root\[data-theme-effective="dark"\] \.eo-copilot-send-btn:not\(:disabled\)/);
   assert.match(contentCss, /#doc-editor\[data-eo-doc-flavor="pages"\]\[data-eo-hf-edit\] > section\[data-eo-hf="header"\]::after/);
+  const menuBarCss = readUi("menu-bar.css");
+  assert.match(menuBarCss, /\.md-sub\[hidden\]\s*\{\s*display:\s*none;\s*\}/);
   assert.match(hwpCss, /\.stb-message\s*\{\s*color:\s*var\(--accent-strong\)/);
   assert.match(hwpCss, /\.dialog-close\s*\{[\s\S]*?min-width:\s*22px[\s\S]*?min-height:\s*22px/);
   assert.match(hwpCss, /\.eq-mode-btn\s*\{[^}]*min-height:\s*22px/);

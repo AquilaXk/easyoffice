@@ -201,6 +201,10 @@
   line-height: 16px;
 }
 
+.md-sub[hidden] {
+  display: none;
+}
+
 .md-sub:not(.disabled):not([aria-disabled="true"]):hover,
 .md-sub:not(.disabled):not([aria-disabled="true"]):focus-visible {
   background: var(--ui-selected);
