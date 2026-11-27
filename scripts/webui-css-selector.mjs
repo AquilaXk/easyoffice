@@ -165,8 +165,13 @@ function matchesSimple(el, spec, scopeEl) {
   if (el?.nodeType !== 1) return false;
   if (spec.tag && spec.tag !== "*" && el.tagName !== spec.tag) return false;
   if (spec.id && el.id !== spec.id) return false;
-  for (const cls of spec.classes) {
-    if (!el.classList.contains(cls)) return false;
+  if (spec.classes.length > 0) {
+    // A token of the class text is also a substring of it: most elements fail on that without a token lookup.
+    const raw = el._attrs.get("class");
+    if (!raw) return false;
+    for (const cls of spec.classes) {
+      if (!raw.includes(cls) || !el.classList.contains(cls)) return false;
+    }
   }
   for (const attr of spec.attrs) {
     if (!matchesAttribute(el, attr)) return false;
@@ -287,4 +292,54 @@ function parseSelectorList(selectorList) {
 
 export function matchesSelectorList(el, selectorList, scopeEl) {
   return parseSelectorList(selectorList).some((tokens) => matchChainAt(el, tokens.length - 1, tokens, scopeEl));
+}
+
+const attributeNamesOfLists = new Map();
+
+/**
+ * The attribute names a selector list reads: `id`, `class` and every `[name…]` clause, also inside `:not()`.
+ * Whether an element matches the list can change only when one of these attributes changes.
+ */
+export function selectorAttributeNames(selectorList) {
+  let names = attributeNamesOfLists.get(selectorList);
+  if (names) return names;
+  const found = new Set();
+  const collect = (list) => {
+    for (const tokens of parseSelectorList(list)) {
+      for (const token of tokens) {
+        if (token.type !== "sel") continue;
+        if (token.spec.id) found.add("id");
+        if (token.spec.classes.length > 0) found.add("class");
+        for (const attr of token.spec.attrs) found.add(attr.name);
+        token.spec.notSelectorLists.forEach(collect);
+      }
+    }
+  };
+  collect(selectorList);
+  names = [...found];
+  attributeNamesOfLists.set(selectorList, names);
+  return names;
+}
+
+/**
+ * The same test as `matchesSelectorList(el, selectorList, scopeEl)` with the list looked up once, for a walk
+ * that asks it of every element of a tree.
+ */
+export function compileSelectorList(selectorList, scopeEl) {
+  const chains = parseSelectorList(selectorList);
+  if (chains.length === 1) {
+    const tokens = chains[0];
+    const last = tokens.length - 1;
+    if (last === 0 && tokens[0].type === "sel") {
+      const spec = tokens[0].spec;
+      return (el) => matchesSimple(el, spec, scopeEl);
+    }
+    return (el) => matchChainAt(el, last, tokens, scopeEl);
+  }
+  return (el) => {
+    for (const tokens of chains) {
+      if (matchChainAt(el, tokens.length - 1, tokens, scopeEl)) return true;
+    }
+    return false;
+  };
 }

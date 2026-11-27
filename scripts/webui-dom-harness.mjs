@@ -3,7 +3,7 @@ import path from "node:path";
 import vm from "node:vm";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { matchesSelectorList } from "./webui-css-selector.mjs";
+import { compileSelectorList, matchesSelectorList, selectorAttributeNames } from "./webui-css-selector.mjs";
 
 const cjsRequire = createRequire(import.meta.url);
 const INDEX_HTML_PATH = fileURLToPath(
@@ -331,11 +331,74 @@ function createStyleProxy(el) {
   });
 }
 
+// What a cached query answer depends on, counted for changes inside the document only: `structureEpoch` moves
+// when an element gets another parent, and `attributeEpochs` holds, per attribute name, how often a value of
+// that name changed. A selector reads only the attribute names `selectorAttributeNames` lists, so its answer
+// stays valid until the structure or one of those names moves (see `querySelectorAll`). Changes to a tree that
+// is not under the document element do not count: a query on the document never sees them, and a query on a
+// node outside the document is not cached.
+let structureEpoch = 0;
+const attributeEpochs = new Map();
+const QUERY_CACHE = new WeakMap();
+
+/** True when `node` is the document element or lies below it. */
+function isUnderDocument(node) {
+  const root = node?.ownerDocument?.documentElement;
+  for (let cur = node; cur; cur = cur._parent) {
+    if (cur === root) return true;
+  }
+  return false;
+}
+
+function isQueryEntryFresh(entry) {
+  if (entry.structure !== structureEpoch) return false;
+  for (let i = 0; i < entry.names.length; i += 1) {
+    if ((attributeEpochs.get(entry.names[i]) ?? 0) !== entry.seen[i]) return false;
+  }
+  return true;
+}
+
+class TrackedAttrs extends Map {
+  constructor(owner) {
+    super();
+    this._owner = owner;
+  }
+
+  _changed(name) {
+    if (isUnderDocument(this._owner)) attributeEpochs.set(name, (attributeEpochs.get(name) ?? 0) + 1);
+  }
+
+  set(name, value) {
+    if (!super.has(name) || super.get(name) !== value) this._changed(name);
+    return super.set(name, value);
+  }
+
+  delete(name) {
+    if (super.has(name)) this._changed(name);
+    return super.delete(name);
+  }
+
+  clear() {
+    for (const name of super.keys()) this._changed(name);
+    super.clear();
+  }
+}
+
 class MiniNode {
   constructor(nodeType, ownerDocument) {
     this.nodeType = nodeType;
     this.ownerDocument = ownerDocument;
-    this.parentElement = null;
+    this._parent = null;
+  }
+
+  get parentElement() {
+    return this._parent;
+  }
+
+  set parentElement(next) {
+    if (next === this._parent) return;
+    if (this.nodeType === 1 && (isUnderDocument(this._parent) || isUnderDocument(next))) structureEpoch += 1;
+    this._parent = next;
   }
 
   get parentNode() {
@@ -411,14 +474,29 @@ class MiniTextNode extends MiniNode {
   }
 }
 
+// The class tokens of one `class` attribute text, shared by every element that carries the same text. Selector
+// matching asks `contains` of each element of the tree for every query, so splitting the text anew each time
+// dominated the harness setup. The shared sets are read-only; the mutators below copy before they change one.
+const CLASS_TOKEN_SETS = new Map();
+const CLASS_TOKEN_SETS_LIMIT = 4096;
+
+function classTokens(raw) {
+  let tokens = CLASS_TOKEN_SETS.get(raw);
+  if (!tokens) {
+    if (CLASS_TOKEN_SETS.size >= CLASS_TOKEN_SETS_LIMIT) CLASS_TOKEN_SETS.clear();
+    tokens = new Set(raw.split(/\s+/).filter(Boolean));
+    CLASS_TOKEN_SETS.set(raw, tokens);
+  }
+  return tokens;
+}
+
 class MiniClassList {
   constructor(el) {
     this._el = el;
   }
 
   _set() {
-    const raw = this._el._attrs.get("class") || "";
-    return new Set(raw.split(/\s+/).filter(Boolean));
+    return new Set(classTokens(this._el._attrs.get("class") || ""));
   }
 
   _write(set) {
@@ -440,7 +518,7 @@ class MiniClassList {
   }
 
   contains(name) {
-    return this._set().has(name);
+    return classTokens(this._el._attrs.get("class") || "").has(name);
   }
 
   toggle(name, force) {
@@ -488,7 +566,7 @@ class MiniElement extends MiniNode {
   constructor(tagName, ownerDocument) {
     super(1, ownerDocument);
     this.tagName = String(tagName || "DIV").toUpperCase();
-    this._attrs = new Map();
+    this._attrs = new TrackedAttrs(this);
     this.childNodes = [];
     this._listeners = new Map();
     this.style = createStyleProxy(this);
@@ -764,14 +842,39 @@ class MiniElement extends MiniNode {
     return closestFrom(this, sel, this);
   }
 
+  // The page asks the same few selectors again and again while the tree stays as it is, so the matches of a
+  // selector are kept per root until the structure or an attribute the selector reads changes (see
+  // `structureEpoch`). A root outside the document has no entry (its changes are not counted).
+  _queryEntry(sel) {
+    if (!isUnderDocument(this)) return null;
+    let entries = QUERY_CACHE.get(this);
+    if (!entries) {
+      entries = new Map();
+      QUERY_CACHE.set(this, entries);
+    }
+    let entry = entries.get(sel);
+    if (entry && isQueryEntryFresh(entry)) return entry;
+    const names = selectorAttributeNames(sel);
+    entry = { structure: structureEpoch, names, seen: names.map((name) => attributeEpochs.get(name) ?? 0), all: null, first: undefined };
+    entries.set(sel, entry);
+    return entry;
+  }
+
+  // The caller gets its own array.
   querySelectorAll(sel) {
+    const entry = this._queryEntry(sel);
+    if (!entry) return this._collectMatches(sel);
+    entry.all ??= this._collectMatches(sel);
+    return entry.all.slice();
+  }
+
+  _collectMatches(sel) {
     const out = [];
+    const matches = compileSelectorList(sel, this);
     const walk = (parent) => {
       for (const child of parent.childNodes) {
         if (child.nodeType === 1) {
-          if (matchesSelectorList(child, sel, this)) {
-            out.push(child);
-          }
+          if (matches(child)) out.push(child);
           walk(child);
         }
       }
@@ -780,8 +883,25 @@ class MiniElement extends MiniNode {
     return out;
   }
 
+  // First match in document order; a list that is already known gives it at once, otherwise the walk stops
+  // at the first match instead of listing the whole tree.
   querySelector(sel) {
-    return this.querySelectorAll(sel)[0] || null;
+    const entry = this._queryEntry(sel);
+    if (entry?.all) return entry.all[0] ?? null;
+    if (entry && entry.first !== undefined) return entry.first;
+    const matches = compileSelectorList(sel, this);
+    const find = (parent) => {
+      for (const child of parent.childNodes) {
+        if (child.nodeType !== 1) continue;
+        if (matches(child)) return child;
+        const inner = find(child);
+        if (inner) return inner;
+      }
+      return null;
+    };
+    const first = find(this);
+    if (entry) entry.first = first;
+    return first;
   }
 
   addEventListener(type, fn) {
