@@ -404,6 +404,47 @@ fn module_high_density_compression_dedup_tsv_isomorphic_and_pdf_window() {
     assert!(pdf_jw_r[0].body_json.contains("[1..35쪽 생략]"));
     assert!(pdf_jw_r[0].body_json.contains("[45쪽] 페이지 45 본문"));
 
+    // Oversized single-line Korean activePage=45 (>24 KiB UTF-8) preserves [1..44쪽 생략] and [45쪽] prefix instead of dropping page 45
+    let huge_pdf_req = format!(
+        r#"{{"action":"copilot_run","mode":"ask","module":"PDF","prompt":"45쪽 확인","context":{{"pdf":{{"text":"[1..44쪽 생략]\\n\\n[45쪽] HUGE45_{}","pageCount":50,"activePage":45}}}},"provider":{{"kind":"ollama","model":"qwen3"}}}}"#,
+        "한".repeat(10_000)
+    );
+    let (huge_pdf_res, huge_pdf_r) =
+        dispatch_raw_llm(&huge_pdf_req, &openai_text_reply("[45쪽] 요약"));
+    huge_pdf_res.expect("oversized activePage pdf ok");
+    let huge_body = &huge_pdf_r[0].body_json;
+    assert!(
+        huge_body.contains("[1..44쪽 생략]"),
+        "front omit header preserved on oversized activePage: {huge_body}"
+    );
+    assert!(
+        huge_body.contains("[45쪽] HUGE45_"),
+        "oversized activePage=45 content preserved instead of dropped: {huge_body}"
+    );
+    assert!(huge_body.contains("[이하 1줄 생략]"));
+
+    // Multi-line activePage=45 (>24 KiB) preceded by large page 44 skips page 44 and emits page 45 lines
+    let p44_lines: Vec<String> = (0..10)
+        .map(|i| format!("{}44_{i}", "가".repeat(800)))
+        .collect();
+    let p45_lines: Vec<String> = (0..15)
+        .map(|i| format!("{}45_{i}", "나".repeat(800)))
+        .collect();
+    let multiline_pdf = format!(
+        "[44쪽] {}\\n\\n[45쪽] {}",
+        p44_lines.join("\\n"),
+        p45_lines.join("\\n")
+    );
+    let ml_req = format!(
+        r#"{{"action":"copilot_run","mode":"ask","module":"PDF","prompt":"45쪽","context":{{"pdf":{{"text":"{multiline_pdf}","pageCount":50,"activePage":45}}}},"provider":{{"kind":"ollama","model":"qwen3"}}}}"#
+    );
+    let (ml_res, ml_r) = dispatch_raw_llm(&ml_req, &openai_text_reply("[45쪽] 확인"));
+    ml_res.expect("multiline oversized activePage pdf ok");
+    let ml_body = &ml_r[0].body_json;
+    assert!(ml_body.contains("[앞 "), "preceding page skipped");
+    assert!(ml_body.contains("[45쪽] "), "activePage=45 kept");
+    assert!(!ml_body.contains("[44쪽]"), "earlier huge page 44 skipped");
+
     // SLIDE omits empty notes and default titleAndContent layout
     let slide_req = r#"{"action":"copilot_run","mode":"ask","module":"SLIDE","prompt":"점검","context":{"slide":{"activeIndex":0,"slides":[{"title":"표지","bullets":["핵심"],"notes":"","layout":"titleAndContent","elements":[]}]}},"provider":{"kind":"ollama","model":"qwen3"}}"#;
     let (slide_res, slide_r) = dispatch_raw_llm(slide_req, &openai_text_reply("좋습니다"));

@@ -16,7 +16,7 @@ pub struct TurnMessage {
     pub blocks: Vec<String>,
 }
 
-fn clamp_utf8_boundary(s: &str, mut end: usize) -> usize {
+pub(super) fn clamp_utf8_boundary(s: &str, mut end: usize) -> usize {
     if end >= s.len() {
         return s.len();
     }

@@ -608,15 +608,50 @@ pub fn write_pdf_context(out: &mut String, pdf: &PdfContext) {
         let cut_after = full_after.saturating_sub(after.len());
         push_omitted(out, cut_after, "줄");
     } else {
-        // 선택 쪽 자체가 크면 예산 상한 내에서 앞쪽부터 실어 보낸다.
+        // 선택 쪽 자체가 예산을 넘으면 앞선 쪽을 건너뛰고 현재 쪽의 앞부분을 UTF-8 경계까지 실어 보낸다.
+        let limit = MAX_PROMPT_CONTEXT_BYTES.saturating_sub(OMIT_NOTICE_RESERVE);
+        if start > 0 {
+            if start == 2
+                && lines[0].text.ends_with("쪽 생략]")
+                && lines[1].text.is_empty()
+                && out.len() + lines[0].text.len() + 2 <= limit
+            {
+                out.push_str(&lines[0].text);
+                out.push_str("\n\n");
+            } else if out.len() + 32 <= limit {
+                let _ = writeln!(out, "[앞 {start}줄 생략]");
+            }
+        }
         let mut shown = 0usize;
-        for line in &lines {
-            if !push_line(out, &line.text) {
+        let mut clipped_first = false;
+        for line in &lines[start..] {
+            if out.len() + line.text.len() < limit {
+                out.push_str(&line.text);
+                out.push('\n');
+                shown += 1;
+            } else {
+                if shown == 0 {
+                    let room = limit.saturating_sub(out.len() + 1);
+                    let cut = super::cache::clamp_utf8_boundary(&line.text, room);
+                    if cut > 0 {
+                        out.push_str(&line.text[..cut]);
+                        out.push('\n');
+                        clipped_first = true;
+                    }
+                }
                 break;
             }
-            shown += 1;
         }
-        push_omitted(out, lines.len().saturating_sub(shown), "줄");
+        let omitted = lines.len().saturating_sub(start + shown);
+        push_omitted(
+            out,
+            if clipped_first {
+                omitted.max(1)
+            } else {
+                omitted
+            },
+            "줄",
+        );
     }
 }
 

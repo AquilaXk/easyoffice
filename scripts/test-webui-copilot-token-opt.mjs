@@ -63,6 +63,14 @@ test("context compactor computes exact SHA-256, evicts history in cache-aligned 
   lc.pushStepPair(steps, "a2", "r2");
   assert.match(steps[1].text, /^\[단계 영수증\] sha256=/);
   assert.equal(steps[3].text, "r2");
+
+  // Single oversized Korean history/loop entry stays within Rust's 16,384 UTF-8 byte ceiling
+  const hugeReply = compact.compactHistory([{ role: "user", text: "질문" }, { role: "assistant", text: "한".repeat(7000) }], 12);
+  assert.ok(Buffer.byteLength(hugeReply[1].text, "utf8") <= 16384, "history item capped at 16 KiB UTF-8");
+  const cappedSteps = [];
+  lc.pushStepPair(cappedSteps, "답".repeat(7000), "결".repeat(7000));
+  assert.ok(Buffer.byteLength(cappedSteps[0].text, "utf8") <= 16384);
+  assert.ok(Buffer.byteLength(cappedSteps[1].text, "utf8") <= 16384);
 });
 
 test("markdown pipe table serialization, doc.replace_span inline preservation & Track Changes, lightweight ghost, and multi-module context trim", async () => {
@@ -250,6 +258,17 @@ test("SLIDE omits duplicate body/notes/default layout, PDF sends activePage, SHE
   assert.equal(fbCtx.activePage, 6);
   assert.ok(fbCtx.text.startsWith("[6쪽] "), "single-page fallback formats actual activePage");
   assert.ok(Array.from(fbCtx.text).length <= 24000, "single-page fallback fits within 24,000 chars");
+
+  // Negative/invalid dataset.activePage falls back to getPdfCurrentPage hook
+  pdfH.document.getElementById("pdf-page-card").dataset.activePage = "-3";
+  pdfH.host.__EASYOFFICE_MODULE_FIND_HOOKS__ = {
+    ...(pdfH.host.__EASYOFFICE_MODULE_FIND_HOOKS__ || {}),
+    getPdfPages: () => fiftyPages,
+    getPdfCurrentPage: () => 45,
+  };
+  await pdfH.send("음수 쪽 fallback 확인");
+  assert.equal(pdfCtx.activePage, 45);
+  assert.ok(pdfCtx.text.includes("[45쪽] PAGE_45_BODY"));
 
   // SHEET tabs, usedRange & prioritized selection.range when >512 cells exist
   let sheetCtx = null;
@@ -533,4 +552,36 @@ test("regression fixes: live UI chunk eviction across 9 turns, <del> active span
   const hwpRes = await extOps.extractHwpContextAsync(null);
   assert.ok(seenCalls.includes(20), `direct fallback fetched targetStart=20: calls=${JSON.stringify(seenCalls)}`);
   assert.equal(hwpRes.context.doc.paragraphs[20], "TARGET_AT_20");
+
+  // 6. Agent loop read_doc_blocks Korean output >16 KiB UTF-8 is clipped to stay within Rust MAX_HISTORY_ITEM_BYTES (16,384 B)
+  let readTurn = 0;
+  let capturedTurn2 = null;
+  const readLoopEnv = {};
+  loadUiModule(UI("copilot-text.js"), readLoopEnv);
+  loadUiModule(UI("copilot-context-compact.js"), readLoopEnv);
+  loadUiModule(UI("copilot-agent-loop.js"), readLoopEnv);
+  const readLoop = readLoopEnv.__EASYOFFICE_CREATE_COPILOT_AGENT_LOOP__({
+    invokeIpc: async (_cmd, payload) => {
+      readTurn += 1;
+      if (readTurn === 1) {
+        return { status: "ok", reply: "", toolCalls: [{ name: "read_doc_blocks", startIndex: 0, endIndex: 10 }], operations: [] };
+      }
+      capturedTurn2 = JSON.parse(payload);
+      return { status: "ok", reply: "완료", operations: [] };
+    },
+    canStreamIpc: () => false,
+    copilotActions: {
+      executeReadTool: async () => ({ totalParagraphs: 10, blocks: [{ index: 0, text: "가".repeat(7000) }] }),
+    },
+  });
+  await readLoop.runAgentTurn({
+    baseReq: { action: "copilot_run", requestId: "r-utf8-tool", mode: "ask", module: "DOC", prompt: "요약", history: [], context: {}, provider: { kind: "ollama", model: "qwen3" } },
+    newSubRequestId: (i) => `r-utf8-tool-s${i}`,
+    isCancelled: () => false,
+  });
+  assert.ok(capturedTurn2 && Array.isArray(capturedTurn2.loopSteps));
+  assert.ok(
+    Buffer.byteLength(capturedTurn2.loopSteps[1].text, "utf8") <= 16384,
+    `loopSteps[1] stays <= 16384 UTF-8 bytes: ${Buffer.byteLength(capturedTurn2.loopSteps[1].text, "utf8")}`,
+  );
 });

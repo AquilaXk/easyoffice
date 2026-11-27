@@ -10,6 +10,7 @@
   const MAX_LINT_RETRIES = 2;
   const MAX_CUMULATIVE_BYTES = 384 * 1024;
   const MAX_TOOL_OUTPUT_CHARS = 12000;
+  const MAX_TOOL_OUTPUT_BYTES = 15000;
   const MAX_HISTORY_SEND = 12;
   const MAX_DRY_RUN_EVAL_CELLS = 10000;
   const DEFAULT_A4_CONTENT_W_PT = 481.89;
@@ -372,7 +373,7 @@
       streamApi,
       copilotActions,
     } = deps;
-    const { clipCodePoints } = host.__EASYOFFICE_COPILOT_TEXT__;
+    const { clipCodePoints, clipUtf8Bytes } = host.__EASYOFFICE_COPILOT_TEXT__;
 
     async function executeToolCalls(mod, toolCalls, compactor) {
       const outputs = [];
@@ -396,7 +397,8 @@
         }
       }
       const rawJson = JSON.stringify(outputs);
-      return clipCodePoints(rawJson, MAX_TOOL_OUTPUT_CHARS);
+      const capped = clipCodePoints(rawJson, MAX_TOOL_OUTPUT_CHARS);
+      return typeof clipUtf8Bytes === "function" ? clipUtf8Bytes(capped, MAX_TOOL_OUTPUT_BYTES) : capped;
     }
 
     async function runAgentTurn(params) {
@@ -414,7 +416,9 @@
         ? compactApi.compactHistory(baseReq.history, MAX_HISTORY_SEND)
         : (Array.isArray(baseReq.history) ? baseReq.history.slice(-MAX_HISTORY_SEND) : []).map((h) => ({
           role: h?.role === "assistant" ? "assistant" : "user",
-          text: String(h?.text ?? h?.content ?? ""),
+          text: typeof clipUtf8Bytes === "function"
+            ? clipUtf8Bytes(String(h?.text ?? h?.content ?? ""), 16384)
+            : String(h?.text ?? h?.content ?? ""),
         }));
       const loopSteps = [];
       const compactor = compactApi ? compactApi.createLoopCompactor() : null;

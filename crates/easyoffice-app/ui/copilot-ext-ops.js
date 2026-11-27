@@ -101,13 +101,23 @@
         for (const p of extra?.paragraphs || []) {
           byIndex.set(p.index, p);
         }
-        if (targetStart >= 0 && (!byIndex.has(targetStart) || (targetEnd >= targetStart && !byIndex.has(targetEnd)))) {
-          const fallbackStart = !byIndex.has(targetStart) ? targetStart : targetEnd;
-          const fallbackCount = Math.min(MAX_CONTEXT_PARAGRAPHS, Math.max(1, winEnd - fallbackStart + 1));
-          const direct = await hwp.call("readParagraphRange", { startIndex: fallbackStart, count: fallbackCount });
-          for (const p of direct?.paragraphs || []) {
+        for (let attempt = 0; attempt < 4 && targetStart >= 0; attempt += 1) {
+          let firstMissing = -1;
+          for (let idx = targetStart; idx <= Math.max(targetStart, targetEnd); idx += 1) {
+            if (!byIndex.has(idx)) {
+              firstMissing = idx;
+              break;
+            }
+          }
+          if (firstMissing < 0) break;
+          const fallbackCount = Math.min(MAX_CONTEXT_PARAGRAPHS, Math.max(1, winEnd - firstMissing + 1));
+          const direct = await hwp.call("readParagraphRange", { startIndex: firstMissing, count: fallbackCount });
+          const fetched = direct?.paragraphs || [];
+          if (fetched.length === 0) break;
+          for (const p of fetched) {
             byIndex.set(p.index, p);
           }
+          if (!byIndex.has(firstMissing)) break;
         }
       }
 
@@ -376,9 +386,11 @@
     // ---- PDF context, page search & page locate ----------------------------------------------------
 
     function currentPdfActivePage(hooks) {
-      const cardActive = Number(document.getElementById("pdf-page-card")?.dataset?.activePage || 0);
-      const hookActive = Number(hooks?.getPdfCurrentPage?.() || 0);
-      return Math.max(1, Math.trunc(cardActive || hookActive || 1) || 1);
+      const rawCard = Number(document.getElementById("pdf-page-card")?.dataset?.activePage);
+      const rawHook = Number(hooks?.getPdfCurrentPage?.());
+      const cardActive = Number.isFinite(rawCard) && rawCard >= 1 ? Math.trunc(rawCard) : 0;
+      const hookActive = Number.isFinite(rawHook) && rawHook >= 1 ? Math.trunc(rawHook) : 0;
+      return cardActive || hookActive || 1;
     }
 
     function extractPdfContext() {

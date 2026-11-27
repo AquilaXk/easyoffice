@@ -6346,7 +6346,7 @@
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-*.mjs`, `cargo fmt --all -- --check`, `cargo test -p easyoffice-desktop`, `cargo test -p easyoffice-app`, `cargo build -p easyoffice-app`, `cargo run -p easyoffice-app -- --self-test`, `node scripts/hwp-studio-harness.mjs`, `node scripts/hwp-roundtrip-cdp.mjs --app ./target/debug/easyoffice-app`, headless Chrome light/dark CDP screenshot inspection.
 - **Revisit when** 신규 모듈 메뉴·대화상자 문구가 추가될 때.
 
-## PD-364 — 코파일럿 토큰 사용 최적화: 4계층 프롬프트 캐시 정합화, 실시간 평문 스트리밍 복구, 모듈별 고밀도 문맥 압축 및 부분 교체 (`2026-11-27`)
+## PD-364 — 코파일럿 토큰 사용 최적화: 4계층 프롬프트 캐시 정합화, 실시간 평문 스트리밍 복구, 모듈별 고밀도 문맥 압축 및 부분 교체 (2026-11-27)
 
 - **Context** `PD-360` 개편 이후에도 코파일럿 요청은 (1) PII 조건부 시스템 꼬리 문구 추가와 이력 슬라이딩 윈도우·루프 이력 혼입으로 제공자 프롬프트 캐시 접두사가 매 턴 깨졌고 (2) 읽기 전용(`ask`·`PDF`)과 고스트 예측까지 거대한 `emit_copilot_turn` JSON 도구 스키마를 실어 보내 실시간 첫 토큰 스트리밍이 막혔으며 (3) `DOC`/`HWP` 빈 문단 오탐·64 KiB 초과 한글 뒷문단 절단, `SHEET`/`BASE`/`SLIDE`/`PDF` 저밀도 직렬화, 에이전트 루프 중복 읽기·거대 실패 JSON 재전송이 토큰과 지연을 불필요하게 키웠다.
 - **Decision (`PD-364`)**

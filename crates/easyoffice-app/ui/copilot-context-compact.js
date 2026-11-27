@@ -8,6 +8,7 @@
   const DEFAULT_CHUNK_SIZE = 4;
   const DEFAULT_MAX_HISTORY_BYTES = 48 * 1024;
   const DEFAULT_MAX_LOOP_BYTES = 24 * 1024;
+  const MAX_HISTORY_ITEM_BYTES = 16 * 1024;
   const COMPACT_RECEIPT_THRESHOLD = 1024;
 
   const SHA256_K = new Uint32Array([
@@ -56,6 +57,24 @@
 
   function utf8Len(text) {
     return utf8BytesOf(text).byteLength;
+  }
+
+  function clipUtf8Bytes(value, maxBytes) {
+    const ext = host.__EASYOFFICE_COPILOT_TEXT__?.clipUtf8Bytes;
+    if (typeof ext === "function") return ext(value, maxBytes);
+    const str = String(value ?? "");
+    if (str.length * 3 <= maxBytes) return str;
+    let bytes = 0;
+    let end = 0;
+    while (end < str.length) {
+      const cp = str.codePointAt(end);
+      const units = cp > 0xffff ? 2 : 1;
+      const cost = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+      if (bytes + cost > maxBytes) break;
+      bytes += cost;
+      end += units;
+    }
+    return end >= str.length ? str : str.slice(0, end);
   }
 
   function rotr(v, n) {
@@ -124,7 +143,7 @@
     for (const item of rawHistory) {
       if (!item || typeof item !== "object") continue;
       const role = item.role === "assistant" ? "assistant" : "user";
-      const text = String(item.text ?? item.content ?? "").trim();
+      const text = clipUtf8Bytes(String(item.text ?? item.content ?? "").trim(), MAX_HISTORY_ITEM_BYTES).trim();
       if (!text) continue;
       clean.push({ role, text });
     }
@@ -203,8 +222,8 @@
     }
 
     function pushStepPair(loopSteps, assistantText, userText) {
-      if (assistantText) loopSteps.push({ role: "assistant", text: String(assistantText) });
-      if (userText) loopSteps.push({ role: "user", text: String(userText) });
+      if (assistantText) loopSteps.push({ role: "assistant", text: clipUtf8Bytes(String(assistantText), MAX_HISTORY_ITEM_BYTES) });
+      if (userText) loopSteps.push({ role: "user", text: clipUtf8Bytes(String(userText), MAX_HISTORY_ITEM_BYTES) });
       const totalBytes = () => loopSteps.reduce((s, item) => s + utf8Len(item.text) + 24, 0);
       // 오래된 대용량 단계는 SHA-256 영수증으로 줄이고 최신 2단계는 원문을 보존한다.
       for (let i = 0; i + 2 < loopSteps.length && totalBytes() > maxLoopBytes; i += 1) {
