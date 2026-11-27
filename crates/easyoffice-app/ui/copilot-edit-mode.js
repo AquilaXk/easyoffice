@@ -68,9 +68,49 @@
   const isDiscarded = (change) => change?.state === "rejected" || change?.state === "discarded";
   const DISCARDED_LABEL = "버림";
 
+  // 문단 하나의 글을 바꾸는 연산(`replace_span`, 문단별 교체)이 가리키는 문단의 모양. 표는 글로 바꿀 수 없어 거부하고, 목록은 항목 목록으로 짓는다.
+  function paragraphShape(reader, index) {
+    const shape = reader.shape?.(index) ?? { tag: "p", items: [] };
+    if (shape.tag === "table") throw new Error("표 문단은 글로 바꿀 수 없어 아래에 삽입도 못 합니다. 표 안의 글은 바꾸기로 한 칸 안의 구간을 고치세요.");
+    return shape;
+  }
+
+  // 겹치는 것까지 센 횟수(둘 이상이면 어디를 바꿀지 특정할 수 없다).
+  function occurrences(text, search) {
+    let count = 0;
+    for (let at = text.indexOf(search); at >= 0 && count < 2; at = text.indexOf(search, at + 1)) count += 1;
+    return count;
+  }
+
+  const listKindOf = (shape) => (shape.tag === "ol" ? "ordered" : "bullet");
+
+  // `replace_span`의 새 글: 바꾼 뒤의 문단 전체. 목록이면 구간이 든 항목 하나만 바뀐 새 목록이다.
+  function spanInsert(op, index, reader) {
+    const shape = paragraphShape(reader, index);
+    const search = String(op?.search ?? "");
+    const replace = String(op?.replace ?? "");
+    const isList = shape.tag === "ul" || shape.tag === "ol";
+    const texts = isList ? shape.items : [reader.text(index)];
+    if (texts.some((text) => text === null)) throw new Error("아래에 삽입할 문단의 글을 읽지 못했습니다.");
+    const hits = search ? texts.reduce((sum, text) => sum + occurrences(text, search), 0) : 0;
+    const holder = texts.findIndex((text) => text.includes(search));
+    if (!search || hits !== 1) throw new Error("변경할 대상 구간을 문단에서 유일하게 찾을 수 없습니다.");
+    const next = texts.map((text, at) => (at === holder ? text.replace(search, () => replace) : text));
+    return { after: index, plain: true, blocks: [isList ? { list: listKindOf(shape), items: next } : next[0]] };
+  }
+
+  // 문단별 교체의 새 글. 목록이면 줄마다 항목인 새 목록이다.
+  function replacementInsert(rep, index, reader) {
+    const shape = paragraphShape(reader, index);
+    const text = String(rep?.text ?? "");
+    if (shape.tag !== "ul" && shape.tag !== "ol") return { after: index, blocks: [text] };
+    return { after: index, blocks: [{ list: listKindOf(shape), items: host.__EASYOFFICE_COPILOT_DOC_HTML__.listItemLines(text) }] };
+  }
+
   /**
    * 고치는 연산을 "원문은 두고 새 글을 원 문단(범위) 바로 아래 새 문단으로" 넣는 연산 하나(`doc.insert_below`)로 바꾼다.
-   * `reader.count`는 문단 수, `reader.text(index)`는 지금 문단의 글(모르면 null). 문단 번호는 모두 바꾸기 전 문서의 번호다.
+   * `reader.count`는 문단 수, `reader.text(index)`는 지금 문단의 글(모르면 null), `reader.shape(index)`(없어도 된다)는 `{ tag, items }`로
+   * 문단이 표·목록인지와 목록 항목의 글이다. 문단 번호는 모두 바꾸기 전 문서의 번호다.
    * 문단 끝 너머를 가리키는 교체나 `doc.append`는 문서 끝에 더하는 연산으로 남긴다.
    */
   function toInsertBelowOperations(operations, reader) {
@@ -82,18 +122,13 @@
       if (kind === "doc.replace_span") {
         const index = Number(op?.index);
         if (!Number.isInteger(index) || index < 0 || index > lastIndex) throw new Error("아래에 삽입할 문단 번호가 범위를 벗어났습니다.");
-        const current = reader.text(index);
-        if (current === null) throw new Error("아래에 삽입할 문단의 글을 읽지 못했습니다.");
-        const search = String(op?.search ?? "");
-        const at = search ? current.indexOf(search) : -1;
-        if (at < 0 || current.indexOf(search, at + 1) >= 0) throw new Error("변경할 대상 구간을 문단에서 유일하게 찾을 수 없습니다.");
-        inserts.push({ after: index, plain: true, blocks: [current.slice(0, at) + String(op?.replace ?? "") + current.slice(at + search.length)] });
+        inserts.push(spanInsert(op, index, reader));
       } else if (kind === "doc.replace_paragraphs" && Array.isArray(op.replacements)) {
         for (const rep of op.replacements) {
           const index = Number(rep?.index);
           if (!Number.isInteger(index) || index < 0) continue;
           if (index > lastIndex) rest.push({ op: "doc.append", blocks: [String(rep?.text ?? "")] });
-          else inserts.push({ after: index, blocks: [String(rep?.text ?? "")] });
+          else inserts.push(replacementInsert(rep, index, reader));
         }
       } else if (kind === "doc.replace_paragraphs") {
         const blocks = Array.isArray(op.blocks) ? op.blocks : Array.isArray(op.paragraphs) ? op.paragraphs : op.text !== undefined ? [String(op.text)] : [];
@@ -105,6 +140,22 @@
       }
     }
     return inserts.length > 0 ? [{ op: INSERT_BELOW_KIND, inserts }, ...rest] : rest;
+  }
+
+  // 문서에 있던 글로 지은 블록(문단 글 또는 `{ list, items }` 목록): 태그·엔티티 표기로 다시 읽지 않고 텍스트로 넣는다.
+  function buildPlainBlock(document, docHtml, item) {
+    if (typeof item === "string") {
+      const paragraph = document.createElement("p");
+      docHtml.appendPlainText(document, paragraph, item);
+      return paragraph;
+    }
+    const list = document.createElement(item.list === "ordered" ? "ol" : "ul");
+    for (const text of item.items) {
+      const li = document.createElement("li");
+      docHtml.appendPlainText(document, li, text);
+      list.appendChild(li);
+    }
+    return list;
   }
 
   /**
@@ -119,13 +170,7 @@
       const anchor = existing[entry.after];
       if (!anchor) throw new Error("아래에 삽입할 문단을 찾을 수 없습니다.");
       entry.blocks.forEach((item, offset) => {
-        let block = null;
-        if (entry.plain) {
-          block = document.createElement("p");
-          docHtml.appendPlainText(document, block, item);
-        } else {
-          block = buildBlock(item);
-        }
+        const block = entry.plain ? buildPlainBlock(document, docHtml, item) : buildBlock(item);
         if (!block) return;
         if (tracking) docHtml.wrapBlockInserted(document, block, revisionId, dateIso);
         const previous = tails.get(anchor) || anchor;

@@ -907,9 +907,17 @@
       const snapshot = embedHwp ? extOps.getHwpSnapshot() : null;
       if (embedHwp && !snapshot) throw new Error("한글 문서를 아직 읽지 못했습니다.");
       const blocks = snapshot ? null : docBlocksOf(document.getElementById("doc-editor"));
+      const plainOf = (el) => (docHtml?.plainActiveTextOfBlock ? docHtml.plainActiveTextOfBlock(el) : String(el.textContent || ""));
       const reader = snapshot
         ? { count: snapshot.totalParagraphs || 0, text: (index) => snapshot.byIndex?.get(index)?.text ?? null }
-        : { count: blocks.length, text: (index) => (docHtml?.plainActiveTextOfBlock ? docHtml.plainActiveTextOfBlock(blocks[index]) : String(blocks[index].textContent || "")) };
+        : {
+            count: blocks.length,
+            text: (index) => plainOf(blocks[index]),
+            shape: (index) => {
+              const tag = String(blocks[index].tagName || "").toLowerCase();
+              return { tag, items: tag === "ul" || tag === "ol" ? Array.from(blocks[index].querySelectorAll("li")).map(plainOf) : [] };
+            },
+          };
       return editMode.toInsertBelowOperations(operations, reader);
     }
 

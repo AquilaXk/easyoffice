@@ -93,7 +93,8 @@
     };
   }
 
-  const TAG_LIKE_PLAIN_RE = /<\/?(?:strong|b|em|i|u|s|del|strike|a|table|tr|th|td|br)\b/i;
+  const ENTITY_RE = /&(?:#\d+|#x[0-9a-f]+|[a-z]+);/i;
+  const TAG_LIKE_PLAIN_RE =/<\/?(?:strong|b|em|i|u|s|del|strike|a|table|tr|th|td|br)\b/i;
 
   function serializeInlineInternal(container) {
     let hasMarkup = false;
@@ -230,13 +231,36 @@
     targetParent.appendChild(span);
   }
 
-  // 평문은 태그·엔티티 문법으로 다시 읽지 않고 그대로 텍스트 노드로 넣는다(`\n`은 줄바꿈). 빈 글이면 빈 줄 하나가 남는다.
-  function appendPlainText(document, parent, text) {
+  // 문서에 있던 평문은 태그·엔티티 문법으로 다시 읽지 않고 그대로 텍스트 노드로 넣는다(`\n`은 줄바꿈).
+  function appendPlainRuns(document, parent, text) {
     String(text ?? "").split("\n").forEach((part, idx) => {
       if (idx > 0) parent.appendChild(document.createElement("br"));
       if (part) parent.appendChild(document.createTextNode(part));
     });
+  }
+
+  // 빈 글이면 빈 줄 하나가 남는다.
+  function appendPlainText(document, parent, text) {
+    appendPlainRuns(document, parent, text);
     if (!parent.firstChild) parent.appendChild(document.createElement("br"));
+  }
+
+  const blockTagOf = (blockEl) => String(blockEl?.tagName || "").toLowerCase();
+  const isListBlock = (blockEl) => blockTagOf(blockEl) === "ul" || blockTagOf(blockEl) === "ol";
+  const isTableOrListBlock = (blockEl) => blockTagOf(blockEl) === "table" || isListBlock(blockEl);
+  const LIST_MARKER_RE = /^\s*(?:[-*•]|\d+[.)])\s+/;
+
+  // 목록의 새 글: 줄마다 항목 하나(`- a`·`1. a` 표지는 뗀다).
+  const listItemLines = (rawText) => String(rawText ?? "").split("\n").map((line) => line.replace(LIST_MARKER_RE, "")).filter((line) => line.trim());
+
+  // 한 줄도 없으면 빈 항목 하나를 둔다.
+  function fillListItems(document, list, rawText) {
+    const lines = listItemLines(rawText);
+    for (const line of lines.length > 0 ? lines : [""]) {
+      const li = document.createElement("li");
+      populateSanitizedInline(document, li, line);
+      list.appendChild(li);
+    }
   }
 
   function populateSanitizedInline(document, parent, rawInput) {
@@ -536,8 +560,15 @@
     return blockEl;
   }
 
-  function replaceParagraphContentWithTrackChanges(document, editor, blockEl, rawText) {
+  // `fill(parent)`: 새 내용을 넣는 함수. 없으면 `rawText`를 모델이 준 글로 읽는다(`populateSanitizedInline`).
+  // 표 문단은 글로 바꾸지 않고 거부한다(호출한 쪽이 롤백한다). 목록 문단은 줄마다 항목으로 다시 짓는다.
+  function replaceParagraphContentWithTrackChanges(document, editor, blockEl, rawText, fill) {
     const tableParsed = parseHtmlTableString(rawText);
+    if (!tableParsed && blockTagOf(blockEl) === "table") {
+      throw new Error("표 문단은 글로 바꿀 수 없습니다. 표 안의 글은 부분 교체로 고치세요.");
+    }
+    const isList = !tableParsed && isListBlock(blockEl);
+    const fillContent = fill || ((parent) => populateSanitizedInline(document, parent, rawText));
     if (!isTrackChangesActive(editor)) {
       if (tableParsed) {
         const tbl = buildTableElement(document, tableParsed.rows, tableParsed.headerRow);
@@ -545,20 +576,27 @@
         return tbl;
       }
       blockEl.replaceChildren();
-      populateSanitizedInline(document, blockEl, rawText);
+      if (isList) fillListItems(document, blockEl, rawText);
+      else fillContent(blockEl);
       return blockEl;
     }
 
     const revId = nextRevisionId(editor);
     const dateIso = new Date().toISOString();
-    if (tableParsed) {
+    if (tableParsed || isList) {
       const hadText = Boolean(String(blockEl.textContent || "").trim());
+      const following = blockEl.nextSibling;
       markBlockDeletedInPlace(document, blockEl, revId, dateIso);
-      const tbl = buildTableElement(document, tableParsed.rows, tableParsed.headerRow);
-      wrapBlockInserted(document, tbl, revId + (hadText ? 1 : 0), dateIso);
-      if (blockEl.parentElement === editor) blockEl.after(tbl);
-      else editor.appendChild(tbl);
-      return tbl;
+      let next = null;
+      if (tableParsed) {
+        next = buildTableElement(document, tableParsed.rows, tableParsed.headerRow);
+      } else {
+        next = document.createElement(blockTagOf(blockEl));
+        fillListItems(document, next, rawText);
+      }
+      wrapBlockInserted(document, next, revId + (hadText ? 1 : 0), dateIso);
+      editor.insertBefore(next, following);
+      return next;
     }
 
     const oldHasText = Boolean(String(blockEl.textContent || "").trim());
@@ -569,7 +607,7 @@
       blockEl.replaceChildren();
     }
     const insWrapper = makeRevisionWrapper(document, "ins", revId + (delWrapper ? 1 : 0), dateIso);
-    populateSanitizedInline(document, insWrapper, rawText);
+    fillContent(insWrapper);
     if (delWrapper) blockEl.appendChild(delWrapper);
     blockEl.appendChild(insWrapper);
     return blockEl;
@@ -646,6 +684,13 @@
     return collectActiveTextEntries(blockEl).map((e) => e.text).join("");
   }
 
+  // `node`를 `holder`의 자식들로 갈아 끼운다.
+  function swapNodeForChildren(node, holder) {
+    const parent = node.parentNode;
+    while (holder.firstChild) parent.insertBefore(holder.firstChild, node);
+    parent.removeChild(node);
+  }
+
   function replaceSpanWithTrackChanges(document, editor, blockEl, search, replace) {
     const cleanSearch = String(search ?? "");
     const cleanReplace = String(replace ?? "");
@@ -664,29 +709,45 @@
     const endAt = firstAt + cleanSearch.length;
     const hasInlineEl = Boolean(blockEl.querySelector?.("span.eo-run, a, strong, em, u, s, del, ins"));
 
-    if (isTrackChangesActive(editor)) {
-      const serialized = serializeInlineChildren(blockEl);
-      const serAt = serialized.indexOf(cleanSearch);
-      const insideTag = serAt >= 0 && serialized.lastIndexOf("<", serAt) > serialized.lastIndexOf(">", serAt);
-      if (serAt >= 0 && !insideTag && serialized.indexOf(cleanSearch, serAt + 1) < 0) {
-        const nextSer = serialized.slice(0, serAt) + cleanReplace + serialized.slice(serAt + cleanSearch.length);
-        return replaceParagraphContentWithTrackChanges(document, editor, blockEl, nextSer);
+    // 표와 목록은 칸·항목을 지키며 한 칸 안의 글만 바꾼다(문단 하나로 합치지 않는다).
+    if (isTableOrListBlock(blockEl)) {
+      if (isTrackChangesActive(editor)) {
+        throw new Error("변경 추적 중에는 표·목록 안의 글을 부분 교체할 수 없습니다.");
       }
-      const nextPlain = plain.slice(0, firstAt) + cleanReplace + plain.slice(endAt);
-      return replaceParagraphContentWithTrackChanges(document, editor, blockEl, nextPlain);
+      let at = 0;
+      const touched = entries.filter((entry) => {
+        const start = at;
+        at += entry.text.length;
+        return at > firstAt && start < endAt;
+      });
+      if (touched.length !== 1 || touched[0].br) {
+        throw new Error("표·목록의 여러 칸·항목에 걸친 구간은 바꿀 수 없습니다. 한 칸 안의 구간으로 지정해 주세요.");
+      }
     }
 
-    if (!hasInlineEl && !plain.includes("\n")) {
+    if (isTrackChangesActive(editor)) {
+      if (hasInlineEl) {
+        const serialized = serializeInlineChildren(blockEl);
+        const serAt = serialized.indexOf(cleanSearch);
+        const insideTag = serAt >= 0 && serialized.lastIndexOf("<", serAt) > serialized.lastIndexOf(">", serAt);
+        if (serAt >= 0 && !insideTag && serialized.indexOf(cleanSearch, serAt + 1) < 0) {
+          const nextSer = serialized.slice(0, serAt) + cleanReplace + serialized.slice(serAt + cleanSearch.length);
+          return replaceParagraphContentWithTrackChanges(document, editor, blockEl, nextSer);
+        }
+      }
+      // 문서에 있던 글은 그대로 텍스트로 두고 모델이 준 바꿀 글만 서식 표기로 읽는다.
       const nextPlain = plain.slice(0, firstAt) + cleanReplace + plain.slice(endAt);
-      blockEl.replaceChildren();
-      populateSanitizedInline(document, blockEl, nextPlain);
-      return blockEl;
+      return replaceParagraphContentWithTrackChanges(document, editor, blockEl, nextPlain, (parent) => {
+        appendPlainRuns(document, parent, plain.slice(0, firstAt));
+        populateSanitizedInline(document, parent, cleanReplace);
+        appendPlainRuns(document, parent, plain.slice(endAt));
+      });
     }
 
-    // 인라인 서식 노드를 보존하면서 활성 텍스트 범위(<del>/주석 제외)만 부분 치환한다.
+    // 텍스트 노드 단위로 활성 텍스트 범위(<del>/주석 제외)만 부분 치환한다. 인라인 서식·칸·항목은 그대로 남고, 바꾸지 않는 글은 다시 읽지 않는다.
     let offset = 0;
     let wroteReplacement = false;
-    const needsInlineParse = TAG_LIKE_PLAIN_RE.test(cleanReplace) || cleanReplace.includes("\n");
+    const needsInlineParse = TAG_LIKE_PLAIN_RE.test(cleanReplace) || cleanReplace.includes("\n") || ENTITY_RE.test(cleanReplace);
     for (const entry of entries) {
       const len = entry.text.length;
       const nStart = offset;
@@ -696,10 +757,9 @@
       if (entry.br) {
         if (!wroteReplacement) {
           wroteReplacement = true;
-          const parent = entry.br.parentNode || blockEl;
-          const frag = document.createDocumentFragment();
-          populateSanitizedInline(document, frag, cleanReplace);
-          parent.replaceChild(frag, entry.br);
+          const holder = document.createElement("span");
+          populateSanitizedInline(document, holder, cleanReplace);
+          swapNodeForChildren(entry.br, holder);
         } else {
           entry.br.remove?.();
         }
@@ -713,12 +773,11 @@
       if (!wroteReplacement) {
         wroteReplacement = true;
         if (needsInlineParse) {
-          const parent = node.parentNode || blockEl;
-          const frag = document.createDocumentFragment();
-          if (before) frag.appendChild(document.createTextNode(before));
-          populateSanitizedInline(document, frag, cleanReplace);
-          if (after) frag.appendChild(document.createTextNode(after));
-          parent.replaceChild(frag, node);
+          const holder = document.createElement("span");
+          if (before) holder.appendChild(document.createTextNode(before));
+          populateSanitizedInline(document, holder, cleanReplace);
+          if (after) holder.appendChild(document.createTextNode(after));
+          swapNodeForChildren(node, holder);
         } else {
           node.data = before + cleanReplace + after;
         }
@@ -760,6 +819,7 @@
     serializeBlockForContext,
     populateSanitizedInline,
     appendPlainText,
+    listItemLines,
     buildDocBlockElement,
     isTrackChangesActive,
     nextRevisionId,
