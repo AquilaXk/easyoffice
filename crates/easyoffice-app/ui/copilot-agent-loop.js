@@ -353,14 +353,23 @@
     } = deps;
     const { clipCodePoints } = host.__EASYOFFICE_COPILOT_TEXT__;
 
-    async function executeToolCalls(mod, toolCalls) {
+    async function executeToolCalls(mod, toolCalls, compactor) {
       const outputs = [];
       for (const tc of toolCalls) {
         if (!tc || typeof tc !== "object") continue;
         const name = String(tc.name || "");
         try {
-          const result = await copilotActions.executeReadTool(mod, name, tc);
-          outputs.push({ tool: name, ok: true, result });
+          if (compactor) {
+            const entry = await compactor.runCachedReadTool(mod, tc, copilotActions.executeReadTool);
+            if (entry.cached) {
+              outputs.push({ tool: name, cached: true, receipt: entry.receipt });
+            } else {
+              outputs.push({ tool: name, ok: true, sha256: entry.sha256.slice(0, 12), result: entry.result });
+            }
+          } else {
+            const result = await copilotActions.executeReadTool(mod, name, tc);
+            outputs.push({ tool: name, ok: true, result });
+          }
         } catch (err) {
           outputs.push({ tool: name, ok: false, error: String(err?.message || err) });
         }
@@ -379,7 +388,15 @@
       } = params;
 
       const streaming = Boolean(canStreamIpc?.());
-      const workingHistory = Array.isArray(baseReq.history) ? baseReq.history.slice(-MAX_HISTORY_SEND) : [];
+      const compactApi = host.__EASYOFFICE_COPILOT_CONTEXT_COMPACT__;
+      const priorHistory = compactApi
+        ? compactApi.compactHistory(baseReq.history, MAX_HISTORY_SEND)
+        : (Array.isArray(baseReq.history) ? baseReq.history.slice(-MAX_HISTORY_SEND) : []).map((h) => ({
+          role: h?.role === "assistant" ? "assistant" : "user",
+          text: String(h?.text ?? h?.content ?? ""),
+        }));
+      const loopSteps = [];
+      const compactor = compactApi ? compactApi.createLoopCompactor() : null;
       let cumulativeBytes = 0;
       let totalDropped = 0;
       let lintRetries = 0;
@@ -393,8 +410,9 @@
         const payloadObj = {
           ...baseReq,
           requestId: reqId,
-          history: workingHistory.slice(-MAX_HISTORY_SEND),
+          history: priorHistory,
         };
+        if (loopSteps.length > 0) payloadObj.loopSteps = loopSteps;
         if (streaming) payloadObj.stream = true;
         const payloadJson = JSON.stringify(payloadObj);
         cumulativeBytes += utf8ByteLength(payloadJson);
@@ -425,18 +443,16 @@
 
         // 1. On-demand read tool execution when the model asked to inspect more context first.
         if (toolCalls.length > 0 && ops.length === 0 && turnIdx + 1 < MAX_TURNS) {
-          const toolJson = await executeToolCalls(baseReq.module, toolCalls);
+          const toolJson = await executeToolCalls(baseReq.module, toolCalls, compactor);
           if (isCancelled()) return null;
-          workingHistory.push({
-            role: "assistant",
-            text: String(res?.reply || "문서 범위를 조회합니다."),
-            content: String(res?.reply || "문서 범위를 조회합니다."),
-          });
-          workingHistory.push({
-            role: "user",
-            text: `[도구 실행 결과]\n${toolJson}\n위 조회 결과를 바탕으로 원래 요청("${clipCodePoints(baseReq.prompt, 400)}")에 최종 답변·연산을 작성하십시오.`,
-            content: `[도구 실행 결과]\n${toolJson}\n위 조회 결과를 바탕으로 원래 요청("${clipCodePoints(baseReq.prompt, 400)}")에 최종 답변·연산을 작성하십시오.`,
-          });
+          const stepAssistant = String(res?.reply || "문서 범위를 조회합니다.");
+          const stepUser = `[도구 실행 결과]\n${toolJson}\n위 조회 결과를 바탕으로 최종 답변·연산을 작성하십시오.`;
+          if (compactor) {
+            compactor.pushStepPair(loopSteps, stepAssistant, stepUser);
+          } else {
+            loopSteps.push({ role: "assistant", text: stepAssistant });
+            loopSteps.push({ role: "user", text: stepUser });
+          }
           continue;
         }
 
@@ -454,17 +470,20 @@
           if (isCancelled()) return null;
           if (gate && !gate.ok && gate.issues.length > 0) {
             lintRetries += 1;
-            const summary = gate.issues.slice(0, 6).join("; ");
-            workingHistory.push({
-              role: "assistant",
-              text: JSON.stringify({ reply: res?.reply || "", operations: normalizedOps }),
-              content: JSON.stringify({ reply: res?.reply || "", operations: normalizedOps }),
-            });
-            workingHistory.push({
-              role: "user",
-              text: `[자동 검증 게이트 오류] 제안한 연산을 적용하면 다음 문제가 새로 발생합니다: ${summary}. 오류가 발생하지 않도록 좌표·크기·수식 참조를 수정해 전체 연산을 다시 생성하십시오.`,
-              content: `[자동 검증 게이트 오류] 제안한 연산을 적용하면 다음 문제가 새로 발생합니다: ${summary}. 오류가 발생하지 않도록 좌표·크기·수식 참조를 수정해 전체 연산을 다시 생성하십시오.`,
-            });
+            if (compactor) {
+              const pair = compactor.summarizeValidationFailure(res, normalizedOps, gate.issues);
+              compactor.pushStepPair(loopSteps, pair.assistantText, pair.userText);
+            } else {
+              const summary = gate.issues.slice(0, 6).join("; ");
+              loopSteps.push({
+                role: "assistant",
+                text: JSON.stringify({ reply: res?.reply || "", operations: normalizedOps }),
+              });
+              loopSteps.push({
+                role: "user",
+                text: `[자동 검증 게이트 오류] ${summary}. 좌표·크기·수식 참조만 수정해 연산을 다시 생성하십시오.`,
+              });
+            }
             continue;
           }
         }

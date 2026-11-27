@@ -7,10 +7,10 @@ use super::operations::{
     validate_locations, validate_operations, validate_tool_calls, ValidatedOperations,
 };
 use super::pii::{PiiVault, StreamingPiiRestorer};
-use super::prompt::build_prompts_for_llm;
+use super::prompt::build_prompt_parts_for_llm;
 use super::providers::{
-    build_provider_chat_body_with_history, build_provider_headers, build_provider_ping_body,
-    extract_provider_completion, parse_discovered_models, serialize_models_response,
+    build_provider_chat_body_with_parts, build_provider_headers, build_provider_ping_body,
+    extract_provider_completion_with_usage, parse_discovered_models, serialize_models_response,
 };
 use super::ssrf::ValidatedEndpoint;
 use super::stream::StreamAssembler;
@@ -18,6 +18,7 @@ use super::types::{
     push_json_str, CopilotEventSink, CopilotLlmClient, CopilotLlmRequest, CopilotRunRequest,
     CopilotRunResponse, CopilotStreamClient, CopilotStreamEvent, HttpMethod, ProviderConfig,
 };
+use super::usage::TokenUsage;
 pub use super::wire::{send_local_http, send_local_http_streaming};
 
 pub fn validate_wire_headers(headers: &[(String, String)]) -> Result<(), EasyOfficeError> {
@@ -136,9 +137,24 @@ pub fn test_provider_endpoint(
     Ok(out)
 }
 
+pub fn should_fail_closed_on_test_error(err: &EasyOfficeError) -> bool {
+    match err {
+        EasyOfficeError::SecurityViolation(_) | EasyOfficeError::ResourceBudgetExceeded(_) => true,
+        EasyOfficeError::InvalidArgument(msg) => {
+            msg.contains("콘텐츠 인코딩")
+                || msg.contains("HTTP 401")
+                || msg.contains("상한")
+                || msg.contains("데스크톱 앱")
+                || msg.contains("API 키")
+        }
+        _ => false,
+    }
+}
+
 pub fn test_provider_models_endpoint(
     provider: &ProviderConfig,
     endpoint: &ValidatedEndpoint,
+    target_model: Option<&str>,
     host_llm: Option<&CopilotLlmClient<'_>>,
 ) -> Result<String, EasyOfficeError> {
     let headers = build_provider_headers(provider)?;
@@ -151,6 +167,27 @@ pub fn test_provider_models_endpoint(
     );
     let raw = dispatch_transport(&req, host_llm)?;
     let discovered = parse_discovered_models(provider.kind, &raw)?;
+    if let Some(expected) = target_model.map(str::trim).filter(|m| !m.is_empty()) {
+        let found = discovered.iter().any(|m| {
+            m.id == expected
+                || m.id.strip_prefix("models/") == Some(expected)
+                || expected.strip_prefix("models/") == Some(m.id.as_str())
+        });
+        if !found {
+            return Err(EasyOfficeError::InvalidArgument(
+                "선택한 모델이 제공자 목록에 없어 최소 ping으로 전환합니다.".to_string(),
+            ));
+        }
+        let label = format!(
+            "{} 연결 확인 완료 ({expected})",
+            provider.kind.display_name()
+        );
+        let mut out = String::with_capacity(128);
+        out.push_str("{\"status\":\"ok\",\"message\":");
+        push_json_str(&mut out, &label);
+        out.push('}');
+        return Ok(out);
+    }
     let label = format!(
         "{} 연결 확인 완료 (사용 가능한 모델 {}개)",
         provider.kind.display_name(),
@@ -204,42 +241,59 @@ pub fn run_remote_or_local(
         ));
     }
     let headers = build_provider_headers(&req.provider)?;
-    let (mut system_prompt, raw_user_content) = build_prompts_for_llm(req)?;
+    let (system_prompt, raw_context_block, raw_user_prompt) = build_prompt_parts_for_llm(req)?;
 
     let mut vault = PiiVault::new();
-    let (history_to_send, user_content) = if req.provider.kind.is_local_loopback() {
-        (req.history.clone(), raw_user_content)
-    } else {
-        vault.reserve_existing_tokens(&raw_user_content);
-        let redacted_history = vault.redact_history(&req.history);
-        let redacted_user = vault.redact_text(&raw_user_content);
-        if vault.has_entries() {
-            system_prompt.push_str(
-                " [PII_EMAIL_1], [PII_PHONE_1], [PII_RRN_1], [PII_ID_1] 형태의 토큰은 보호된 개인정보 자리표시자이므로 원문에서 참조할 때 변형 없이 그대로 유지하세요.",
-            );
-        }
-        (redacted_history, redacted_user)
-    };
+    let (history_to_send, ctx_to_send, prompt_to_send, steps_to_send) =
+        if req.provider.kind.is_local_loopback() {
+            (
+                req.history.clone(),
+                raw_context_block,
+                raw_user_prompt,
+                req.loop_steps.clone(),
+            )
+        } else {
+            vault.reserve_existing_tokens(&raw_context_block);
+            vault.reserve_existing_tokens(&raw_user_prompt);
+            for h in &req.history {
+                vault.reserve_existing_tokens(&h.text);
+            }
+            for s in &req.loop_steps {
+                vault.reserve_existing_tokens(&s.text);
+            }
+            let redacted_history = vault.redact_history(&req.history);
+            let redacted_prompt = vault.redact_text(&raw_user_prompt);
+            let redacted_ctx = vault.redact_text(&raw_context_block);
+            let redacted_steps = vault.redact_history(&req.loop_steps);
+            (
+                redacted_history,
+                redacted_ctx,
+                redacted_prompt,
+                redacted_steps,
+            )
+        };
 
-    let body_json = build_provider_chat_body_with_history(
+    let body_json = build_provider_chat_body_with_parts(
         req,
         &history_to_send,
-        &system_prompt,
-        &user_content,
+        &ctx_to_send,
+        &prompt_to_send,
+        &steps_to_send,
         stream.is_some(),
+        &system_prompt,
     )?;
     let mut http_req = build_http_req(HttpMethod::Post, endpoint, headers, body_json, cancel);
-    let (content, reasoning) = match stream {
+    let (content, reasoning, usage) = match stream {
         Some(plan) => {
             http_req.stream = true;
             read_streamed(req, &http_req, plan, &vault)?
         }
         None => {
             let raw_response = dispatch_transport(&http_req, host_llm)?;
-            extract_provider_completion(req.provider.kind, &raw_response)?
+            extract_provider_completion_with_usage(req.provider.kind, &raw_response)?
         }
     };
-    let mut resp = parse_and_validate_assistant_output(req, &content, reasoning, &vault);
+    let mut resp = parse_and_validate_assistant_output(req, &content, reasoning, usage, &vault);
     vault.restore_response(&mut resp);
     Ok(resp)
 }
@@ -249,7 +303,7 @@ fn read_streamed(
     http_req: &CopilotLlmRequest,
     plan: StreamPlan<'_>,
     vault: &PiiVault,
-) -> Result<(String, String), EasyOfficeError> {
+) -> Result<(String, String, Option<TokenUsage>), EasyOfficeError> {
     precheck(http_req)?;
     let mut assembler = StreamAssembler::new(req.provider.kind);
     let mut restorer = StreamingPiiRestorer::default();
@@ -288,7 +342,7 @@ fn read_streamed(
             text: &flushed,
         });
     }
-    assembler.finish(&raw)
+    assembler.finish_with_usage(&raw)
 }
 
 fn strip_code_fence(raw: &str) -> &str {
@@ -309,6 +363,7 @@ fn parse_and_validate_assistant_output(
     req: &CopilotRunRequest,
     content: &str,
     default_reasoning: String,
+    usage: Option<TokenUsage>,
     vault: &PiiVault,
 ) -> CopilotRunResponse {
     let default_reasoning = vault.restore_text(&default_reasoning);
@@ -333,6 +388,7 @@ fn parse_and_validate_assistant_output(
             dropped_operations: 0,
             locations: Vec::new(),
             tool_calls: Vec::new(),
+            usage,
         };
     };
     // 검증기 실행 전에 자리표시자를 원문으로 복원해 셀 좌표·시트 이름·길이 상한 검사를 실제 값 기준으로 수행한다.
@@ -377,5 +433,6 @@ fn parse_and_validate_assistant_output(
         dropped_operations: dropped,
         locations,
         tool_calls,
+        usage,
     }
 }

@@ -23,6 +23,13 @@
       getHwpHost,
       getPdfEdit,
       extractEditableDocumentText,
+      getActiveModule,
+      activatePane,
+      sheetDataStore,
+      getActiveSheetName,
+      getSheetController,
+      getWorkspacePanels,
+      slideDeckState,
     } = deps;
     const { clipCodePoints } = host.__EASYOFFICE_COPILOT_TEXT__;
 
@@ -70,9 +77,10 @@
       const sel = head?.selection || { hasSelection: false, text: "", startParagraphIndex: 0, endParagraphIndex: 0 };
       const targetStart = span ? span.start : (sel.hasSelection ? sel.startParagraphIndex : -1);
       const targetEnd = span ? span.end : (sel.hasSelection ? sel.endParagraphIndex : -1);
+      const missingTarget = targetStart >= 0 && (!byIndex.has(targetStart) || (targetEnd >= targetStart && !byIndex.has(targetEnd)));
 
-      if (targetEnd >= MAX_CONTEXT_PARAGRAPHS && head?.totalParagraphs > MAX_CONTEXT_PARAGRAPHS) {
-        const winStart = Math.max(MAX_CONTEXT_PARAGRAPHS, targetStart - HWP_SURROUNDING_WINDOW);
+      if ((targetEnd >= MAX_CONTEXT_PARAGRAPHS || (head?.truncatedByBytes && missingTarget)) && head?.totalParagraphs > 0) {
+        const winStart = Math.max(0, targetStart - HWP_SURROUNDING_WINDOW);
         const winEnd = Math.min(head.totalParagraphs - 1, targetEnd + HWP_SURROUNDING_WINDOW);
         const count = Math.min(MAX_CONTEXT_PARAGRAPHS, Math.max(1, winEnd - winStart + 1));
         const extra = await hwp.call("readParagraphRange", { startIndex: winStart, count });
@@ -85,6 +93,7 @@
         documentGeneration: Number(head?.documentGeneration || 0),
         pageCount: Number(head?.pageCount || 1),
         totalParagraphs: Number(head?.totalParagraphs || 0),
+        truncatedByBytes: Boolean(head?.truncatedByBytes),
         selection: sel,
         byIndex,
       };
@@ -108,7 +117,12 @@
       for (let i = 0; i < count; i += 1) {
         const entry = snap.byIndex.get(i);
         const keep = i < MAX_CONTEXT_PARAGRAPHS || (i >= winStart && i <= winEnd);
-        paragraphs.push(keep && entry ? clipCodePoints(entry.text || "", MAX_CONTEXT_TEXT_CHARS) : "");
+        paragraphs.push(keep && snap.byIndex.has(i) ? clipCodePoints(entry?.text || "", MAX_CONTEXT_TEXT_CHARS) : null);
+      }
+      let trimmedTail = 0;
+      while (paragraphs.length > 0 && paragraphs[paragraphs.length - 1] === null) {
+        paragraphs.pop();
+        trimmedTail += 1;
       }
 
       const selectedText = sel?.selectedText
@@ -130,7 +144,7 @@
           doc: {
             paragraphs,
             selectedText,
-            omittedParagraphs: Math.max(0, snap.totalParagraphs - count),
+            omittedParagraphs: Math.max(0, snap.totalParagraphs - count) + trimmedTail,
           },
         },
       };
@@ -170,6 +184,17 @@
       const kind = String(op.op || op.type || op.kind || "");
       const byIndex = cachedHwpSnapshot?.byIndex || new Map();
       const total = cachedHwpSnapshot?.totalParagraphs || 0;
+      if (kind === "doc.replace_span") {
+        const idx = Number(op?.index);
+        if (!Number.isInteger(idx) || idx < 0) return;
+        const before = byIndex.get(idx)?.text ?? "";
+        const search = String(op?.search ?? "");
+        const replace = String(op?.replace ?? "");
+        const at = search ? before.indexOf(search) : -1;
+        const after = at >= 0 ? before.slice(0, at) + replace + before.slice(at + search.length) : replace;
+        entries.push(change(idx < total ? "replace" : "insert", "문단 " + (idx + 1), before, after, { module: "HWP", paragraphIndex: idx }));
+        return;
+      }
       if (kind === "doc.replace_paragraphs" && Array.isArray(op.replacements)) {
         for (const rep of op.replacements) {
           const idx = Number(rep?.index);
@@ -214,7 +239,14 @@
 
       for (const op of operations) {
         const kind = String(op?.op || op?.type || op?.kind || "").trim();
-        if (kind === "doc.replace_paragraphs" && Array.isArray(op.replacements)) {
+        if (kind === "doc.replace_span") {
+          const idx = Number(op?.index);
+          if (!Number.isInteger(idx) || idx < 0) throw new Error("한글 부분 교체 대상 문단 번호가 올바르지 않습니다.");
+          const search = plainTextFromDocItem(String(op?.search ?? ""));
+          const replace = plainTextFromDocItem(String(op?.replace ?? ""));
+          steps.push({ kind: "replace_span", index: idx, search, replace });
+          locations.push({ module: "HWP", label: "문단 " + (idx + 1), paragraphIndex: idx });
+        } else if (kind === "doc.replace_paragraphs" && Array.isArray(op.replacements)) {
           const replacements = op.replacements.map((r) => {
             const idx = Number(r?.index);
             locations.push({ module: "HWP", label: "문단 " + (idx + 1), paragraphIndex: idx });
@@ -324,6 +356,7 @@
     function extractPdfContext() {
       const hooks = host.__EASYOFFICE_MODULE_FIND_HOOKS__;
       const pages = hooks?.getPdfPages?.() || [];
+      const activePage = Math.max(1, Number(document.getElementById("pdf-page-card")?.dataset?.activePage || 1) || 1);
       if (Array.isArray(pages) && pages.length > 0) {
         const formatted = pages
           .map((p, idx) => {
@@ -335,6 +368,7 @@
         return {
           text: clipCodePoints(formatted, MAX_CONTEXT_TEXT_CHARS),
           pageCount: pages.length,
+          activePage: Math.min(activePage, pages.length),
         };
       }
       const rawText = clipCodePoints(
@@ -342,7 +376,7 @@
         MAX_CONTEXT_TEXT_CHARS,
       );
       const pageCount = Math.max(1, Number(getPdfEdit?.()?.pageCount?.() || pages.length || 1) || 1);
-      return { text: rawText ? `[1쪽] ${rawText}` : "", pageCount };
+      return { text: rawText ? `[1쪽] ${rawText}` : "", pageCount, activePage: Math.min(activePage, pageCount) };
     }
 
     function searchPdfPagesTool(args) {
@@ -702,6 +736,63 @@
       return st ? JSON.stringify({ n: st.nodes?.length || 0, c: st.connectors?.length || 0, ids: (st.nodes || []).map((x) => [x.id, x.text]) }) : "";
     }
 
+    async function locateTarget(loc, { docBlocksOf }) {
+      if (!loc || typeof loc !== "object") return false;
+      const mod = String(loc.module || getActiveModule()).toUpperCase();
+      if (mod !== getActiveModule() && typeof activatePane === "function") {
+        await activatePane(mod);
+      }
+      if (mod === "HWP" && getEmbedHwpHost()) return locateHwpTarget(loc);
+      if (mod === "PDF") return locatePdfTarget(loc);
+      if (mod === "SHEET") {
+        const sc = getSheetController();
+        const sheetName = String(loc.sheet || getActiveSheetName());
+        if (sheetName && sheetName !== getActiveSheetName() && sheetDataStore?.[sheetName]) {
+          await sc?.switchSheetTab?.(sheetName);
+        }
+        const rangeText = String(loc.range || loc.label || "").trim().toUpperCase();
+        const names = host.__EASYOFFICE_SHEET_NAMES__;
+        const nameBox = document.getElementById("active-cell-ref");
+        if (rangeText && names?.parseAddress(rangeText) && nameBox) {
+          nameBox.textContent = rangeText;
+          const ev = typeof host.KeyboardEvent === "function"
+            ? new host.KeyboardEvent("keydown", { key: "Enter", bubbles: true })
+            : { type: "keydown", key: "Enter", target: nameBox };
+          nameBox.dispatchEvent(ev);
+          return true;
+        }
+        return false;
+      }
+      if (mod === "DOC" || mod === "HWP") {
+        const editor = document.getElementById("doc-editor");
+        const blocks = docBlocksOf(editor);
+        const idx = Number.isInteger(loc.paragraphIndex) ? loc.paragraphIndex : 0;
+        const target = blocks[Math.max(0, Math.min(blocks.length - 1, idx))];
+        if (!target) return false;
+        target.scrollIntoView?.({ block: "center" });
+        editor.focus?.();
+        const sel = host.getSelection?.();
+        if (sel && document.createRange) {
+          const range = document.createRange();
+          range.setStart(target, 0);
+          range.setEnd(target, 0);
+          sel.removeAllRanges?.();
+          sel.addRange?.(range);
+        }
+        return true;
+      }
+      if (mod === "SLIDE") {
+        const idx = Number.isInteger(loc.slideIndex)
+          ? loc.slideIndex
+          : Math.max(0, (Number.parseInt(String(loc.label || "").replace(/\D+/g, ""), 10) || 1) - 1);
+        if (idx < 0 || idx >= (slideDeckState?.length || 0)) return false;
+        getWorkspacePanels()?.renderSlideDeck?.(idx);
+        document.getElementById("slide-thumb-list")?.querySelector(`[data-slide-idx="${idx}"]`)?.focus?.();
+        return true;
+      }
+      return mod === "BASE" || mod === "BOARD";
+    }
+
     return {
       getEmbedHwpHost,
       refreshHwpSnapshot,
@@ -720,6 +811,7 @@
       extractPdfContext,
       searchPdfPagesTool,
       locatePdfTarget,
+      locateTarget,
       applyBaseOperationsBatch,
       baseEntries,
       baseFingerprint,

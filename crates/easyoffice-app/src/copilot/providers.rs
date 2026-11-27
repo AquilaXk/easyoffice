@@ -3,14 +3,21 @@
 use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
 use std::fmt::Write as _;
 
+use super::cache::{
+    assemble_ordered_turns, build_prompt_cache_key, is_official_anthropic_host,
+    is_official_openai_host, write_anthropic_system_and_messages, write_google_contents,
+    write_openai_messages,
+};
 use super::schema::{
     synthesize_completion_from_tools, write_provider_tools_field, NativeToolInvocation,
 };
 use super::ssrf::EndpointTarget;
 use super::types::{
     push_json_str, CopilotRunRequest, HistoryMessage, ProviderConfig, ProviderKind,
-    ReasoningEffort, MAX_DISCOVERED_MODELS, MAX_LLM_REQUEST_BYTES, MAX_OUTPUT_TOKENS,
+    ReasoningEffort, LIGHTWEIGHT_MAX_OUTPUT_TOKENS, MAX_DISCOVERED_MODELS, MAX_LLM_REQUEST_BYTES,
+    MAX_OUTPUT_TOKENS,
 };
+use super::usage::{extract_usage_from_root, TokenUsage};
 
 pub const ANTHROPIC_API_VERSION: &str = "2023-06-01";
 
@@ -113,12 +120,12 @@ pub fn build_provider_ping_body(provider: &ProviderConfig) -> String {
             out.push_str("{\"model\":");
             push_json_str(&mut out, model);
             out.push_str(
-                ",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}",
+                ",\"max_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}",
             );
             out
         }
         ProviderKind::Google => {
-            "{\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"ping\"}]}],\"generationConfig\":{\"maxOutputTokens\":8}}"
+            "{\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"ping\"}]}],\"generationConfig\":{\"maxOutputTokens\":1}}"
                 .to_string()
         }
         _ => {
@@ -128,56 +135,11 @@ pub fn build_provider_ping_body(provider: &ProviderConfig) -> String {
             let (field, _) = openai_output_cap(provider.kind, None);
             let _ = write!(
                 out,
-                ",\"messages\":[{{\"role\":\"user\",\"content\":\"ping\"}}],\"{field}\":8}}"
+                ",\"messages\":[{{\"role\":\"user\",\"content\":\"ping\"}}],\"{field}\":1}}"
             );
             out
         }
     }
-}
-
-fn coalesce_turns<'a>(
-    history: &'a [HistoryMessage],
-    user_content: &'a str,
-) -> Vec<(&'static str, String)> {
-    let mut turns: Vec<(&'static str, String)> = Vec::with_capacity(history.len() + 1);
-    for h in history {
-        let role = if h.role == "assistant" {
-            "assistant"
-        } else {
-            "user"
-        };
-        if turns.is_empty() && role != "user" {
-            continue;
-        }
-        if let Some(last) = turns.last_mut() {
-            if last.0 == role {
-                last.1.push_str("\n\n");
-                last.1.push_str(&h.text);
-                continue;
-            }
-        }
-        turns.push((role, h.text.clone()));
-    }
-    if let Some(last) = turns.last_mut() {
-        if last.0 == "user" {
-            last.1.push_str("\n\n");
-            last.1.push_str(user_content);
-            return turns;
-        }
-    }
-    turns.push(("user", user_content.to_string()));
-    turns
-}
-
-fn is_official_anthropic_host(base_url: &str) -> bool {
-    let trimmed = base_url.trim();
-    let after_scheme = trimmed
-        .strip_prefix("https://")
-        .or_else(|| trimmed.strip_prefix("HTTPS://"))
-        .unwrap_or("");
-    let host_port = after_scheme.split('/').next().unwrap_or("");
-    let host = host_port.split(':').next().unwrap_or("");
-    host.eq_ignore_ascii_case("api.anthropic.com")
 }
 
 fn is_gemini_3_or_4(clean_model_lower: &str) -> bool {
@@ -203,52 +165,74 @@ pub fn build_provider_chat_body_with_history(
     user_content: &str,
     stream: bool,
 ) -> Result<String, EasyOfficeError> {
+    build_provider_chat_body_with_parts(
+        req,
+        history,
+        "",
+        user_content,
+        &req.loop_steps,
+        stream,
+        system_prompt,
+    )
+}
+
+pub fn build_provider_chat_body_with_parts(
+    req: &CopilotRunRequest,
+    prior_history: &[HistoryMessage],
+    context_block: &str,
+    user_prompt: &str,
+    loop_steps: &[HistoryMessage],
+    stream: bool,
+    system_prompt: &str,
+) -> Result<String, EasyOfficeError> {
     let model = req.provider.model.trim();
     if model.is_empty() {
         return Err(EasyOfficeError::InvalidArgument(
             "모델 설정에서 사용할 모델을 먼저 선택하세요.".to_string(),
         ));
     }
-    let effort = req.provider.reasoning_effort;
+    let effort = req.effective_reasoning_effort();
     let is_reasoning = infer_reasoning_support(model);
     let body = match req.provider.kind {
         ProviderKind::Anthropic => {
-            let turns = coalesce_turns(history, user_content);
-            let budget = effort
-                .filter(|_| is_reasoning)
-                .map_or(0, ReasoningEffort::budget_tokens);
-            let max_tokens = MAX_OUTPUT_TOKENS + budget;
-            let mut out = String::with_capacity(system_prompt.len() + user_content.len() + 1024);
+            let turns = assemble_ordered_turns(
+                req,
+                prior_history,
+                context_block,
+                user_prompt,
+                loop_steps,
+                true,
+            );
+            let budget = if req.lightweight {
+                0
+            } else {
+                effort
+                    .filter(|_| is_reasoning)
+                    .map_or(0, ReasoningEffort::budget_tokens)
+            };
+            let max_tokens = if req.lightweight {
+                LIGHTWEIGHT_MAX_OUTPUT_TOKENS
+            } else {
+                MAX_OUTPUT_TOKENS + budget
+            };
+            let official_host = is_official_anthropic_host(&req.provider.base_url);
+            let mut out = String::with_capacity(
+                system_prompt.len() + context_block.len() + user_prompt.len() + 1024,
+            );
             out.push_str("{\"model\":");
             push_json_str(&mut out, model);
-            let _ = write!(out, ",\"max_tokens\":{max_tokens},\"system\":");
-            if is_official_anthropic_host(&req.provider.base_url) {
-                out.push_str("[{\"type\":\"text\",\"text\":");
-                push_json_str(&mut out, system_prompt);
-                out.push_str(",\"cache_control\":{\"type\":\"ephemeral\"}}]");
-            } else {
-                push_json_str(&mut out, system_prompt);
-            }
-            out.push_str(",\"messages\":[");
-            for (idx, (role, text)) in turns.iter().enumerate() {
-                if idx > 0 {
-                    out.push(',');
-                }
-                out.push_str("{\"role\":");
-                push_json_str(&mut out, role);
-                out.push_str(",\"content\":");
-                push_json_str(&mut out, text);
-                out.push('}');
-            }
-            out.push(']');
+            let _ = write!(out, ",\"max_tokens\":{max_tokens}");
+            write_anthropic_system_and_messages(&mut out, system_prompt, &turns, official_host);
             write_provider_tools_field(&mut out, req);
-            if budget > 0 {
-                let _ = write!(
-                    out,
-                    ",\"thinking\":{{\"type\":\"enabled\",\"budget_tokens\":{budget}}}"
-                );
-            } else if !is_reasoning {
-                out.push_str(",\"temperature\":0.2");
+            if !req.lightweight {
+                if budget > 0 {
+                    let _ = write!(
+                        out,
+                        ",\"thinking\":{{\"type\":\"enabled\",\"budget_tokens\":{budget}}}"
+                    );
+                } else if !is_reasoning {
+                    out.push_str(",\"temperature\":0.2");
+                }
             }
             if stream {
                 out.push_str(",\"stream\":true");
@@ -257,90 +241,108 @@ pub fn build_provider_chat_body_with_history(
             out
         }
         ProviderKind::Google => {
-            let turns = coalesce_turns(history, user_content);
+            let turns = assemble_ordered_turns(
+                req,
+                prior_history,
+                context_block,
+                user_prompt,
+                loop_steps,
+                true,
+            );
             let clean_lower = model
                 .strip_prefix("models/")
                 .unwrap_or(model)
                 .to_ascii_lowercase();
             let gemini_34 = is_gemini_3_or_4(&clean_lower);
-            let budget = effort
-                .filter(|_| is_reasoning || gemini_34)
-                .map_or(0, ReasoningEffort::budget_tokens);
-            let max_out = MAX_OUTPUT_TOKENS + budget;
-            let mut out = String::with_capacity(system_prompt.len() + user_content.len() + 1024);
+            let budget = if req.lightweight {
+                0
+            } else {
+                effort
+                    .filter(|_| is_reasoning || gemini_34)
+                    .map_or(0, ReasoningEffort::budget_tokens)
+            };
+            let max_out = if req.lightweight {
+                LIGHTWEIGHT_MAX_OUTPUT_TOKENS
+            } else {
+                MAX_OUTPUT_TOKENS + budget
+            };
+            let mut out = String::with_capacity(
+                system_prompt.len() + context_block.len() + user_prompt.len() + 1024,
+            );
             out.push_str("{\"systemInstruction\":{\"parts\":[{\"text\":");
             push_json_str(&mut out, system_prompt);
-            out.push_str("}]},\"contents\":[");
-            for (idx, (role, text)) in turns.iter().enumerate() {
-                if idx > 0 {
-                    out.push(',');
-                }
-                let g_role = if *role == "assistant" {
-                    "model"
-                } else {
-                    "user"
-                };
-                out.push_str("{\"role\":");
-                push_json_str(&mut out, g_role);
-                out.push_str(",\"parts\":[{\"text\":");
-                push_json_str(&mut out, text);
-                out.push_str("}]}");
-            }
-            out.push(']');
+            out.push_str("}]}");
+            write_google_contents(&mut out, &turns);
             write_provider_tools_field(&mut out, req);
             out.push_str(",\"generationConfig\":{");
             if !gemini_34 && !is_reasoning && budget == 0 {
                 out.push_str("\"temperature\":0.2,");
             }
             let _ = write!(out, "\"maxOutputTokens\":{max_out}");
-            if gemini_34 {
-                if let Some(level) = effort {
-                    out.push_str(
-                        ",\"thinkingConfig\":{\"includeThoughts\":true,\"thinkingLevel\":",
+            if !req.lightweight {
+                if gemini_34 {
+                    if let Some(level) = effort {
+                        out.push_str(
+                            ",\"thinkingConfig\":{\"includeThoughts\":true,\"thinkingLevel\":",
+                        );
+                        push_json_str(&mut out, level.as_str());
+                        out.push('}');
+                    }
+                } else if budget > 0 {
+                    let _ = write!(
+                        out,
+                        ",\"thinkingConfig\":{{\"includeThoughts\":true,\"thinkingBudget\":{budget}}}"
                     );
-                    push_json_str(&mut out, level.as_str());
-                    out.push('}');
                 }
-            } else if budget > 0 {
-                let _ = write!(
-                    out,
-                    ",\"thinkingConfig\":{{\"includeThoughts\":true,\"thinkingBudget\":{budget}}}"
-                );
             }
             out.push_str("}}");
             out
         }
         _ => {
-            let mut out = String::with_capacity(system_prompt.len() + user_content.len() + 1024);
+            let turns = assemble_ordered_turns(
+                req,
+                prior_history,
+                context_block,
+                user_prompt,
+                loop_steps,
+                false,
+            );
+            let mut out = String::with_capacity(
+                system_prompt.len() + context_block.len() + user_prompt.len() + 1024,
+            );
             out.push_str("{\"model\":");
             push_json_str(&mut out, model);
-            out.push_str(",\"messages\":[{\"role\":\"system\",\"content\":");
-            push_json_str(&mut out, system_prompt);
-            out.push('}');
-            for h in history {
-                out.push_str(",{\"role\":");
-                push_json_str(&mut out, &h.role);
-                out.push_str(",\"content\":");
-                push_json_str(&mut out, &h.text);
-                out.push('}');
-            }
-            out.push_str(",{\"role\":\"user\",\"content\":");
-            push_json_str(&mut out, user_content);
-            out.push_str("}]");
-            let (cap_field, cap) = openai_output_cap(req.provider.kind, effort);
+            write_openai_messages(&mut out, system_prompt, &turns);
+            let (cap_field, cap) = if req.lightweight {
+                let (f, _) = openai_output_cap(req.provider.kind, None);
+                (f, LIGHTWEIGHT_MAX_OUTPUT_TOKENS)
+            } else {
+                openai_output_cap(req.provider.kind, effort)
+            };
             let _ = write!(out, ",\"{cap_field}\":{cap}");
             write_provider_tools_field(&mut out, req);
-            if let Some(level) = effort {
-                if req.provider.kind == ProviderKind::DeepSeek && is_reasoning {
-                    out.push_str(",\"thinking\":{\"type\":\"enabled\"},\"reasoning_effort\":");
-                    push_json_str(&mut out, level.as_str());
-                } else if matches!(
-                    req.provider.kind,
-                    ProviderKind::OpenAi | ProviderKind::OpenRouter | ProviderKind::Xai
-                ) && is_reasoning
-                {
-                    out.push_str(",\"reasoning_effort\":");
-                    push_json_str(&mut out, level.as_str());
+            if req.provider.kind == ProviderKind::OpenAi
+                && is_official_openai_host(&req.provider.base_url)
+            {
+                let cache_key = build_prompt_cache_key(req);
+                out.push_str(",\"prompt_cache_key\":");
+                push_json_str(&mut out, &cache_key);
+            }
+            if !req.lightweight {
+                if let Some(level) = effort {
+                    if req.provider.kind == ProviderKind::DeepSeek && is_reasoning {
+                        out.push_str(",\"thinking\":{\"type\":\"enabled\"},\"reasoning_effort\":");
+                        push_json_str(&mut out, level.as_str());
+                    } else if matches!(
+                        req.provider.kind,
+                        ProviderKind::OpenAi | ProviderKind::OpenRouter | ProviderKind::Xai
+                    ) && is_reasoning
+                    {
+                        out.push_str(",\"reasoning_effort\":");
+                        push_json_str(&mut out, level.as_str());
+                    } else if !is_reasoning {
+                        out.push_str(",\"temperature\":0.2");
+                    }
                 } else if !is_reasoning {
                     out.push_str(",\"temperature\":0.2");
                 }
@@ -349,6 +351,11 @@ pub fn build_provider_chat_body_with_history(
             }
             if stream {
                 out.push_str(",\"stream\":true");
+                if req.provider.kind == ProviderKind::OpenAi
+                    && is_official_openai_host(&req.provider.base_url)
+                {
+                    out.push_str(",\"stream_options\":{\"include_usage\":true}");
+                }
             }
             out.push('}');
             out
@@ -535,12 +542,22 @@ pub fn extract_provider_completion(
     kind: ProviderKind,
     raw_json: &str,
 ) -> Result<(String, String), EasyOfficeError> {
+    let (content, thinking, _) = extract_provider_completion_with_usage(kind, raw_json)?;
+    Ok((content, thinking))
+}
+
+pub fn extract_provider_completion_with_usage(
+    kind: ProviderKind,
+    raw_json: &str,
+) -> Result<(String, String, Option<TokenUsage>), EasyOfficeError> {
     let parsed = StrictJsonValue::parse(raw_json).map_err(|_| {
         EasyOfficeError::InvalidArgument("모델 응답이 유효한 JSON이 아닙니다.".to_string())
     })?;
     let mut text_out = String::new();
     let mut thinking_out = String::new();
     let mut tools_out = Vec::new();
+    let mut usage = TokenUsage::default();
+    let mut has_usage = false;
 
     if let Some(arr) = parsed.as_array() {
         let mut any_matched = false;
@@ -556,6 +573,10 @@ pub fn extract_provider_completion(
                     .unwrap_or("모델 서버가 오류를 반환했습니다.");
                 return Err(EasyOfficeError::InvalidArgument(msg.to_string()));
             }
+            if let Some(u) = extract_usage_from_root(kind, obj) {
+                usage.merge_latest(u);
+                has_usage = true;
+            }
             any_matched |= extract_from_root_object(
                 kind,
                 obj,
@@ -567,7 +588,7 @@ pub fn extract_provider_completion(
         }
         if any_matched && (!text_out.is_empty() || !tools_out.is_empty()) {
             let content = synthesize_completion_from_tools(text_out, &tools_out);
-            return Ok((content, thinking_out));
+            return Ok((content, thinking_out, has_usage.then_some(usage)));
         }
         return Err(EasyOfficeError::InvalidArgument(
             "모델 응답 배열에서 메시지 본문을 찾을 수 없습니다.".to_string(),
@@ -579,6 +600,10 @@ pub fn extract_provider_completion(
             "모델 응답 루트는 JSON 객체 또는 배열이어야 합니다.".to_string(),
         )
     })?;
+    if let Some(u) = extract_usage_from_root(kind, root) {
+        usage.merge_latest(u);
+        has_usage = true;
+    }
     if extract_from_root_object(
         kind,
         root,
@@ -589,7 +614,7 @@ pub fn extract_provider_completion(
     ) && (!text_out.is_empty() || !tools_out.is_empty())
     {
         let content = synthesize_completion_from_tools(text_out, &tools_out);
-        return Ok((content, thinking_out));
+        return Ok((content, thinking_out, has_usage.then_some(usage)));
     }
     Err(EasyOfficeError::InvalidArgument(
         "모델 응답에서 메시지 본문을 찾을 수 없습니다.".to_string(),

@@ -122,7 +122,7 @@ test("a text selection command targets the blocks the selection touches and reac
   assert.equal(context.doc.paragraphs[231], "문단 231");
   assert.equal(context.doc.paragraphs[220], "문단 220", "surrounding window past paragraph 200 is preserved");
   assert.equal(context.doc.paragraphs[245], "문단 245", "trailing surrounding window is preserved");
-  assert.equal(context.doc.paragraphs[210], "", "outside the window and the selection stays empty");
+  assert.equal(context.doc.paragraphs[210], null, "outside the window and the selection stays null");
   assert.equal(context.doc.omittedParagraphs, 12);
 });
 

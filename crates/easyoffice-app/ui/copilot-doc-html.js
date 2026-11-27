@@ -151,21 +151,41 @@
   function serializeTableBlock(tableEl) {
     const rows = Array.from(tableEl.querySelectorAll?.("tr") || []).slice(0, MAX_TABLE_ROWS);
     if (rows.length === 0) return "";
-    const rowHtml = rows.map((tr, rIdx) => {
+    let anyMarkupOrSpan = false;
+    const parsedRows = rows.map((tr, rIdx) => {
       const cells = Array.from(tr.children || [])
         .filter((c) => {
           const t = (c.tagName || "").toLowerCase();
           return t === "td" || t === "th";
         })
         .slice(0, MAX_TABLE_COLS);
-      const cellStr = cells.map((cell) => {
+      return cells.map((cell) => {
+        const colSpan = Number(cell.getAttribute?.("colspan") || cell.colSpan || 1);
+        const rowSpan = Number(cell.getAttribute?.("rowspan") || cell.rowSpan || 1);
+        if (colSpan > 1 || rowSpan > 1) anyMarkupOrSpan = true;
         const isHeader = (cell.tagName || "").toLowerCase() === "th" || (rIdx === 0 && cell.dataset?.eoHeader === "true");
         const tag = isHeader ? "th" : "td";
-        const { html } = serializeInlineInternal(cell);
-        return `<${tag}>${html}</${tag}>`;
-      }).join("");
-      return `<tr>${cellStr}</tr>`;
-    }).join("");
+        const { html, hasMarkup } = serializeInlineInternal(cell);
+        const headerOnlyBold = rIdx === 0 && isHeader && /^<strong>[^<]*<\/strong>$/.test(html);
+        if (hasMarkup && !headerOnlyBold) anyMarkupOrSpan = true;
+        const plain = headerOnlyBold
+          ? decodeHtmlEntities(html.slice("<strong>".length, -"</strong>".length))
+          : decodeHtmlEntities(html);
+        return { tag, html, plain };
+      });
+    });
+
+    if (!anyMarkupOrSpan) {
+      const cleanCell = (txt) => String(txt || "").trim().replace(/\|/g, "\\|").replace(/\r?\n+/g, " ");
+      const headCols = Math.max(1, parsedRows[0]?.length || 1);
+      const mdLines = parsedRows.map((row) => "| " + row.map((c) => cleanCell(c.plain)).join(" | ") + " |");
+      const sep = "| " + Array(headCols).fill("---").join(" | ") + " |";
+      return [mdLines[0], sep, ...mdLines.slice(1)].join("\n");
+    }
+
+    const rowHtml = parsedRows
+      .map((row) => "<tr>" + row.map((c) => `<${c.tag}>${c.html}</${c.tag}>`).join("") + "</tr>")
+      .join("");
     return `<table>${rowHtml}</table>`;
   }
 
@@ -548,6 +568,82 @@
     return plainPreviewTextOfBlock(raw);
   }
 
+  function collectTextNodes(root, out = []) {
+    for (const child of root.childNodes || []) {
+      if (child.nodeType === 3) out.push(child);
+      else if (child.nodeType === 1) collectTextNodes(child, out);
+    }
+    return out;
+  }
+
+  function replaceSpanWithTrackChanges(document, editor, blockEl, search, replace) {
+    const cleanSearch = String(search ?? "");
+    const cleanReplace = String(replace ?? "");
+    if (!cleanSearch.trim()) {
+      throw new Error("검색 대상 문자열은 비어 있을 수 없습니다.");
+    }
+    const plain = String(blockEl.textContent || "");
+    const firstAt = plain.indexOf(cleanSearch);
+    if (firstAt < 0) {
+      throw new Error("변경할 대상 구간을 문단에서 찾을 수 없습니다.");
+    }
+    if (plain.indexOf(cleanSearch, firstAt + 1) >= 0) {
+      throw new Error("동일한 문구가 여러 번 나타나 바꿀 위치를 특정할 수 없습니다.");
+    }
+    const endAt = firstAt + cleanSearch.length;
+    const hasInlineEl = Boolean(blockEl.querySelector?.("span.eo-run, a, strong, em, u, s, del, ins"));
+
+    if (isTrackChangesActive(editor)) {
+      const serialized = serializeInlineChildren(blockEl);
+      const serAt = serialized.indexOf(cleanSearch);
+      if (serAt >= 0 && serialized.indexOf(cleanSearch, serAt + 1) < 0) {
+        const nextSer = serialized.slice(0, serAt) + cleanReplace + serialized.slice(serAt + cleanSearch.length);
+        return replaceParagraphContentWithTrackChanges(document, editor, blockEl, nextSer);
+      }
+      const nextPlain = plain.slice(0, firstAt) + cleanReplace + plain.slice(endAt);
+      return replaceParagraphContentWithTrackChanges(document, editor, blockEl, nextPlain);
+    }
+
+    if (!hasInlineEl) {
+      const nextPlain = plain.slice(0, firstAt) + cleanReplace + plain.slice(endAt);
+      blockEl.replaceChildren();
+      populateSanitizedInline(document, blockEl, nextPlain);
+      return blockEl;
+    }
+
+    // 인라인 서식 노드를 보존하면서 일치한 텍스트 노드 범위만 부분 치환한다.
+    const nodes = collectTextNodes(blockEl);
+    let offset = 0;
+    let wroteReplacement = false;
+    for (const node of nodes) {
+      const len = node.data.length;
+      const nStart = offset;
+      const nEnd = offset + len;
+      offset = nEnd;
+      if (nEnd <= firstAt || nStart >= endAt) continue;
+      const localStart = Math.max(0, firstAt - nStart);
+      const localEnd = Math.min(len, endAt - nStart);
+      const before = node.data.slice(0, localStart);
+      const after = node.data.slice(localEnd);
+      if (!wroteReplacement) {
+        wroteReplacement = true;
+        if (TAG_LIKE_PLAIN_RE.test(cleanReplace)) {
+          const parent = node.parentNode || blockEl;
+          const frag = document.createDocumentFragment();
+          if (before) frag.appendChild(document.createTextNode(before));
+          populateSanitizedInline(document, frag, cleanReplace);
+          if (after) frag.appendChild(document.createTextNode(after));
+          parent.replaceChild(frag, node);
+        } else {
+          node.data = before + cleanReplace + after;
+        }
+      } else {
+        node.data = before + after;
+      }
+    }
+    return blockEl;
+  }
+
   host.__EASYOFFICE_COPILOT_DOC_HTML__ = Object.freeze({
     docBlocksOf,
     serializeBlockForContext,
@@ -557,6 +653,7 @@
     nextRevisionId,
     wrapBlockInserted,
     replaceParagraphContentWithTrackChanges,
+    replaceSpanWithTrackChanges,
     markBlockDeletedInPlace,
     plainPreviewTextOfBlock,
   });

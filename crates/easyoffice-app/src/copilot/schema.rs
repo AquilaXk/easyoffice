@@ -3,8 +3,9 @@
 use easyoffice_formats::StrictJsonValue;
 use std::fmt::Write as _;
 
+use super::cache::is_official_anthropic_host;
 use super::prompt::doc_has_unread_blocks;
-use super::types::{push_json_str, CopilotModule, CopilotRunRequest, ProviderKind};
+use super::types::{push_json_str, CopilotCommand, CopilotModule, CopilotRunRequest, ProviderKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeToolInvocation {
@@ -27,44 +28,85 @@ const SEARCH_PDF_SCHEMA: &str =
 const DOC_BLOCK_ITEM_SCHEMA: &str = r#"{"type":"object","properties":{"heading":{"type":"integer","minimum":1},"text":{"type":"string"},"list":{"type":"string","enum":["bullet","ordered","task"]},"items":{"type":"array","items":{"type":"string"}},"table":{"type":"object","properties":{"headerRow":{"type":"boolean"},"rows":{"type":"array","items":{"type":"array","items":{"type":"string"}}}},"required":["rows"]}}}"#;
 const SLIDE_ELEMENT_SCHEMA: &str = r#"{"type":"object","properties":{"id":{"type":"string"},"kind":{"type":"string","enum":["textbox","shape","table","chart","image"]},"x":{"type":"number"},"y":{"type":"number"},"w":{"type":"number"},"h":{"type":"number"},"text":{"type":"string"},"role":{"type":"string","enum":["title","subtitle","body","none"]},"fontSizePt":{"type":"number"},"bold":{"type":"boolean"},"italic":{"type":"boolean"},"color":{"type":"string"},"fill":{"type":"string"},"align":{"type":"string","enum":["left","center","right","justify"]},"shapeType":{"type":"string"},"stroke":{"type":"string"},"rows":{"type":"array","items":{"type":"array","items":{"type":"string"}}},"headerRow":{"type":"boolean"},"chartType":{"type":"string","enum":["column","bar","line","pie","scatter"]},"title":{"type":"string"},"categories":{"type":"array","items":{"type":"string"}},"series":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"values":{"type":"array","items":{"type":"number"}},"color":{"type":"string"}},"required":["values"]}}},"required":["kind"]}"#;
 
-fn op_item_schema(module: CopilotModule, read_only: bool) -> String {
-    if read_only {
-        return r#"{"type":"object","properties":{"kind":{"type":"string"}}}"#.to_string();
+fn op_item_schema(req: &CopilotRunRequest) -> (String, Option<&'static str>) {
+    if req.is_read_only() {
+        return (
+            r#"{"type":"object","properties":{"kind":{"type":"string"}}}"#.to_string(),
+            None,
+        );
     }
-    match module {
-        CopilotModule::Doc => format!(
-            r#"{{"type":"object","properties":{{"kind":{{"type":"string","enum":["doc.append","doc.replace_paragraphs","doc.scrub_pii"]}},"blocks":{{"type":"array","items":{DOC_BLOCK_ITEM_SCHEMA}}},"replacements":{{"type":"array","items":{{"type":"object","properties":{{"index":{{"type":"integer","minimum":0}},"text":{{"type":"string"}}}},"required":["index","text"]}}}},"startIndex":{{"type":"integer","minimum":0}},"endIndex":{{"type":"integer","minimum":0}}}},"required":["kind"]}}"#
+    if let Some(cmd) = req.command {
+        match req.module {
+            CopilotModule::Doc | CopilotModule::Hwp => {
+                if cmd == CopilotCommand::VisualizeTable && req.module == CopilotModule::Doc {
+                    return (
+                        format!(
+                            r#"{{"type":"object","properties":{{"kind":{{"type":"string","enum":["doc.replace_paragraphs"]}},"startIndex":{{"type":"integer","minimum":0}},"endIndex":{{"type":"integer","minimum":0}},"blocks":{{"type":"array","items":{DOC_BLOCK_ITEM_SCHEMA}}}}},"required":["kind","startIndex","endIndex","blocks"]}}"#
+                        ),
+                        None,
+                    );
+                }
+                return (
+                    r#"{"type":"object","properties":{"kind":{"type":"string","enum":["doc.replace_paragraphs"]},"replacements":{"type":"array","items":{"type":"object","properties":{"index":{"type":"integer","minimum":0},"text":{"type":"string"}},"required":["index","text"]}}},"required":["kind","replacements"]}"#.to_string(),
+                    None,
+                );
+            }
+            CopilotModule::Slide => {
+                return (
+                    r#"{"type":"object","properties":{"kind":{"type":"string","enum":["slide.update"]},"index":{"type":"integer","minimum":0},"title":{"type":"string"},"bullets":{"type":"array","items":{"type":"string"}}},"required":["kind"]}"#.to_string(),
+                    None,
+                );
+            }
+            _ => {}
+        }
+    }
+    match req.module {
+        CopilotModule::Doc => (
+            format!(
+                r#"{{"type":"object","properties":{{"kind":{{"type":"string","enum":["doc.append","doc.replace_paragraphs","doc.replace_span","doc.scrub_pii"]}},"blocks":{{"type":"array","items":{DOC_BLOCK_ITEM_SCHEMA}}},"replacements":{{"type":"array","items":{{"type":"object","properties":{{"index":{{"type":"integer","minimum":0}},"text":{{"type":"string"}}}},"required":["index","text"]}}}},"startIndex":{{"type":"integer","minimum":0}},"endIndex":{{"type":"integer","minimum":0}},"index":{{"type":"integer","minimum":0}},"search":{{"type":"string"}},"replace":{{"type":"string"}}}},"required":["kind"]}}"#
+            ),
+            None,
         ),
-        CopilotModule::Hwp => {
-            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["doc.append","doc.replace_paragraphs"]},"blocks":{"type":"array","items":{"type":"object","properties":{"heading":{"type":"integer"},"text":{"type":"string"},"list":{"type":"string"},"items":{"type":"array","items":{"type":"string"}}}}},"replacements":{"type":"array","items":{"type":"object","properties":{"index":{"type":"integer","minimum":0},"text":{"type":"string"}},"required":["index","text"]}},"startIndex":{"type":"integer","minimum":0},"endIndex":{"type":"integer","minimum":0}},"required":["kind"]}"#.to_string()
-        }
-        CopilotModule::Sheet => {
-            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["sheet.write","sheet.format","sheet.chart","sheet.table","sheet.pivot","sheet.cond_format","sheet.sort_filter","sheet.structure","sheet.note"]},"sheet":{"type":"string"},"range":{"type":"string"},"cells":{"type":"array","items":{"type":"object","properties":{"coord":{"type":"string"},"raw":{"type":"string"},"numFmt":{"type":"string"},"bold":{"type":"boolean"},"fill":{"type":"string"},"color":{"type":"string"}},"required":["coord","raw"]}},"fill":{"type":"string"},"color":{"type":"string"},"bold":{"type":"boolean"},"numFmt":{"type":"string"},"chartType":{"type":"string","enum":["column","bar","line","pie","scatter"]},"dataRange":{"type":"string"},"title":{"type":"string"},"legend":{"type":"string","enum":["right","bottom","top","left","none"]},"switchRowCol":{"type":"boolean"},"action":{"type":"string"},"tableName":{"type":"string"},"style":{"type":"string"},"totalRow":{"type":"boolean"},"sourceRange":{"type":"string"},"destSheet":{"type":"string"},"destCell":{"type":"string"},"rowField":{"type":"string"},"colField":{"type":"string"},"valueField":{"type":"string"},"agg":{"type":"string","enum":["sum","count","average","min","max"]},"preset":{"type":"string"},"value1":{"type":"string"},"value2":{"type":"string"},"colOffset":{"type":"integer"},"ascending":{"type":"boolean"},"query":{"type":"string"},"index":{"type":"integer"},"count":{"type":"integer"},"coord":{"type":"string"},"text":{"type":"string"}},"required":["kind"]}"#.to_string()
-        }
-        CopilotModule::Slide => format!(
-            r#"{{"type":"object","properties":{{"kind":{{"type":"string","enum":["slide.add","slide.update","slide.add_element"]}},"index":{{"type":"integer","minimum":0}},"slideIndex":{{"type":"integer","minimum":0}},"title":{{"type":"string"}},"body":{{"type":"string"}},"bullets":{{"type":"array","items":{{"type":"string"}}}},"notes":{{"type":"string"}},"layout":{{"type":"string","enum":["titleSlide","titleAndContent","sectionHeader","twoColumn","blank"]}},"transition":{{"type":"string","enum":["none","fade","push","wipe","split","zoom"]}},"elements":{{"type":"array","items":{SLIDE_ELEMENT_SCHEMA}}},"element":{SLIDE_ELEMENT_SCHEMA}}},"required":["kind"]}}"#
+        CopilotModule::Hwp => (
+            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["doc.append","doc.replace_paragraphs","doc.replace_span"]},"blocks":{"type":"array","items":{"type":"object","properties":{"heading":{"type":"integer"},"text":{"type":"string"},"list":{"type":"string"},"items":{"type":"array","items":{"type":"string"}}}}},"replacements":{"type":"array","items":{"type":"object","properties":{"index":{"type":"integer","minimum":0},"text":{"type":"string"}},"required":["index","text"]}},"startIndex":{"type":"integer","minimum":0},"endIndex":{"type":"integer","minimum":0},"index":{"type":"integer","minimum":0},"search":{"type":"string"},"replace":{"type":"string"}},"required":["kind"]}"#.to_string(),
+            None,
         ),
-        CopilotModule::Base => {
-            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["base.add_field","base.add_records","base.update_records","base.set_view"]},"name":{"type":"string"},"fieldType":{"type":"string","enum":["text","number","checkbox","select","date"]},"options":{"type":"array","items":{"type":"string"}},"records":{"type":"array","items":{"type":"object"}},"updates":{"type":"array","items":{"type":"object","properties":{"rowIndex":{"type":"integer","minimum":0},"values":{"type":"object"}},"required":["rowIndex","values"]}},"view":{"type":"string","enum":["grid","kanban","calendar"]},"filterField":{"type":"string"},"filterOp":{"type":"string","enum":["contains","eq","neq","gt","gte","lt","lte","empty","notEmpty"]},"filterValue":{"type":"string"},"sortField":{"type":"string"},"sortDir":{"type":"string","enum":["asc","desc"]},"groupField":{"type":"string"}},"required":["kind"]}"#.to_string()
-        }
-        CopilotModule::Board => {
-            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["board.add_graph"]},"direction":{"type":"string","enum":["TB","LR"]},"nodes":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"kind":{"type":"string","enum":["shape","text"]},"shape":{"type":"string","enum":["rect","roundRect","diamond","ellipse"]},"text":{"type":"string"},"fill":{"type":"string"}},"required":["id","text"]}},"edges":{"type":"array","items":{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"label":{"type":"string"},"style":{"type":"string","enum":["orthogonal","curved"]}},"required":["from","to"]}}},"required":["kind","nodes"]}"#.to_string()
-        }
-        CopilotModule::Pdf => {
-            r#"{"type":"object","properties":{"kind":{"type":"string"}}}"#.to_string()
-        }
+        CopilotModule::Sheet => (
+            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["sheet.write","sheet.format","sheet.chart","sheet.table","sheet.pivot","sheet.cond_format","sheet.sort_filter","sheet.structure","sheet.note"]},"sheet":{"type":"string"},"range":{"type":"string"},"cells":{"type":"array","items":{"type":"object","properties":{"coord":{"type":"string"},"raw":{"type":"string"},"numFmt":{"type":"string"},"bold":{"type":"boolean"},"fill":{"type":"string"},"color":{"type":"string"}},"required":["coord","raw"]}},"fill":{"type":"string"},"color":{"type":"string"},"bold":{"type":"boolean"},"numFmt":{"type":"string"},"chartType":{"type":"string","enum":["column","bar","line","pie","scatter"]},"dataRange":{"type":"string"},"title":{"type":"string"},"legend":{"type":"string","enum":["right","bottom","top","left","none"]},"switchRowCol":{"type":"boolean"},"action":{"type":"string"},"tableName":{"type":"string"},"style":{"type":"string"},"totalRow":{"type":"boolean"},"sourceRange":{"type":"string"},"destSheet":{"type":"string"},"destCell":{"type":"string"},"rowField":{"type":"string"},"colField":{"type":"string"},"valueField":{"type":"string"},"agg":{"type":"string","enum":["sum","count","average","min","max"]},"preset":{"type":"string"},"value1":{"type":"string"},"value2":{"type":"string"},"colOffset":{"type":"integer"},"ascending":{"type":"boolean"},"query":{"type":"string"},"index":{"type":"integer"},"count":{"type":"integer"},"coord":{"type":"string"},"text":{"type":"string"}},"required":["kind"]}"#.to_string(),
+            None,
+        ),
+        CopilotModule::Slide => (
+            r##"{"type":"object","properties":{"kind":{"type":"string","enum":["slide.add","slide.update","slide.add_element"]},"index":{"type":"integer","minimum":0},"slideIndex":{"type":"integer","minimum":0},"title":{"type":"string"},"body":{"type":"string"},"bullets":{"type":"array","items":{"type":"string"}},"notes":{"type":"string"},"layout":{"type":"string","enum":["titleSlide","titleAndContent","sectionHeader","twoColumn","blank"]},"transition":{"type":"string","enum":["none","fade","push","wipe","split","zoom"]},"elements":{"type":"array","items":{"$ref":"#/$defs/SlideEl"}},"element":{"$ref":"#/$defs/SlideEl"}},"required":["kind"]}"##.to_string(),
+            Some(SLIDE_ELEMENT_SCHEMA),
+        ),
+        CopilotModule::Base => (
+            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["base.add_field","base.add_records","base.update_records","base.set_view"]},"name":{"type":"string"},"fieldType":{"type":"string","enum":["text","number","checkbox","select","date"]},"options":{"type":"array","items":{"type":"string"}},"records":{"type":"array","items":{"type":"object"}},"updates":{"type":"array","items":{"type":"object","properties":{"rowIndex":{"type":"integer","minimum":0},"values":{"type":"object"}},"required":["rowIndex","values"]}},"view":{"type":"string","enum":["grid","kanban","calendar"]},"filterField":{"type":"string"},"filterOp":{"type":"string","enum":["contains","eq","neq","gt","gte","lt","lte","empty","notEmpty"]},"filterValue":{"type":"string"},"sortField":{"type":"string"},"sortDir":{"type":"string","enum":["asc","desc"]},"groupField":{"type":"string"}},"required":["kind"]}"#.to_string(),
+            None,
+        ),
+        CopilotModule::Board => (
+            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["board.add_graph"]},"direction":{"type":"string","enum":["TB","LR"]},"nodes":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"kind":{"type":"string","enum":["shape","text"]},"shape":{"type":"string","enum":["rect","roundRect","diamond","ellipse"]},"text":{"type":"string"},"fill":{"type":"string"}},"required":["id","text"]}},"edges":{"type":"array","items":{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"label":{"type":"string"},"style":{"type":"string","enum":["orthogonal","curved"]}},"required":["from","to"]}}},"required":["kind","nodes"]}"#.to_string(),
+            None,
+        ),
+        CopilotModule::Pdf => (
+            r#"{"type":"object","properties":{"kind":{"type":"string"}}}"#.to_string(),
+            None,
+        ),
     }
 }
 
 fn build_emit_schema(req: &CopilotRunRequest) -> String {
-    let op_schema = op_item_schema(req.module, req.is_read_only());
+    let (op_schema, slide_def) = op_item_schema(req);
+    let defs = match slide_def {
+        Some(el_schema) => format!(r#""$defs":{{"SlideEl":{el_schema}}},"#),
+        None => String::new(),
+    };
     format!(
-        r#"{{"type":"object","properties":{{"reply":{{"type":"string"}},"reasoning":{{"type":"string"}},"operations":{{"type":"array","items":{op_schema}}},"locations":{{"type":"array","items":{{"type":"object","properties":{{"module":{{"type":"string"}},"label":{{"type":"string"}},"sheet":{{"type":"string"}},"range":{{"type":"string"}},"paragraphIndex":{{"type":"integer"}},"slideIndex":{{"type":"integer"}},"page":{{"type":"integer"}}}},"required":["module","label"]}}}}}},"required":["reply","operations"]}}"#
+        r#"{{"type":"object",{defs}"properties":{{"reply":{{"type":"string"}},"operations":{{"type":"array","items":{op_schema}}}}},"required":["reply","operations"]}}"#
     )
 }
 
 fn read_tools_for_module(req: &CopilotRunRequest) -> Vec<ToolDef> {
-    if req.command.is_some() {
+    if req.lightweight || req.command.is_some() {
         return Vec::new();
     }
     match req.module {
@@ -95,50 +137,93 @@ fn read_tools_for_module(req: &CopilotRunRequest) -> Vec<ToolDef> {
 }
 
 /// 공식 제공자(`OpenAI`·`Anthropic`·`Google`) 요청 본문에 네이티브 `tools` 스키마를 덧붙인다.
+/// `lightweight` 요청은 도구를 생략하고, 읽기 전용(`ask`·`PDF`)은 필요한 읽기 도구만 남기며 0개면 `tools` 자체를 생략한다.
 pub fn write_provider_tools_field(out: &mut String, req: &CopilotRunRequest) {
-    let emit_schema = build_emit_schema(req);
+    if req.lightweight {
+        return;
+    }
+    let read_only = req.is_read_only();
     let read_tools = read_tools_for_module(req);
+    if read_only && read_tools.is_empty() {
+        return;
+    }
+    let emit_schema = (!read_only).then(|| build_emit_schema(req));
     match req.provider.kind {
         ProviderKind::OpenAi => {
-            out.push_str(",\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"emit_copilot_turn\",\"description\":\"최종 답변과 편집 작업 목록을 구조화해 반환한다.\",\"parameters\":");
-            out.push_str(&emit_schema);
-            out.push_str("}}");
+            out.push_str(",\"tools\":[");
+            let mut wrote = false;
+            if let Some(schema) = &emit_schema {
+                out.push_str("{\"type\":\"function\",\"function\":{\"name\":\"emit_copilot_turn\",\"description\":\"최종 답변과 편집 작업 목록을 구조화해 반환한다.\",\"parameters\":");
+                out.push_str(schema);
+                out.push_str("}}");
+                wrote = true;
+            }
             for t in &read_tools {
+                if wrote {
+                    out.push(',');
+                }
                 let _ = write!(
                     out,
-                    ",{{\"type\":\"function\",\"function\":{{\"name\":\"{}\",\"description\":",
+                    "{{\"type\":\"function\",\"function\":{{\"name\":\"{}\",\"description\":",
                     t.name
                 );
                 push_json_str(out, t.description);
                 out.push_str(",\"parameters\":");
                 out.push_str(t.parameters_json);
                 out.push_str("}}");
+                wrote = true;
             }
             out.push(']');
         }
         ProviderKind::Anthropic => {
-            out.push_str(",\"tools\":[{\"name\":\"emit_copilot_turn\",\"description\":\"최종 답변과 편집 작업 목록을 구조화해 반환한다.\",\"input_schema\":");
-            out.push_str(&emit_schema);
-            out.push('}');
+            let official_host = is_official_anthropic_host(&req.provider.base_url);
+            let total_tools = usize::from(emit_schema.is_some()) + read_tools.len();
+            let mut emitted = 0usize;
+            out.push_str(",\"tools\":[");
+            if let Some(schema) = &emit_schema {
+                out.push_str("{\"name\":\"emit_copilot_turn\",\"description\":\"최종 답변과 편집 작업 목록을 구조화해 반환한다.\",\"input_schema\":");
+                out.push_str(schema);
+                emitted += 1;
+                if official_host && emitted == total_tools {
+                    out.push_str(",\"cache_control\":{\"type\":\"ephemeral\"}");
+                }
+                out.push('}');
+            }
             for t in &read_tools {
-                let _ = write!(out, ",{{\"name\":\"{}\",\"description\":", t.name);
+                if emitted > 0 {
+                    out.push(',');
+                }
+                let _ = write!(out, "{{\"name\":\"{}\",\"description\":", t.name);
                 push_json_str(out, t.description);
                 out.push_str(",\"input_schema\":");
                 out.push_str(t.parameters_json);
+                emitted += 1;
+                if official_host && emitted == total_tools {
+                    out.push_str(",\"cache_control\":{\"type\":\"ephemeral\"}");
+                }
                 out.push('}');
             }
             out.push(']');
         }
         ProviderKind::Google => {
-            out.push_str(",\"tools\":[{\"functionDeclarations\":[{\"name\":\"emit_copilot_turn\",\"description\":\"최종 답변과 편집 작업 목록을 구조화해 반환한다.\",\"parametersJsonSchema\":");
-            out.push_str(&emit_schema);
-            out.push('}');
+            out.push_str(",\"tools\":[{\"functionDeclarations\":[");
+            let mut wrote = false;
+            if let Some(schema) = &emit_schema {
+                out.push_str("{\"name\":\"emit_copilot_turn\",\"description\":\"최종 답변과 편집 작업 목록을 구조화해 반환한다.\",\"parametersJsonSchema\":");
+                out.push_str(schema);
+                out.push('}');
+                wrote = true;
+            }
             for t in &read_tools {
-                let _ = write!(out, ",{{\"name\":\"{}\",\"description\":", t.name);
+                if wrote {
+                    out.push(',');
+                }
+                let _ = write!(out, "{{\"name\":\"{}\",\"description\":", t.name);
                 push_json_str(out, t.description);
                 out.push_str(",\"parametersJsonSchema\":");
                 out.push_str(t.parameters_json);
                 out.push('}');
+                wrote = true;
             }
             out.push_str("]}]");
         }

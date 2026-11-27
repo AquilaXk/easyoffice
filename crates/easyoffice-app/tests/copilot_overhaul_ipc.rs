@@ -771,7 +771,12 @@ fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed(
     }"#;
     let (g_res, g_reqs) = dispatch_raw_llm(ghost_req, &hallucinated_tool_reply);
     let g_obj = parse_obj(&g_res.expect("ghost request ok"));
-    assert!(g_reqs[0].body_json.contains("\"emit_copilot_turn\""));
+    assert!(
+        !g_reqs[0].body_json.contains("\"emit_copilot_turn\"")
+            && !g_reqs[0].body_json.contains("\"tools\""),
+        "read-only ask request with 0 read tools omits emit_copilot_turn and tools: {}",
+        g_reqs[0].body_json
+    );
     assert!(
         !g_reqs[0].body_json.contains("read_doc_blocks")
             && !g_reqs[0].body_json.contains("toolCalls"),
@@ -855,14 +860,29 @@ fn read_doc_blocks_tool_is_exposed_only_when_paragraphs_are_omitted_or_windowed(
     let (_, over_200_reqs) = dispatch_raw_llm(&over_200_req, &ok_openai);
     assert!(over_200_reqs[0].body_json.contains("\"read_doc_blocks\""));
 
-    // 5. Sparse empty slot (`""`) exposes `read_doc_blocks`
+    // 5. Genuine blank paragraph (`""`) does NOT expose `read_doc_blocks`, while sparse `null` slot DOES
+    let blank_req = r#"{
+        "action":"copilot_run",
+        "mode":"edit",
+        "module":"HWP",
+        "prompt":"빈 문단 확인",
+        "provider":{"kind":"anthropic","baseUrl":"https://93.184.216.34/v1","model":"claude-sonnet-4-5","apiKey":"sk-ant-test"},
+        "context":{"doc":{"paragraphs":["첫 문단","","셋째 문단"],"omittedParagraphs":0}}
+    }"#;
+    let (_, blank_reqs) = dispatch_raw_llm(blank_req, ok_anthropic);
+    assert!(
+        !blank_reqs[0].body_json.contains("read_doc_blocks"),
+        "genuine blank paragraph must not trigger read_doc_blocks: {}",
+        blank_reqs[0].body_json
+    );
+
     let sparse_req = r#"{
         "action":"copilot_run",
         "mode":"edit",
         "module":"HWP",
         "prompt":"빈 구간 조회",
         "provider":{"kind":"anthropic","baseUrl":"https://93.184.216.34/v1","model":"claude-sonnet-4-5","apiKey":"sk-ant-test"},
-        "context":{"doc":{"paragraphs":["첫 문단","","셋째 문단"],"omittedParagraphs":0}}
+        "context":{"doc":{"paragraphs":["첫 문단",null,"셋째 문단"],"omittedParagraphs":0}}
     }"#;
     let (_, sparse_reqs) = dispatch_raw_llm(sparse_req, ok_anthropic);
     assert!(sparse_reqs[0].body_json.contains("\"read_doc_blocks\""));

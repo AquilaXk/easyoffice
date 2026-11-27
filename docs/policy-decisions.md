@@ -6345,3 +6345,43 @@
 - **Trade-offs** (1) `SHEET`의 `서식 > 맞춤` 메뉴·도구 단추·네이티브 메뉴는 `가로`·`세로` 접두어를 빼고 가로 `가운데 맞춤`, 세로 `위쪽 맞춤`·`가운데 맞춤`·`아래쪽 맞춤`으로 쓴다. 근거는 표준 오피스 스프레드시트 한국어판 지원 문서의 「셀에서 텍스트 맞춤」 3·4단계(2026-11-27 확인)이며, 세로는 `위쪽 맞춤`·`가운데 맞춤`·`아래쪽 맞춤`, 가로는 `텍스트 왼쪽 맞춤`·`가운데 맞춤`·`텍스트 오른쪽 맞춤`으로 적혀 있다. 이 문서에 `중간 맞춤`은 없어 세로 중간도 `가운데 맞춤`으로 두며 아이콘으로 구분한다. 가로 왼쪽·오른쪽도 이 문서에 따라 메뉴·도구 단추 툴팁·네이티브 메뉴에서 `텍스트 왼쪽 맞춤`·`텍스트 오른쪽 맞춤`으로 쓴다(두 줄 단추 글자는 `왼쪽 맞춤`·`오른쪽 맞춤`으로 둔다). `셀 서식` 대화상자 목록(`sheet-look-ui.js`)은 그대로 둔다. (2) `items.rs`의 1,000줄 상한과 `rustfmt` 포맷을 함께 만족하도록 `sc!` 축약 매크로를 도입해 `rust-menu-table.mjs` 정규식 확장에 맞췄다.
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-*.mjs`, `cargo fmt --all -- --check`, `cargo test -p easyoffice-desktop`, `cargo test -p easyoffice-app`, `cargo build -p easyoffice-app`, `cargo run -p easyoffice-app -- --self-test`, `node scripts/hwp-studio-harness.mjs`, `node scripts/hwp-roundtrip-cdp.mjs --app ./target/debug/easyoffice-app`, headless Chrome light/dark CDP screenshot inspection.
 - **Revisit when** 신규 모듈 메뉴·대화상자 문구가 추가될 때.
+
+## PD-361 — 코파일럿 토큰 사용 최적화: 4계층 프롬프트 캐시 정합화, 실시간 평문 스트리밍 복구, 모듈별 고밀도 문맥 압축 및 부분 교체 (`2026-11-27`)
+
+- **Context** `PD-360` 개편 이후에도 코파일럿 요청은 (1) PII 조건부 시스템 꼬리 문구 추가와 이력 슬라이딩 윈도우·루프 이력 혼입으로 제공자 프롬프트 캐시 접두사가 매 턴 깨졌고 (2) 읽기 전용(`ask`·`PDF`)과 고스트 예측까지 거대한 `emit_copilot_turn` JSON 도구 스키마를 실어 보내 실시간 첫 토큰 스트리밍이 막혔으며 (3) `DOC`/`HWP` 빈 문단 오탐·64 KiB 초과 한글 뒷문단 절단, `SHEET`/`BASE`/`SLIDE`/`PDF` 저밀도 직렬화, 에이전트 루프 중복 읽기·거대 실패 JSON 재전송이 토큰과 지연을 불필요하게 키웠다.
+- **Decision (`PD-361`)**
+  1. **P0 — 4계층 프롬프트 캐시 정합화, 루프 분리, 전 제공자 `usage` 계측 및 무료 연결 시험 (`cache.rs` · `usage.rs` · `providers.rs` · `llm_client.rs` · `mod.rs` · `copilot-context-compact.js` · `copilot-agent-loop.js`)**:
+     - `CopilotRunRequest`에 `loopSteps`(`loop_steps`), `promptCacheKey`(`prompt_cache_key`, 512바이트 상한 초과 시 Fail-Closed 거부), `lightweight` 필드를 추가했다(`ipc_commands = 15` 불변).
+     - 메시지 조립을 `[1. 정적 tools + 정적 system_prompt] -> [2. 청크 고정 priorHistory] -> [3. 현재 턴 <document_context> + 사용자 prompt] -> [4. loopSteps]` 4계층으로 분리했다. 단 불변 읽기 전용 `PDF` 모듈에서 `priorHistory`가 있으면 `<document_context>`를 `priorHistory` 앞에 두어 후속 질문에서도 문서 캐시를 유지한다.
+     - `llm_client.rs`의 조건부 PII 시스템 꼬리 문구를 없애고 정적 `system_prompt`에 1문장 상시 규칙으로 흡수해 PII 유무와 무관하게 시스템 접두사 바이트 일치를 유지한다(`PiiVault` 치환·복원 순서는 `prompt` -> `context` -> `loopSteps` 유지).
+     - `copilot-agent-loop.js`는 도구 결과·검증 오류를 `priorHistory`(`workingHistory`)에 섞지 않고 `loopSteps`에만 쌓으며 원래 질문 중복 삽입과 `history[].content` 이중 필드를 없앴다.
+     - 공식 Anthropic 호스트(`is_official_anthropic_host`)에는 요청 루트에 최상위 `"cache_control":{"type":"ephemeral"}`과 블록 배열 본문(`[{"type":"text","text":...}]`) 및 정적 시스템·마지막 도구 캐시 브레이크포인트를 적용한다. 공식 OpenAI 호스트(`ProviderKind::OpenAi && is_official_openai_host`)에만 SHA-256 64자 `prompt_cache_key`와 스트리밍 `stream_options.include_usage: true`를 주입하고 호환 제공자(`Mistral`·`Groq`·`Ollama`·`LmStudio`·`RemoteHttps`·`LocalHttp`)에는 주입하지 않아 HTTP 400을 막는다.
+     - `usage.rs`로 OpenAI·Anthropic·Google의 입력·출력·캐시·추론 토큰을 정규화해 `CopilotRunResponse.usage`로 반환한다. `copilot_test_provider`는 모델 지정 여부와 무관하게 무료 `GET /models`를 먼저 조회해 해당 모델이 확인되면 즉시 성공을 반환하고 목록 외·미지원일 때만 `max_tokens: 1`(`maxOutputTokens: 1`) 최소 핑으로 폴백한다.
+  2. **P0 — 전 모듈 고밀도 문맥 압축 및 `DOC`/`HWP` 절단·오탐 수리 (`compact.rs` · `context.rs` · `copilot-doc-html.js` · `copilot-ext-ops.js` · `copilot-actions.js` · `apps/hwp-studio/src/embed/copilot-bridge.ts`)**:
+     - `DocContext.paragraphs`를 `Vec<Option<String>>`으로 바꾸어 실제 빈 문단(`""`)과 미적재 희소 슬롯(`null`)을 분리했다. 빈 문단 `""`만 있는 문서는 `doc_has_unread_blocks == false`를 유지하며 `copilot-ext-ops.js`의 `snap.byIndex` 미적재 슬롯과 `copilot-bridge.ts`의 64 KiB 초과 `truncatedByBytes` 이후 문단을 `null`·`omittedParagraphs`로 구분해 뒷문단 누락을 고쳤다.
+     - `doc.selected_text`가 적재된 단일 문단 전체와 일치하면 하단 `선택 텍스트:` 중복 출력을 생략하고 `copilot-doc-html.js` `serializeTableBlock`은 서식 없는 평문 표를 마크다운 파이프 표로 직렬화한다.
+     - `SHEET`는 탭 목록·사용 범위 요약 1줄과 `selection.range` 셀 최우선 창 적재를 적용하고 `raw == value` 중복 제거 및 열 방향 3행 이상 동형 수식 `{r}` 병합·밀집 TSV 격자를 출력한다. `BASE`는 `  [i] v1 | v2` 파이프 행으로 직렬화하고 `PDF`는 `activePage` 중심 `window::select_window`를 적용하며 `SLIDE`는 중복 `body`·빈 `노트`·기본 레이아웃(`titleAndContent`)을 생략한다.
+  3. **P1 — 실시간 스트리밍 복구, 스키마 경량화 및 고스트 예측 경량 경로 (`prompt.rs` · `schema.rs` · `stream.rs` · `copilot-ghost.js`)**:
+     - `req.lightweight` 요청은 `tools` 미전송, 평문 응답, 출력 상한 96토큰, 추론 비활성으로 처리하고 `copilot-ghost.js`에 `lightweight: true` 및 중복 `selectedText` 제거를 적용했다.
+     - `req.is_read_only()`(`ask`·`PDF`)에서는 공식 3대 제공자의 `emit_copilot_turn` 강제 도구를 없애고 필요한 읽기 도구만 노출해(0개면 `tools` 생략) 첫 토큰부터 평문 실시간 스트리밍을 복구했다(JSON 폴백 파싱 호환 유지).
+     - `edit` 스키마에서는 중복 `reasoning`·`locations`를 빼고(응답 파서는 하위 호환 유지) `SLIDE_ELEMENT_SCHEMA` 인라인 중복을 `$defs.SlideEl` 단일 정의로 모았으며 `req.command`가 있으면 단일 허용 연산 스키마만 노출하고 `module_edit_guide`를 압축 시그니처로 줄였다. `StreamAssembler`는 `emit_copilot_turn` 인자 JSON 조각에서 `"reply":"..."`만 UTF-16 대리쌍 안전 복원·`StreamingPiiRestorer` 경유로 증분 스트리밍한다.
+  4. **P2 — 단독 선택 명령 추론 상한, 루프 영수증 압축 및 `doc.replace_span` (`types.rs` · `op_types.rs` · `op_serialize.rs` · `operations.rs` · `copilot-context-compact.js` · `copilot-perform.js`)**:
+     - 대화 이력(`history`·`loopSteps`)이 비어 있는 단독 선택 명령(`FixSpelling`·`Shorten`·`Lengthen`·`Rewrite`·`Translate`)만 `ReasoningEffort::Low` 상한을 적용하고 후속 대화가 있으면 사용자 설정을 유지해 접두사 캐시를 보존한다.
+     - `copilot-context-compact.js`는 4개 정렬 청크 단위 이력 퇴출, 동일 읽기 도구 정규화+SHA-256 캐시 영수증, 오래된 `loopSteps` 영수증 축약, 검증 재시도 시 거대 `operations` JSON 대신 연산 종류·대상 요약만 누적한다.
+     - `DOC`·`HWP`에 `doc.replace_span`(`index`, `search`, `replace`)을 추가했다(공백 전용 `search`·부재·중복 일치 시 Fail-Closed 드롭, `PiiVault` 선복원 후 일치 검증, 형제 인라인 서식 런 및 변경 내용 추적·단일 실행 취소 보존).
+- **실측 바이트 절감 (`main` 대비 `HEAD`, 동일 요청 기준)**
+  - `SLIDE` edit 요청(`body_bytes`): `4,499 B -> 3,224 B` (`-28.3%`)
+  - `DOC` `fix_spelling` 단독 명령(`body_bytes`): `3,432 B -> 1,991 B` (`-42.0%`; 문맥 `165 B -> 120 B`)
+  - `DOC` `ask` 요청(`body_bytes`): `1,479 B -> 848 B` (`-42.7%`)
+  - `DOC` 고스트 예측(`lightweight`, `body_bytes`): `1,566 B -> 791 B` (`-49.5%`)
+  - `SHEET` 60셀(20행 동형 수식, `<document_context>`): `1,744 B -> 496 B` (`-71.6%`; 전체 `body_bytes` `3,675 B -> 1,864 B`, `-49.3%`)
+  - `BASE` 100행(`<document_context>`): `6,760 B -> 4,260 B` (`-37.0%`; 전체 `body_bytes` `8,217 B -> 5,086 B`, `-38.1%`)
+  - `SLIDE` 5슬라이드(`<document_context>`): `683 B -> 478 B` (`-30.0%`; 전체 `body_bytes` `2,063 B -> 1,227 B`, `-40.5%`)
+  - `DOC` 4×3 평문 표(`serializeBlockForContext`): `263 B -> 116 B` (`-55.9%`)
+  - `SHEET` 20셀 2턴 검증 재시도 IPC 요청(이력 10건 포함): 전체 요청 `7,862 B -> 998 B` (`-87.3%`; 이력·루프 구간 `7,688 B -> 809 B`, `-89.5%`)
+- **재사용 판단 (구현 원칙 3단계)** (1) `PD-269`에 따라 `Cargo.lock` 신규 외부 크레이트나 npm 패키지를 0건으로 유지했다. (2) 워크스페이스 기존 `sha2`, `window::select_window`, `PiiVault`·`StreamingPiiRestorer`, `ipc_commands = 15`를 그대로 연결·재사용했다. (3) 캐시 키 정규화·계층 배치·다중 제공자 `usage` 파싱·스프레드시트 격자/동형 수식 압축·중복 읽기 SHA-256 영수증 알고리즘은 허용 라이선스(`Apache-2.0`·`MIT`) 참조 구현을 이식하고 각 파일 머리 주석과 `THIRD_PARTY_NOTICES.md`에 출처를 남겼으며 1,000줄 파일 상한에 맞추어 Rust(`copilot/{cache,usage,compact}.rs`)와 WebUI(`copilot-context-compact.js`)로 분리했다.
+- **Why** 대화 이력 누적과 읽기/예측·대형 문서·멀티턴 검증 루프가 빚는 토큰 낭비와 캐시 미스를 줄이고 첫 토큰 스트리밍 지연과 `DOC`/`HWP` 문단 절단 결함을 해소한다.
+- **Trade-offs** (1) `HWP` `replace_span`은 컨트롤 앵커 손상을 막기 위해 단일 문단 평문 유일 일치로 한정했다. (2) 이력 상한 퇴출은 최근성을 1~3건 잃더라도 캐시 접두사 안정성을 위해 4개 정렬 청크 단위로 잘라낸다. (3) 호환 제공자 다수가 `stream_options.include_usage`나 `prompt_cache_key`로 HTTP 400을 내므로 공식 OpenAI/Anthropic 호스트에만 캐시·사용량 확장을 주입한다.
+- **Alternatives rejected** (1) OpenAI 호환 전 제공자에 일괄 `prompt_cache_key`와 `include_usage`를 주입하는 방식: 로컬·호환 서버 HTTP 400 유발로 기각했다. (2) `DOC` 평문 표 마크다운 변환을 서식이 섞인 표까지 강제 적용하는 방식: 인라인 서식·표 속성 손실이 나므로 무서식 평문 표에만 한정했다. (3) 멀티턴 `priorHistory`와 `loopSteps`를 단일 배열로 섞는 방식: 도구 결과와 재시도 오류가 이전 대화 캐시 접두사를 깨고 영수증 축약을 어렵게 해 분리했다.
+- **Verified by** `crates/easyoffice-app/tests/copilot_token_opt_pd361.rs`, `crates/easyoffice-app/tests/copilot_{engine_pd253,gaps_pd267,overhaul_ipc,providers_pd253,stream_pd268,window_pd268}.rs`, `scripts/test-webui-copilot-token-opt.mjs`, `scripts/test-webui-copilot-overhaul.mjs`, `scripts/test-hwp-studio.mjs`, `node scripts/check-hwp-studio-bundle.mjs`, `node scripts/verify-licenses.mjs`, `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-*.mjs`, `cargo fmt --all -- --check`, `cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings`, `cargo test --workspace --exclude easyoffice-desktop`, `cargo run -p easyoffice-app -- --self-test`, `cargo clippy -p easyoffice-desktop --all-targets -- -D warnings`, `cargo test -p easyoffice-desktop`.
+- **Revisit when** 실시간 과금 UI가 캐시·추론 토큰 단가를 표시해야 하거나 `HWP` 표 셀 내부 부분 교체 RPC가 추가될 때.

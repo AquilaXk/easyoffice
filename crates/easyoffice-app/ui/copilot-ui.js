@@ -554,11 +554,15 @@
 
     function buildHistoryPayload() {
       const completed = messages.filter((m) => !m.pending && !m.error);
-      return completed.slice(-MAX_HISTORY_ITEMS).map((m) => {
-        const text = m.role === "user" ? String(m.text || "") : String(m.reply || "");
-        return { role: m.role, text, content: text };
-      });
+      const raw = completed.slice(-MAX_HISTORY_ITEMS).map((m) => ({
+        role: m.role,
+        text: m.role === "user" ? String(m.text || "") : String(m.reply || ""),
+      }));
+      const compactApi = host.__EASYOFFICE_COPILOT_CONTEXT_COMPACT__;
+      return compactApi ? compactApi.compactHistory(raw, MAX_HISTORY_ITEMS) : raw;
     }
+
+    let promptCacheSession = "s-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 
     function newRequestId() {
       return "cp-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8) + "-" + turnCounter;
@@ -657,6 +661,7 @@
         const baseReq = {
           action: "copilot_run",
           requestId: turn.requestId,
+          promptCacheKey: promptCacheSession,
           mode,
           module: mod,
           prompt: turn.request.prompt,

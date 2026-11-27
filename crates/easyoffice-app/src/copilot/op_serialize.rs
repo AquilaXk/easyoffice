@@ -43,7 +43,11 @@ pub fn serialize_run_response(resp: &CopilotRunResponse) -> String {
             write_tool_call_json(&mut out, tc);
         }
     }
-    out.push_str("]}");
+    out.push(']');
+    if let Some(usage) = resp.usage {
+        super::usage::write_usage_json_field(&mut out, usage);
+    }
+    out.push('}');
     out
 }
 
@@ -318,6 +322,20 @@ pub fn write_operation_json(out: &mut String, op: &CopilotOperation) {
                 out.push('}');
             }
             out.push_str("]}");
+        }
+        CopilotOperation::DocReplaceSpan {
+            index,
+            search,
+            replace,
+        } => {
+            let _ = write!(
+                out,
+                "{{\"kind\":\"doc.replace_span\",\"index\":{index},\"search\":"
+            );
+            push_json_str(out, search);
+            out.push_str(",\"replace\":");
+            push_json_str(out, replace);
+            out.push('}');
         }
         CopilotOperation::DocReplaceRange {
             start_index,

@@ -16,8 +16,8 @@ use super::types::{
     CopilotCommand, CopilotLocation, CopilotModule, CopilotOperation, CopilotRunRequest, DocBlock,
     DocReplacement, SheetWriteCell, MAX_CHART_HEIGHT, MAX_CHART_SERIES, MAX_CHART_TITLE_CHARS,
     MAX_CHART_WIDTH, MAX_DOC_APPEND_BLOCKS, MAX_DOC_TABLE_COLS, MAX_DOC_TABLE_ROWS,
-    MAX_LLM_LOCATIONS, MAX_LLM_OPERATIONS, MAX_SHEET_WRITE_CELLS, MAX_SLIDES, MAX_SLIDE_BULLETS,
-    MIN_CHART_HEIGHT, MIN_CHART_WIDTH,
+    MAX_LLM_LOCATIONS, MAX_LLM_OPERATIONS, MAX_PROMPT_CONTEXT_BYTES, MAX_SHEET_WRITE_CELLS,
+    MAX_SLIDES, MAX_SLIDE_BULLETS, MIN_CHART_HEIGHT, MIN_CHART_WIDTH,
 };
 
 /// 검사를 통과한 작업과 버린 작업 수.
@@ -61,12 +61,31 @@ fn op_matches_module(kind: &str, module: CopilotModule) -> bool {
     match module {
         CopilotModule::Sheet => kind.starts_with("sheet."),
         CopilotModule::Doc => kind.starts_with("doc."),
-        CopilotModule::Hwp => matches!(kind, "doc.append" | "doc.replace_paragraphs"),
+        CopilotModule::Hwp => {
+            matches!(
+                kind,
+                "doc.append" | "doc.replace_paragraphs" | "doc.replace_span"
+            )
+        }
         CopilotModule::Slide => kind.starts_with("slide."),
         CopilotModule::Base => kind.starts_with("base."),
         CopilotModule::Board => kind.starts_with("board."),
         CopilotModule::Pdf => false,
     }
+}
+
+fn strip_simple_inline_tags(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_tag = false;
+    for ch in text.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' if in_tag => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// 선택 영역 명령의 결과는 선택한 문단(칸)을 바꾸는 작업 하나만 받는다.
@@ -86,6 +105,11 @@ fn restrict_to_command(
                 CopilotOperation::DocReplaceParagraphs { replacements } => replacements
                     .iter()
                     .all(|r| (start..=end).contains(&r.index)),
+                CopilotOperation::DocReplaceSpan { index, .. }
+                    if req.command != Some(CopilotCommand::VisualizeTable) =>
+                {
+                    (start..=end).contains(index)
+                }
                 CopilotOperation::DocReplaceRange {
                     start_index: Some(s),
                     end_index: Some(e),
@@ -402,6 +426,48 @@ fn validate_single_operation(
             }
             (!replacements.is_empty())
                 .then_some(CopilotOperation::DocReplaceParagraphs { replacements })
+        }
+        "doc.replace_span" => {
+            let max_para = req
+                .context
+                .doc
+                .as_ref()
+                .map(|d| d.paragraphs.len() + d.omitted_paragraphs)
+                .unwrap_or(usize::MAX);
+            let index = opt_usize(obj, "index")?;
+            if index >= max_para {
+                return None;
+            }
+            let search = StrictJsonValue::get_str(obj, "search")?;
+            let replace = StrictJsonValue::get_str(obj, "replace")?;
+            if search.trim().is_empty()
+                || search.len() > 8_192
+                || replace.len() > MAX_PROMPT_CONTEXT_BYTES
+            {
+                return None;
+            }
+            if let Some(Some(para_text)) = req
+                .context
+                .doc
+                .as_ref()
+                .and_then(|d| d.paragraphs.get(index))
+            {
+                let raw_hits = para_text.match_indices(search).count();
+                if raw_hits > 1 {
+                    return None;
+                }
+                if raw_hits == 0 {
+                    let plain = strip_simple_inline_tags(para_text);
+                    if plain.match_indices(search).count() != 1 {
+                        return None;
+                    }
+                }
+            }
+            Some(CopilotOperation::DocReplaceSpan {
+                index,
+                search: search.to_string(),
+                replace: replace.to_string(),
+            })
         }
         "doc.scrub_pii" => Some(CopilotOperation::DocScrubPii),
         "slide.add" => {

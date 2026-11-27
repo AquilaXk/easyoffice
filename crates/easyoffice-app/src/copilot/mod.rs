@@ -2,7 +2,9 @@
 
 use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
 
+pub mod cache;
 pub mod cancel;
+pub mod compact;
 pub mod context;
 pub mod llm_client;
 pub mod op_serialize;
@@ -16,6 +18,7 @@ pub mod schema;
 pub mod ssrf;
 pub mod stream;
 pub mod types;
+pub mod usage;
 pub mod window;
 pub mod wire;
 
@@ -77,15 +80,37 @@ fn handle_test_provider(
             &provider.base_url,
             target,
         )?;
-        return llm_client::test_provider_models_endpoint(&provider, &endpoint, llm);
+        return llm_client::test_provider_models_endpoint(&provider, &endpoint, None, llm);
     }
-    let target = chat_endpoint_target(&provider, false);
-    let endpoint = ssrf::validate_provider_target(
+    // 모델이 지정된 경우에도 엔드포인트 보안 검증 후 무료 GET /models를 우선 확인한다.
+    let chat_target = chat_endpoint_target(&provider, false);
+    let chat_endpoint = ssrf::validate_provider_target(
         provider.kind.is_local_loopback(),
         &provider.base_url,
-        target,
+        chat_target,
     )?;
-    llm_client::test_provider_endpoint(&provider, &endpoint, llm)
+    let models_target = models_endpoint_target(&provider);
+    if let Ok(models_endpoint) = ssrf::validate_provider_target(
+        provider.kind.is_local_loopback(),
+        &provider.base_url,
+        models_target,
+    ) {
+        match llm_client::test_provider_models_endpoint(
+            &provider,
+            &models_endpoint,
+            Some(&provider.model),
+            llm,
+        ) {
+            Ok(json) => return Ok(json),
+            Err(
+                err @ (EasyOfficeError::SecurityViolation(_)
+                | EasyOfficeError::ResourceBudgetExceeded(_)),
+            ) => return Err(err),
+            Err(err) if llm_client::should_fail_closed_on_test_error(&err) => return Err(err),
+            Err(_) => {}
+        }
+    }
+    llm_client::test_provider_endpoint(&provider, &chat_endpoint, llm)
 }
 
 fn handle_list_models(

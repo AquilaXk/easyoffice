@@ -43,6 +43,8 @@ pub const MAX_BOARD_NODES: usize = 256;
 pub const MAX_BOARD_CONNECTORS: usize = 1_024;
 pub const MAX_BOARD_TEXT_BYTES: usize = 1_024;
 pub const MAX_OUTPUT_TOKENS: u32 = 8_192;
+pub const LIGHTWEIGHT_MAX_OUTPUT_TOKENS: u32 = 96;
+pub const MAX_PROMPT_CACHE_KEY_BYTES: usize = 512;
 pub const MAX_SLIDES: usize = 256;
 pub const MAX_SLIDE_BULLETS: usize = 64;
 pub const MAX_SLIDE_ELEMENTS: usize = 64;
@@ -401,6 +403,9 @@ pub struct CopilotRunRequest {
     pub command: Option<CopilotCommand>,
     pub prompt: String,
     pub history: Vec<HistoryMessage>,
+    pub loop_steps: Vec<HistoryMessage>,
+    pub prompt_cache_key: Option<String>,
+    pub lightweight: bool,
     pub selection: SelectionContext,
     pub context: CopilotContext,
     pub provider: ProviderConfig,
@@ -410,6 +415,54 @@ impl CopilotRunRequest {
     /// 질문 모드이거나 편집 연산이 없는 모듈(`PDF`)이면 모델이 돌려준 연산은 전부 버린다.
     pub fn is_read_only(&self) -> bool {
         self.mode == CopilotMode::Ask || self.module.is_ask_only()
+    }
+
+    /// 대화 이력(`history`·`loop_steps`)이 없으면 단순 문단 선택 명령의 추론 강도를 `low`로 제한해 토큰을 아낀다.
+    /// 이력이 이어지는 멀티턴 대화에서는 프롬프트 캐시 보존을 위해 사용자 설정 `reasoning_effort`를 유지한다.
+    pub fn effective_reasoning_effort(&self) -> Option<ReasoningEffort> {
+        if self.lightweight {
+            return None;
+        }
+        let effort = self.provider.reasoning_effort?;
+        if self.history.is_empty()
+            && self.loop_steps.is_empty()
+            && matches!(
+                self.command,
+                Some(
+                    CopilotCommand::FixSpelling
+                        | CopilotCommand::Shorten
+                        | CopilotCommand::Lengthen
+                        | CopilotCommand::Rewrite
+                        | CopilotCommand::Translate
+                )
+            )
+        {
+            return Some(ReasoningEffort::Low);
+        }
+        Some(effort)
+    }
+
+    #[cfg(test)]
+    pub fn default_for_test(module: CopilotModule) -> Self {
+        Self {
+            mode: CopilotMode::Ask,
+            module,
+            command: None,
+            prompt: "확인".to_string(),
+            history: Vec::new(),
+            loop_steps: Vec::new(),
+            prompt_cache_key: None,
+            lightweight: false,
+            selection: SelectionContext::default(),
+            context: CopilotContext::default(),
+            provider: ProviderConfig {
+                kind: ProviderKind::OpenAi,
+                base_url: "https://api.openai.com/v1".to_string(),
+                model: "gpt-4o".to_string(),
+                api_key: "sk-test".to_string(),
+                reasoning_effort: None,
+            },
+        }
     }
 }
 
@@ -607,7 +660,28 @@ pub fn parse_run_request(
         ));
     }
 
-    let history = parse_history(entries)?;
+    let history = parse_history_field(entries, "history")?;
+    let loop_steps = parse_history_field(entries, "loopSteps")?;
+    if history.len().saturating_add(loop_steps.len()) > MAX_HISTORY_ITEMS * 2 {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(
+            "대화 및 루프 단계 총 개수가 상한을 초과했습니다.".to_string(),
+        ));
+    }
+    let prompt_cache_key = match opt_str(entries, "promptCacheKey")? {
+        Some(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.len() > MAX_PROMPT_CACHE_KEY_BYTES {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                    "promptCacheKey 크기가 상한({MAX_PROMPT_CACHE_KEY_BYTES} bytes)을 초과했습니다."
+                )));
+            }
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        }
+        None => None,
+    };
+    let lightweight = StrictJsonValue::get_field(entries, "lightweight")
+        .and_then(StrictJsonValue::as_bool)
+        .unwrap_or(false);
     let selection = parse_selection(entries)?;
     let context = parse_context(entries)?;
     let provider = parse_provider_config(entries)?;
@@ -622,34 +696,38 @@ pub fn parse_run_request(
         command,
         prompt,
         history,
+        loop_steps,
+        prompt_cache_key,
+        lightweight,
         selection,
         context,
         provider,
     })
 }
 
-fn parse_history(
+fn parse_history_field(
     entries: &[(String, StrictJsonValue)],
+    field_name: &str,
 ) -> Result<Vec<HistoryMessage>, EasyOfficeError> {
-    let Some(val) = StrictJsonValue::get_field(entries, "history") else {
+    let Some(val) = StrictJsonValue::get_field(entries, field_name) else {
         return Ok(Vec::new());
     };
     if matches!(val, StrictJsonValue::Null) {
         return Ok(Vec::new());
     }
     let items = val.as_array().ok_or_else(|| {
-        EasyOfficeError::InvalidArgument("'history' 필드는 배열이어야 합니다.".to_string())
+        EasyOfficeError::InvalidArgument(format!("'{field_name}' 필드는 배열이어야 합니다."))
     })?;
     if items.len() > MAX_HISTORY_ITEMS {
         return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-            "대화 기록 항목 수({})가 상한({MAX_HISTORY_ITEMS}개)을 초과했습니다.",
+            "{field_name} 항목 수({})가 상한({MAX_HISTORY_ITEMS}개)을 초과했습니다.",
             items.len()
         )));
     }
     let mut out = Vec::with_capacity(items.len());
     for item in items {
         let obj = item.as_object().ok_or_else(|| {
-            EasyOfficeError::InvalidArgument("history 항목은 객체여야 합니다.".to_string())
+            EasyOfficeError::InvalidArgument(format!("{field_name} 항목은 객체여야 합니다."))
         })?;
         let role = match opt_str(obj, "role")?.unwrap_or("user") {
             "assistant" => "assistant".to_string(),
@@ -662,7 +740,7 @@ fn parse_history(
         let text = text_raw.trim().to_string();
         if text.len() > MAX_HISTORY_ITEM_BYTES {
             return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                "history 항목 크기가 상한({MAX_HISTORY_ITEM_BYTES} bytes)을 초과했습니다."
+                "{field_name} 항목 크기가 상한({MAX_HISTORY_ITEM_BYTES} bytes)을 초과했습니다."
             )));
         }
         if !text.is_empty() {
@@ -693,8 +771,12 @@ fn validate_command_target(
                 return invalid("선택 영역 명령에는 선택한 문단 위치가 필요합니다.");
             };
             let last = end.unwrap_or(start);
-            let known = context.doc.as_ref().map_or(0, |doc| doc.paragraphs.len());
-            if last < start || last >= known {
+            let valid = context.doc.as_ref().is_some_and(|doc| {
+                last >= start
+                    && last < doc.paragraphs.len()
+                    && (start..=last).all(|i| doc.paragraphs[i].is_some())
+            });
+            if !valid {
                 return invalid("선택한 문단 범위가 올바르지 않습니다.");
             }
             Ok(())

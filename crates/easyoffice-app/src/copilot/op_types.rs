@@ -171,6 +171,11 @@ pub enum CopilotOperation {
     DocReplaceParagraphs {
         replacements: Vec<DocReplacement>,
     },
+    DocReplaceSpan {
+        index: usize,
+        search: String,
+        replace: String,
+    },
     DocReplaceRange {
         start_index: Option<usize>,
         end_index: Option<usize>,
@@ -266,6 +271,7 @@ pub struct CopilotRunResponse {
     pub dropped_operations: usize,
     pub locations: Vec<CopilotLocation>,
     pub tool_calls: Vec<CopilotToolCall>,
+    pub usage: Option<super::usage::TokenUsage>,
 }
 
 pub fn write_str_array(out: &mut String, items: &[String]) {

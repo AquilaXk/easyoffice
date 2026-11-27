@@ -61,6 +61,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "copilot-actions.js",
     "copilot-agent-loop.js",
     "copilot-catalog.js",
+    "copilot-context-compact.js",
     "copilot-cursor.js",
     "copilot-diff.js",
     "copilot-doc-html.js",

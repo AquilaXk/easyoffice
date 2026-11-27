@@ -41,6 +41,9 @@ pub struct SheetCellInput {
 pub struct SheetContext {
     pub name: String,
     pub cells: Vec<SheetCellInput>,
+    pub sheet_tabs: Vec<String>,
+    pub used_range: Option<String>,
+    pub total_cells: Option<usize>,
 }
 
 impl Default for SheetContext {
@@ -48,13 +51,17 @@ impl Default for SheetContext {
         Self {
             name: "Sheet1".to_string(),
             cells: Vec::new(),
+            sheet_tabs: Vec::new(),
+            used_range: None,
+            total_cells: None,
         }
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DocContext {
-    pub paragraphs: Vec<String>,
+    /// `Some("")`는 내용이 실제로 빈 문단, `None`은 창/절단으로 아직 싣지 않은 희소 슬롯이다.
+    pub paragraphs: Vec<Option<String>>,
     pub selected_text: String,
     /// 문서에는 있지만 이 요청에 싣지 못한 문단 수(클라이언트가 알린다).
     pub omitted_paragraphs: usize,
@@ -90,6 +97,7 @@ pub struct SlideContext {
 pub struct PdfContext {
     pub text: String,
     pub page_count: usize,
+    pub active_page: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -365,7 +373,43 @@ pub(super) fn parse_context(
                 .unwrap_or("Sheet1")
                 .to_string();
             let cells = parse_sheet_cells(s_obj)?;
-            Some(SheetContext { name, cells })
+            let mut sheet_tabs = Vec::new();
+            for tab_val in bounded_array(
+                s_obj,
+                if StrictJsonValue::get_field(s_obj, "tabs").is_some() {
+                    "tabs"
+                } else {
+                    "sheets"
+                },
+                MAX_BASE_TABLES,
+                "context.sheet.tabs",
+            )? {
+                let s = tab_val.as_str().ok_or_else(|| {
+                    EasyOfficeError::InvalidArgument(
+                        "'context.sheet.tabs' 항목은 문자열이어야 합니다.".to_string(),
+                    )
+                })?;
+                if s.len() > 128 {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "시트 탭 이름 길이가 상한(128 bytes)을 초과했습니다.".to_string(),
+                    ));
+                }
+                if !s.trim().is_empty() {
+                    sheet_tabs.push(s.trim().to_string());
+                }
+            }
+            let used_range = opt_str(s_obj, "usedRange")?
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && s.len() <= 64)
+                .map(ToString::to_string);
+            let total_cells = opt_usize_field(s_obj, "totalCells");
+            Some(SheetContext {
+                name,
+                cells,
+                sheet_tabs,
+                used_range,
+                total_cells,
+            })
         }
     } else {
         None
@@ -414,7 +458,12 @@ pub(super) fn parse_context(
                 .and_then(StrictJsonValue::as_u64)
                 .and_then(|v| usize::try_from(v).ok())
                 .unwrap_or(0);
-            Some(PdfContext { text, page_count })
+            let active_page = opt_usize_field(p_obj, "activePage").filter(|&p| p >= 1);
+            Some(PdfContext {
+                text,
+                page_count,
+                active_page,
+            })
         }
     } else {
         None
@@ -497,18 +546,23 @@ fn parse_doc_context(obj: &[(String, StrictJsonValue)]) -> Result<DocContext, Ea
             }
             let mut out = Vec::with_capacity(items.len());
             for item in items {
-                let s = item.as_str().ok_or_else(|| {
-                    EasyOfficeError::InvalidArgument(
-                        "'doc.paragraphs' 항목은 문자열이어야 합니다.".to_string(),
-                    )
-                })?;
-                total_bytes = total_bytes.saturating_add(s.len());
-                if total_bytes > MAX_TEXT_CONTEXT_BYTES {
-                    return Err(EasyOfficeError::ResourceBudgetExceeded(
-                        "문서 문단 총 크기가 상한을 초과했습니다.".to_string(),
-                    ));
+                match item {
+                    StrictJsonValue::Null => out.push(None),
+                    StrictJsonValue::Str(s) => {
+                        total_bytes = total_bytes.saturating_add(s.len());
+                        if total_bytes > MAX_TEXT_CONTEXT_BYTES {
+                            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                                "문서 문단 총 크기가 상한을 초과했습니다.".to_string(),
+                            ));
+                        }
+                        out.push(Some(s.clone()));
+                    }
+                    _ => {
+                        return Err(EasyOfficeError::InvalidArgument(
+                            "'doc.paragraphs' 항목은 문자열 또는 null이어야 합니다.".to_string(),
+                        ));
+                    }
                 }
-                out.push(s.to_string());
             }
             out
         }

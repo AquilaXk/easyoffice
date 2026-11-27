@@ -66,6 +66,17 @@
         entries.push(change("mask", "개인정보 가리기", "", "", { module: "DOC", paragraphIndex: 0 }));
         return;
       }
+      if (kind === "doc.replace_span") {
+        const index = Number(op?.index);
+        if (!Number.isInteger(index) || index < 0) return;
+        const before = index < blocks.length ? String(blocks[index].textContent || "") : "";
+        const search = String(op?.search ?? "");
+        const replace = String(op?.replace ?? "");
+        const at = search ? before.indexOf(search) : -1;
+        const after = at >= 0 ? before.slice(0, at) + replace + before.slice(at + search.length) : replace;
+        entries.push(change("replace", "문단 " + (index + 1), before, after, { module: "DOC", paragraphIndex: index }, { docIndex: index }));
+        return;
+      }
       if (kind === "doc.replace_paragraphs" && Array.isArray(op.replacements)) {
         for (const rep of op.replacements) {
           const index = Number(rep?.index);
@@ -166,8 +177,12 @@
         const blocks = editorBlocks();
         const touched = new Set();
         for (const op of ops) {
+          const kind = String(op?.op || op?.type || op?.kind || "");
+          if (kind === "doc.replace_span" && Number.isInteger(Number(op?.index))) {
+            touched.add(Number(op.index));
+          }
           for (const rep of Array.isArray(op?.replacements) ? op.replacements : []) touched.add(Number(rep?.index));
-          if (String(op?.op || op?.type || op?.kind || "") === "doc.replace_paragraphs" && !Array.isArray(op.replacements)) {
+          if (kind === "doc.replace_paragraphs" && !Array.isArray(op.replacements)) {
             // 범위 교체(범위를 생략하면 문서 전체)는 범위 안 모든 문단이 바뀌지 않았어야 한다.
             const start = Number.isInteger(op.startIndex) ? Math.max(0, op.startIndex) : 0;
             const end = Number.isInteger(op.endIndex) ? Math.min(blocks.length - 1, op.endIndex) : blocks.length - 1;

@@ -161,12 +161,30 @@
       return { sheet: getActiveSheetName(), range: getSelectionLabel("SHEET") || "A1" };
     }
 
-    function extractSheetContext() {
+    function parseSelectionBounds(rangeStr) {
+      const clean = String(rangeStr || "").trim();
+      if (!clean) return null;
+      const parts = clean.split(":");
+      if (parts.length > 2) return null;
+      const p1 = parseRef(parts[0]);
+      const p2 = parts.length === 2 ? parseRef(parts[1]) : p1;
+      if (!p1 || !p2) return null;
+      return {
+        r1: Math.min(p1.row, p2.row),
+        r2: Math.max(p1.row, p2.row),
+        c1: Math.min(p1.col, p2.col),
+        c2: Math.max(p1.col, p2.col),
+      };
+    }
+
+    function extractSheetContext(selectionRange) {
       const sc = getSheetController();
       const sheetName = getActiveSheetName();
       if (sc) sheetDataStore[sheetName] = sc.snapshotDomSheetCells();
       const map = sheetDataStore[sheetName] || {};
+      const selBounds = parseSelectionBounds(selectionRange);
       const parsed = [];
+      let minR = Infinity, maxR = 0, minC = Infinity, maxC = 0;
       for (const coord of Object.keys(map)) {
         const rec = map[coord];
         if (!rec) continue;
@@ -175,15 +193,33 @@
         if (!raw && !value) continue;
         const parts = parseRef(coord);
         if (!parts) continue;
-        parsed.push({ coord: refOf(parts.row, parts.col), row: parts.row, col: parts.col, raw, value });
+        if (parts.row < minR) minR = parts.row;
+        if (parts.row > maxR) maxR = parts.row;
+        if (parts.col < minC) minC = parts.col;
+        if (parts.col > maxC) maxC = parts.col;
+        const inSel = Boolean(
+          selBounds
+          && parts.row >= selBounds.r1 && parts.row <= selBounds.r2
+          && parts.col >= selBounds.c1 && parts.col <= selBounds.c2,
+        );
+        parsed.push({ coord: refOf(parts.row, parts.col), row: parts.row, col: parts.col, inSel, raw, value });
       }
-      parsed.sort(compareCoordEntries);
+      parsed.sort((a, b) => {
+        if (a.inSel !== b.inSel) return a.inSel ? -1 : 1;
+        return compareCoordEntries(a, b);
+      });
       const cells = parsed.slice(0, MAX_CONTEXT_CELLS).map(({ coord, raw, value }) => ({ coord, raw, value }));
-      return { name: sheetName, cells };
+      const tabs = Object.keys(sheetDataStore).slice(0, 64);
+      const usedRange = maxR >= minR && maxC >= minC ? refOf(minR, minC) + ":" + refOf(maxR, maxC) : "";
+      const out = { name: sheetName, cells };
+      if (tabs.length > 0) out.tabs = tabs;
+      if (usedRange) out.usedRange = usedRange;
+      if (parsed.length > cells.length) out.totalCells = parsed.length;
+      return out;
     }
 
     // One entry per block, empty ones included, so that an index in the context is the block index an operation
-    // names. A command target past paragraph 200 also carries its surrounding window (`SURROUNDING_PARAGRAPH_WINDOW`, PD-268).
+    // names. Out-of-window sparse slots emit `null` so the engine distinguishes unloaded blocks from genuine blanks.
     function extractDocContext(span) {
       const editor = document.getElementById("doc-editor");
       const blocks = docBlocksOf(editor);
@@ -198,8 +234,12 @@
         const inSpan = Boolean(span) && i >= span.start && i <= span.end;
         const inWindow = Boolean(span) && i >= winStart && i <= winEnd;
         const limit = inSpan ? MAX_COMMAND_SPAN_CHARS : MAX_CONTEXT_TEXT_CHARS;
-        const serialized = docHtml ? docHtml.serializeBlockForContext(blocks[i]) : String(blocks[i].textContent || "").trim();
-        paragraphs.push(inSpan || inWindow || i < MAX_CONTEXT_PARAGRAPHS ? clipCodePoints(serialized, limit) : "");
+        if (inSpan || inWindow || i < MAX_CONTEXT_PARAGRAPHS) {
+          const serialized = docHtml ? docHtml.serializeBlockForContext(blocks[i]) : String(blocks[i].textContent || "").trim();
+          paragraphs.push(clipCodePoints(serialized, limit));
+        } else {
+          paragraphs.push(null);
+        }
       }
       let selectedText = "";
       const sel = host.getSelection?.();
@@ -274,8 +314,8 @@
       const panels = getWorkspacePanels();
       panels?.syncActiveSlideDomStylesToDeck?.();
       const slides = slideDeckState.slice(0, MAX_CONTEXT_SLIDES).map((s, index) => {
-        const body = String(s?.lower || "");
-        const bullets = body.split(/\n+/).map((t) => t.trim()).filter(Boolean);
+        const rawBody = String(s?.lower || "");
+        const bullets = rawBody.split(/\n+/).map((t) => t.trim()).filter(Boolean);
         const elements = (Array.isArray(s?.elements) ? s.elements : []).slice(0, 32).map((el) => ({
           id: String(el.id || ""),
           kind: String(el.kind || ""),
@@ -285,15 +325,17 @@
           h: Number(el.h || 0),
           text: clipCodePoints(el.text || el.title || el.alt || "", 160),
         }));
-        return {
+        const item = {
           index,
           title: String(s?.title || ""),
           bullets,
-          body,
-          notes: String(s?.notes || ""),
-          layout: String(s?.layout || "titleAndContent"),
-          elements,
         };
+        const notes = String(s?.notes || "");
+        if (notes.trim()) item.notes = notes;
+        const layout = String(s?.layout || "titleAndContent");
+        if (layout && layout !== "titleAndContent") item.layout = layout;
+        if (elements.length > 0) item.elements = elements;
+        return item;
       });
       return { activeIndex: getActiveSlideIndex(), aspect: String(slideDeckState[0]?.aspect || "16:9"), slides };
     }
@@ -303,7 +345,7 @@
       if (mod === "SHEET") {
         const sheet = frozenSelection?.sheet || getActiveSheetName();
         const range = frozenSelection?.range || label || "A1";
-        return { selection: { sheet, range }, context: { sheet: extractSheetContext() } };
+        return { selection: { sheet, range }, context: { sheet: extractSheetContext(range) } };
       }
       if (mod === "DOC" || (mod === "HWP" && !extOps.getEmbedHwpHost())) {
         const sel = target?.selection;
@@ -492,6 +534,27 @@
 
       const existing = docBlocksOf(editor);
       const tracking = Boolean(docHtml?.isTrackChangesActive?.(editor));
+      if (kind === "doc.replace_span") {
+        const idx = Number(op?.index);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= existing.length) {
+          throw new Error("문서 부분 교체 대상 문단 번호가 범위를 벗어났습니다.");
+        }
+        const search = String(op?.search ?? "");
+        const replace = String(op?.replace ?? "");
+        if (docHtml?.replaceSpanWithTrackChanges) {
+          docHtml.replaceSpanWithTrackChanges(document, editor, existing[idx], search, replace);
+        } else {
+          if (!search.trim()) throw new Error("검색 대상 문자열은 비어 있을 수 없습니다.");
+          const cur = String(existing[idx].textContent || "");
+          const at = cur.indexOf(search);
+          if (at < 0 || cur.indexOf(search, at + 1) >= 0) {
+            throw new Error("변경할 대상 구간을 문단에서 유일하게 찾을 수 없습니다.");
+          }
+          existing[idx].textContent = cur.slice(0, at) + replace + cur.slice(at + search.length);
+        }
+        locations.push({ module: "DOC", label: "문단 " + (idx + 1), paragraphIndex: idx });
+        return true;
+      }
       if (kind === "doc.replace_paragraphs" && Array.isArray(op.replacements)) {
         if (op.replacements.length === 0 || op.replacements.length > MAX_CONTEXT_PARAGRAPHS) {
           throw new Error("문서 편집 문단 개수가 허용 범위를 벗어났습니다.");
@@ -714,7 +777,7 @@
               else if (kind === "sheet.format") executeSheetFormat(op, sheetDataStore[sheetName], sheetName, derivedLocations);
               else if (kind === "sheet.chart") executeSheetChart(op, sheetName, derivedLocations);
               else sheetOps.executeExtendedSheetOp(kind, op, { sheetName, sheetDataStore, sheetRowCounts, locations: derivedLocations });
-            } else if (kind === "doc.append" || kind === "doc.replace_paragraphs" || kind === "doc.scrub_pii") {
+            } else if (kind === "doc.append" || kind === "doc.replace_paragraphs" || kind === "doc.replace_span" || kind === "doc.scrub_pii") {
               touchedDoc = executeDocOperation(kind, op, derivedLocations) || touchedDoc;
             } else if (kind === "slide.add" || kind === "slide.update" || kind === "slide.add_element") {
               focusSlideIdx = executeSlideOperation(kind, op, derivedLocations);
@@ -855,69 +918,7 @@
       return preview.fingerprint(mod, operations) === expectedFp;
     }
 
-    async function locateTarget(loc) {
-      if (!loc || typeof loc !== "object") return false;
-      const mod = String(loc.module || getActiveModule()).toUpperCase();
-      if (mod !== getActiveModule() && typeof activatePane === "function") {
-        await activatePane(mod);
-      }
-      if (mod === "HWP" && extOps.getEmbedHwpHost()) {
-        return extOps.locateHwpTarget(loc);
-      }
-      if (mod === "PDF") {
-        return extOps.locatePdfTarget(loc);
-      }
-      if (mod === "SHEET") {
-        const sc = getSheetController();
-        const sheetName = String(loc.sheet || getActiveSheetName());
-        if (sheetName && sheetName !== getActiveSheetName() && sheetDataStore[sheetName]) {
-          await sc?.switchSheetTab?.(sheetName);
-        }
-        const rangeText = String(loc.range || loc.label || "").trim().toUpperCase();
-        const names = host.__EASYOFFICE_SHEET_NAMES__;
-        const nameBox = document.getElementById("active-cell-ref");
-        if (rangeText && names?.parseAddress(rangeText) && nameBox) {
-          nameBox.textContent = rangeText;
-          const ev = typeof host.KeyboardEvent === "function"
-            ? new host.KeyboardEvent("keydown", { key: "Enter", bubbles: true })
-            : { type: "keydown", key: "Enter", target: nameBox };
-          nameBox.dispatchEvent(ev);
-          return true;
-        }
-        return false;
-      }
-      if (mod === "DOC" || mod === "HWP") {
-        const editor = document.getElementById("doc-editor");
-        const blocks = docBlocksOf(editor);
-        const idx = Number.isInteger(loc.paragraphIndex) ? loc.paragraphIndex : 0;
-        const target = blocks[Math.max(0, Math.min(blocks.length - 1, idx))];
-        if (!target) return false;
-        target.scrollIntoView?.({ block: "center" });
-        editor.focus?.();
-        const sel = host.getSelection?.();
-        if (sel && document.createRange) {
-          const range = document.createRange();
-          range.setStart(target, 0);
-          range.setEnd(target, 0);
-          sel.removeAllRanges?.();
-          sel.addRange?.(range);
-        }
-        return true;
-      }
-      if (mod === "SLIDE") {
-        const idx = Number.isInteger(loc.slideIndex)
-          ? loc.slideIndex
-          : Math.max(0, (Number.parseInt(String(loc.label || "").replace(/\D+/g, ""), 10) || 1) - 1);
-        if (idx < 0 || idx >= slideDeckState.length) return false;
-        getWorkspacePanels()?.renderSlideDeck?.(idx);
-        document.getElementById("slide-thumb-list")?.querySelector(`[data-slide-idx="${idx}"]`)?.focus?.();
-        return true;
-      }
-      if (mod === "BASE" || mod === "BOARD") {
-        return true;
-      }
-      return false;
-    }
+    const locateTarget = (loc) => extOps.locateTarget?.(loc, { docBlocksOf }) ?? Promise.resolve(false);
 
     return {
       getSelectionLabel,

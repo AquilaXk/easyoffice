@@ -98,8 +98,9 @@ test("multi-turn agent loop executes on-demand read tools and self-corrects SLID
           toolCalls: [{ name: "read_doc_blocks", startIndex: 202, endIndex: 204 }],
         };
       }
-      const lastUser = req.history.at(-1)?.text || "";
-      assert.match(lastUser, /숨겨진 203번 문단/, "read_doc_blocks output fed back into turn 2");
+      const lastUser = req.loopSteps?.at(-1)?.text || "";
+      assert.deepEqual(req.history, [], "subturn tool results do not pollute priorHistory");
+      assert.match(lastUser, /숨겨진 203번 문단/, "read_doc_blocks output fed back into turn 2 via loopSteps");
       return answer([{ kind: "doc.append", blocks: [{ text: "조회 반영 문단" }] }]);
     },
   });
@@ -129,7 +130,7 @@ test("multi-turn agent loop executes on-demand read tools and self-corrects SLID
           },
         ]);
       }
-      assert.match(req.history.at(-1)?.text || "", /자동 검증 게이트 오류/, "layout_lint overflow reported back to model");
+      assert.match(req.loopSteps?.at(-1)?.text || "", /자동 검증 게이트 오류/, "layout_lint overflow reported back to model via loopSteps");
       return answer([
         {
           kind: "slide.add_element",
@@ -552,7 +553,7 @@ test("SHEET post-verification gate catches formula errors (#DIV/0!) and agent lo
           { kind: "sheet.write", sheet: sheetName, range: "C1", cells: [{ coord: "C1", raw: "=100/0" }] },
         ]);
       }
-      assert.match(req.history.at(-1)?.text || "", /#DIV\/0!/, "formula error fed back to model");
+      assert.match(req.loopSteps?.at(-1)?.text || "", /#DIV\/0!/, "formula error fed back to model via loopSteps");
       return answer([
         { kind: "sheet.write", sheet: sheetName, range: "C1", cells: [{ coord: "C1", raw: "=100/2" }] },
       ]);
@@ -623,7 +624,7 @@ test("sheet.note coord fingerprint detects note edits and sheet.structure delete
           { kind: "sheet.structure", sheet: structSheet, action: "freeze", freezeRows: 2, freezeCols: 0 },
         ]);
       }
-      assert.match(req.history.at(-1)?.text || "", /#REF!/, "deleted-row #REF! caught by dry-run verification gate");
+      assert.match(req.loopSteps?.at(-1)?.text || "", /#REF!/, "deleted-row #REF! caught by dry-run verification gate");
       return answer([
         { kind: "sheet.write", sheet: structSheet, cells: [{ coord: "A4", raw: "=A3*2" }] },
         { kind: "sheet.structure", sheet: structSheet, action: "delete_rows", at: 2, count: 1 },
@@ -684,7 +685,7 @@ test("DOC table cell HTML escaping, ul Track Changes, layout_lint offscreen clon
           { kind: "doc.append", blocks: [{ table: { headerRow: true, rows: [Array.from({ length: 12 }, (_, i) => `열${i + 1}`)] } }] },
         ]);
       }
-      assert.match(req.history.at(-1)?.text || "", /본문 가용 폭/, "wide table overflow reported by DOC layout_lint gate");
+      assert.match(req.loopSteps?.at(-1)?.text || "", /본문 가용 폭/, "wide table overflow reported by DOC layout_lint gate");
       return answer([
         { kind: "doc.append", blocks: [{ table: { headerRow: true, rows: [["조건", "식"], ["범위", "x < y & z > 0"]] } }] },
       ]);

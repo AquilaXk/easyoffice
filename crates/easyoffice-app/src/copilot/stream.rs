@@ -6,9 +6,10 @@
 use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
 use sse_core::{MessageEvent, SseDecoder, SseEvent};
 
-use super::providers::extract_provider_completion;
+use super::providers::extract_provider_completion_with_usage;
 use super::schema::{synthesize_completion_from_tools, NativeToolInvocation};
 use super::types::{ProviderKind, MAX_LLM_RESPONSE_BYTES, MAX_LLM_TOOL_CALLS};
+use super::usage::TokenUsage;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ToolCallChunk {
@@ -23,6 +24,7 @@ struct Delta {
     text: String,
     reasoning: String,
     tool_chunks: Vec<ToolCallChunk>,
+    usage: Option<TokenUsage>,
     error: Option<String>,
     done: bool,
 }
@@ -41,6 +43,7 @@ fn read_delta(kind: ProviderKind, event: &MessageEvent) -> Option<Delta> {
         delta.error = Some(error_message(err));
         return Some(delta);
     }
+    delta.usage = super::usage::extract_usage_from_root(kind, root);
     match kind {
         ProviderKind::Anthropic => read_anthropic(root, event.event.as_ref(), &mut delta),
         ProviderKind::Google => read_google(root, &mut delta),
@@ -245,6 +248,7 @@ fn parse_object(kind: ProviderKind, bytes: &[u8]) -> Option<Delta> {
     if let Some(err) = StrictJsonValue::get_field(object, "error") {
         delta.error = Some(error_message(err));
     } else {
+        delta.usage = super::usage::extract_usage_from_root(kind, object);
         match kind {
             ProviderKind::Google => read_google(object, &mut delta),
             ProviderKind::Anthropic => read_anthropic(object, "", &mut delta),
@@ -360,12 +364,179 @@ enum Wire {
     PlainJson(usize),
 }
 
+fn parse_hex4(bytes: &[u8]) -> Option<u16> {
+    if bytes.len() < 4 {
+        return None;
+    }
+    let s = std::str::from_utf8(&bytes[..4]).ok()?;
+    u16::from_str_radix(s, 16).ok()
+}
+
+fn scan_json_str_literal(bytes: &[u8], mut i: usize) -> Option<(String, usize, bool)> {
+    let mut out = String::new();
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'"' {
+            return Some((out, i + 1, true));
+        }
+        if b == b'\\' {
+            if i + 1 >= bytes.len() {
+                return Some((out, i, false));
+            }
+            match bytes[i + 1] {
+                b'"' => {
+                    out.push('"');
+                    i += 2;
+                }
+                b'\\' => {
+                    out.push('\\');
+                    i += 2;
+                }
+                b'/' => {
+                    out.push('/');
+                    i += 2;
+                }
+                b'n' => {
+                    out.push('\n');
+                    i += 2;
+                }
+                b'r' => {
+                    out.push('\r');
+                    i += 2;
+                }
+                b't' => {
+                    out.push('\t');
+                    i += 2;
+                }
+                b'b' => {
+                    out.push('\x08');
+                    i += 2;
+                }
+                b'f' => {
+                    out.push('\x0c');
+                    i += 2;
+                }
+                b'u' => {
+                    let Some(hi) = parse_hex4(&bytes[i + 2..]) else {
+                        return Some((out, i, false));
+                    };
+                    if (0xD800..=0xDBFF).contains(&hi) {
+                        if i + 12 > bytes.len() || bytes[i + 6] != b'\\' || bytes[i + 7] != b'u' {
+                            return Some((out, i, false));
+                        }
+                        let Some(lo) = parse_hex4(&bytes[i + 8..]) else {
+                            return Some((out, i, false));
+                        };
+                        if (0xDC00..=0xDFFF).contains(&lo) {
+                            let cp = 0x10000
+                                + ((u32::from(hi) - 0xD800) << 10)
+                                + (u32::from(lo) - 0xDC00);
+                            if let Some(ch) = char::from_u32(cp) {
+                                out.push(ch);
+                            }
+                            i += 12;
+                        } else {
+                            out.push('\u{FFFD}');
+                            i += 6;
+                        }
+                    } else {
+                        out.push(char::from_u32(u32::from(hi)).unwrap_or('\u{FFFD}'));
+                        i += 6;
+                    }
+                }
+                other => {
+                    out.push(char::from(other));
+                    i += 2;
+                }
+            }
+            continue;
+        }
+        let s = std::str::from_utf8(&bytes[i..]).ok()?;
+        let ch = s.chars().next()?;
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    Some((out, i, false))
+}
+
+/// `emit_copilot_turn` 도구 인자 JSON 버퍼에서 최상위 `"reply":"..."` 완성 접두사를 추출한다.
+fn extract_emit_reply_prefix(json_buf: &str) -> String {
+    let bytes = json_buf.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if bytes.get(i) != Some(&b'{') {
+        return String::new();
+    }
+    i += 1;
+    let mut depth = 1usize;
+    let mut expecting_key = true;
+    let mut saw_reply_key = false;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        if depth == 1 && b == b'"' {
+            let Some((lit, next_i, complete)) = scan_json_str_literal(bytes, i + 1) else {
+                return String::new();
+            };
+            if expecting_key {
+                saw_reply_key = complete && lit == "reply";
+                expecting_key = false;
+            } else if saw_reply_key {
+                return lit;
+            }
+            if !complete {
+                return String::new();
+            }
+            i = next_i;
+            continue;
+        }
+        if b == b'"' {
+            let Some((_, next_i, complete)) = scan_json_str_literal(bytes, i + 1) else {
+                return String::new();
+            };
+            if !complete {
+                return String::new();
+            }
+            i = next_i;
+            continue;
+        }
+        match b {
+            b'{' | b'[' => {
+                depth += 1;
+                saw_reply_key = false;
+            }
+            b'}' | b']' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    break;
+                }
+            }
+            b',' if depth == 1 => {
+                expecting_key = true;
+                saw_reply_key = false;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    String::new()
+}
+
 pub struct StreamAssembler {
     kind: ProviderKind,
     wire: Wire,
     text: String,
     reasoning: String,
     tool_slots: Vec<(usize, String, String)>,
+    emit_reply_sent: usize,
+    usage: TokenUsage,
+    has_usage: bool,
     tool_bytes: usize,
     events: u32,
     failure: Option<String>,
@@ -379,6 +550,9 @@ impl StreamAssembler {
             text: String::new(),
             reasoning: String::new(),
             tool_slots: Vec::new(),
+            emit_reply_sent: 0,
+            usage: TokenUsage::default(),
+            has_usage: false,
             tool_bytes: 0,
             events: 0,
             failure: None,
@@ -427,10 +601,15 @@ impl StreamAssembler {
             }
         };
         let mut added = String::new();
+        let mut touched_emit = false;
         match deltas {
             Ok(deltas) => {
                 for delta in deltas {
                     self.events += 1;
+                    if let Some(u) = delta.usage {
+                        self.usage.merge_latest(u);
+                        self.has_usage = true;
+                    }
                     if let Some(err) = delta.error {
                         self.failure = Some(err);
                         break;
@@ -442,11 +621,13 @@ impl StreamAssembler {
                         self.tool_bytes = self.tool_bytes.saturating_add(tc.args_piece.len());
                         if tc.slot >= MAX_LLM_TOOL_CALLS {
                             if self.tool_slots.len() < MAX_LLM_TOOL_CALLS * 2 {
+                                let is_emit = tc.name.as_deref() == Some("emit_copilot_turn");
                                 self.tool_slots.push((
                                     usize::MAX,
                                     tc.name.unwrap_or_default(),
                                     tc.args_piece,
                                 ));
+                                touched_emit |= is_emit;
                             }
                         } else if let Some(existing) =
                             self.tool_slots.iter_mut().find(|(s, _, _)| *s == tc.slot)
@@ -457,17 +638,35 @@ impl StreamAssembler {
                                 }
                             }
                             existing.2.push_str(&tc.args_piece);
+                            if existing.1 == "emit_copilot_turn" {
+                                touched_emit = true;
+                            }
                         } else if self.tool_slots.len() < MAX_LLM_TOOL_CALLS * 2 {
-                            self.tool_slots.push((
-                                tc.slot,
-                                tc.name.unwrap_or_default(),
-                                tc.args_piece,
-                            ));
+                            let name = tc.name.unwrap_or_default();
+                            if name == "emit_copilot_turn" {
+                                touched_emit = true;
+                            }
+                            self.tool_slots.push((tc.slot, name, tc.args_piece));
                         }
                     }
                 }
             }
             Err(message) => self.failure = Some(message),
+        }
+        if touched_emit && self.text.is_empty() {
+            if let Some((_, _, args)) = self
+                .tool_slots
+                .iter()
+                .find(|(_, name, _)| name == "emit_copilot_turn")
+            {
+                let prefix = extract_emit_reply_prefix(args);
+                if let Some(new_slice) = prefix.get(self.emit_reply_sent..) {
+                    if !new_slice.is_empty() {
+                        added.push_str(new_slice);
+                        self.emit_reply_sent = prefix.len();
+                    }
+                }
+            }
         }
         if self
             .text
@@ -486,11 +685,19 @@ impl StreamAssembler {
     }
 
     pub fn finish(self, raw_body: &str) -> Result<(String, String), EasyOfficeError> {
+        let (content, reasoning, _) = self.finish_with_usage(raw_body)?;
+        Ok((content, reasoning))
+    }
+
+    pub fn finish_with_usage(
+        self,
+        raw_body: &str,
+    ) -> Result<(String, String, Option<TokenUsage>), EasyOfficeError> {
         if let Some(message) = self.failure {
             return Err(EasyOfficeError::InvalidArgument(message));
         }
         if self.events == 0 {
-            return extract_provider_completion(self.kind, raw_body);
+            return extract_provider_completion_with_usage(self.kind, raw_body);
         }
         let invocations: Vec<NativeToolInvocation> = self
             .tool_slots
@@ -511,7 +718,11 @@ impl StreamAssembler {
             ));
         }
         let content = synthesize_completion_from_tools(self.text, &invocations);
-        Ok((content, self.reasoning))
+        Ok((
+            content,
+            self.reasoning,
+            self.has_usage.then_some(self.usage),
+        ))
     }
 }
 

@@ -41,7 +41,19 @@
       operations.forEach((op, opIndex) => {
         const kind = opKind(op);
         if (mod === "DOC") {
-          if (kind === "doc.replace_paragraphs" && Array.isArray(op.replacements)) {
+          if (kind === "doc.replace_span") {
+            const index = Number(op?.index);
+            if (Number.isInteger(index) && index >= 0) {
+              const blockEl = docBlocksOf(document.getElementById("doc-editor"))[index];
+              const cur = blockEl ? String(blockEl.textContent || "") : "";
+              const search = String(op?.search ?? "");
+              const replace = String(op?.replace ?? "");
+              const at = search ? cur.indexOf(search) : -1;
+              const nextText = at >= 0 ? cur.slice(0, at) + replace + cur.slice(at + search.length) : cur;
+              const hasMarkup = Boolean(blockEl?.querySelector?.("span.eo-run, a, strong, em, u, s")) || hasInlineMarkup(replace);
+              targets.push({ opIndex, kind: "doc-replace-span", entry: 0, index, text: nextText, atomicDoc: hasMarkup });
+            }
+          } else if (kind === "doc.replace_paragraphs" && Array.isArray(op.replacements)) {
             op.replacements.forEach((rep, entry) => {
               const index = Number(rep?.index);
               const raw = String(rep?.text ?? "");
@@ -114,6 +126,11 @@
             ? (fullAtomic ? origRep : null)
             : (prefix ? { ...origRep, text: prefix } : null);
           op.replacements = keepFirst(op.replacements, partial);
+        } else if (target.kind === "doc-replace-span") {
+          if (!fullAtomic && !stop.unstarted) {
+            if (prefix) op.replace = prefix;
+          }
+          if (stop.unstarted || (target.atomicDoc && !fullAtomic)) return;
         } else if (target.kind === "doc-append" || target.kind === "doc-range") {
           const item = op[target.key][target.entry];
           const partial = target.atomicDoc
@@ -380,6 +397,7 @@
       };
       const drivers = {
         "doc-replace": docTarget,
+        "doc-replace-span": docTarget,
         "doc-append": (t) => typeInNewBlock(t, null),
         "doc-range": docRangeTarget,
         "sheet-cell": sheetTarget,

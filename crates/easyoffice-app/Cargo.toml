@@ -24,6 +24,7 @@ easyoffice-sheet = { path = "../easyoffice-sheet" }
 easyoffice-layout = { path = "../easyoffice-layout" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 # PD-269: the SSE line parser is the maintained crate, not a port. Its default 512 KiB limit holds each of an
 # event's data, name and id.
 sse-core = { workspace = true }

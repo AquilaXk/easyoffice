@@ -246,13 +246,13 @@
         requestId: reqId,
         mode: "ask",
         module: "DOC",
+        lightweight: true,
         prompt: "현재 문단의 마지막 문장에 자연스럽게 이어질 다음 구절만 한 줄(80자 이내, 따옴표·설명 없이 이어질 텍스트만)로 제안하세요.",
         history: [],
         selection: { range: "텍스트 예측" },
         context: {
           doc: {
             paragraphs: [snippet],
-            selectedText: snippet,
             omittedParagraphs: 0,
           },
         },

@@ -103,7 +103,7 @@ fn base_and_board_context_reaches_the_model_and_stays_ask_only() {
         "테이블 목록: 고객, 주문",
         "현재 테이블: 고객 (레코드 250건)",
         "이름(text), 금액(number)",
-        "[1] 이름=이, 금액=20",
+        "  [1] 이 | 20",
         "[이하 248건 생략]",
         "base.add_field",
     ] {

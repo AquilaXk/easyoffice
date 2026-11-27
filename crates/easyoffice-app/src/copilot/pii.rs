@@ -299,6 +299,12 @@ impl PiiVault {
                         r.text = self.restore_text(&r.text);
                     }
                 }
+                CopilotOperation::DocReplaceSpan {
+                    search, replace, ..
+                } => {
+                    *search = self.restore_text(search);
+                    *replace = self.restore_text(replace);
+                }
                 CopilotOperation::SlideAdd {
                     title,
                     bullets,

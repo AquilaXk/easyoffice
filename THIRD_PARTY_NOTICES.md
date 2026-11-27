@@ -10596,3 +10596,73 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+---
+
+## Copilot token optimization open-source references (`PD-361`)
+
+Nothing in this section is vendored or linked at runtime; only cache key normalization, multi-provider usage parsing, spreadsheet grid/isomorphic formula compression, and read-tool receipt compaction rules were adapted into `crates/easyoffice-app/src/copilot/{cache,usage,compact}.rs` and `crates/easyoffice-app/ui/copilot-context-compact.js`.
+
+### tribgames/mixdog (Apache-2.0)
+
+Source: https://github.com/tribgames/mixdog (commit `d5ab088efcc2680f0bb4c43448255ca1653fb3c6`). Adapted for deterministic 64-character SHA-256 `prompt_cache_key` derivation, 4-tier prefix-stable message ordering with chunk-aligned history eviction, lightweight single-shot fast-path requests without tools/thinking, OpenAI/Anthropic usage and cache token parsing, and single-sheet context pruning in `crates/easyoffice-app/src/copilot/{cache,usage,compact}.rs` and `crates/easyoffice-app/ui/copilot-context-compact.js`. The license text is the Apache License 2.0 reproduced above.
+
+### cline/cline (Apache-2.0)
+
+Source: https://github.com/cline/cline (Copyright Cline Bot Inc.). Adapted for duplicate read-tool normalization with SHA-256 content receipts, older loop-step compaction into SHA-256 receipts, and compact validation-retry summaries replacing repeated large `operations` JSON blocks in `crates/easyoffice-app/ui/copilot-context-compact.js`. The license text is the Apache License 2.0 reproduced above.
+
+### anomalyco/opencode (MIT)
+
+Source: https://github.com/anomalyco/opencode. Adapted for multi-provider (`OpenAI`, `Anthropic`, `Google`) input, cached-input, reasoning, and output token accounting normalization and top-level Anthropic `cache_control` / block-array assembly in `crates/easyoffice-app/src/copilot/{usage,cache}.rs`.
+
+```
+MIT License
+
+Copyright (c) 2025 opencode
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### DUrayev/SpreadsheetLLM-compression (MIT)
+
+Source: https://github.com/DUrayev/SpreadsheetLLM-compression. Adapted for high-density spreadsheet context serialization (sheet metadata anchors, dense TSV grid vs sparse formatting, and column-wise `{r}` isomorphic row formula grouping) in `crates/easyoffice-app/src/copilot/compact.rs`.
+
+```
+MIT License
+
+Copyright (c) 2024 SpreadsheetLLM Compression Implementation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

@@ -87,6 +87,7 @@ export interface ReadParagraphRangeResult {
 
 export type CopilotEditStep =
   | { kind: 'replace_paragraphs'; replacements: Array<{ index: number; text: string }> }
+  | { kind: 'replace_span'; index: number; search: string; replace: string }
   | { kind: 'replace_range'; startIndex: number; endIndex: number; texts: string[] }
   | { kind: 'append'; texts: string[] };
 
@@ -382,6 +383,23 @@ export function parseApplyCopilotEditsParams(raw: Record<string, unknown>): Appl
       });
       return { kind: 'replace_paragraphs', replacements };
     }
+    if (kind === 'replace_span') {
+      assertOnlyKeys(obj, ['kind', 'index', 'search', 'replace'], `steps[${stepIdx}]`);
+      const index = asNonNegativeSafeInt(obj.index, `steps[${stepIdx}].index`);
+      if (typeof obj.search !== 'string' || typeof obj.replace !== 'string') {
+        throw new Error(`steps[${stepIdx}] search/replace must be strings`);
+      }
+      const search = cleanPlainText(obj.search);
+      const replace = cleanPlainText(obj.replace);
+      if (!search.trim()) {
+        throw new Error(`steps[${stepIdx}].search must not be empty`);
+      }
+      if (search.length > COPILOT_MAX_PARAGRAPH_CHARS || replace.length > COPILOT_MAX_PARAGRAPH_CHARS) {
+        throw new Error(`steps[${stepIdx}] span text exceeds ${COPILOT_MAX_PARAGRAPH_CHARS} characters`);
+      }
+      chargeText(replace);
+      return { kind: 'replace_span', index, search, replace };
+    }
     if (kind === 'replace_range') {
       assertOnlyKeys(obj, ['kind', 'startIndex', 'endIndex', 'texts'], `steps[${stepIdx}]`);
       const startIndex = asNonNegativeSafeInt(obj.startIndex, 'startIndex');
@@ -610,6 +628,29 @@ export function applyCopilotEdits(
               );
               pos = { sectionIndex: target.section, paragraphIndex: res.paragraph, charOffset: res.charOffset };
             }
+          } else if (step.kind === 'replace_span') {
+            const { coords } = buildFlatParagraphTable(targetWasm);
+            if (step.index >= coords.length) {
+              throw new Error(`문단 번호(${step.index + 1})가 문서 범위를 벗어났습니다.`);
+            }
+            const target = coords[step.index];
+            const curLen = target.length;
+            const curText = curLen > 0
+              ? cleanPlainText(targetWasm.getTextRange(target.section, target.paragraph, 0, curLen))
+              : '';
+            const firstAt = curText.indexOf(step.search);
+            if (firstAt < 0) {
+              throw new Error('변경할 대상 구간을 문단에서 찾을 수 없습니다.');
+            }
+            if (curText.indexOf(step.search, firstAt + 1) >= 0) {
+              throw new Error('동일한 문구가 여러 번 나타나 바꿀 위치를 특정할 수 없습니다.');
+            }
+            const nextText = curText.slice(0, firstAt) + step.replace + curText.slice(firstAt + step.search.length);
+            if (nextText.length > COPILOT_MAX_PARAGRAPH_CHARS) {
+              throw new Error(`치환 후 문단 길이가 ${COPILOT_MAX_PARAGRAPH_CHARS}자를 초과했습니다.`);
+            }
+            const res = replaceSingleParagraphWithLines(targetWasm, target.section, target.paragraph, nextText);
+            pos = { sectionIndex: target.section, paragraphIndex: res.paragraph, charOffset: res.charOffset };
           } else if (step.kind === 'replace_range') {
             pos = applyRangeReplaceStep(targetWasm, step.startIndex, step.endIndex, step.texts);
           } else if (step.kind === 'append') {
