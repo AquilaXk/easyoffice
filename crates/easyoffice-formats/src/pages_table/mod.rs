@@ -9,11 +9,13 @@ use self::cell_rich::{decode_rich_cell_storage, RichCellDecoded, MAX_CELL_MARK_E
 pub(crate) use self::format::format_iso_date;
 use self::format::{render_value, FormatSpec};
 use self::packed::{parse_cell, CellScalar, PackedCell};
+use self::parsed::ParsedObjects;
 use self::styles::{assemble_cell_styles, read_cell_fills, read_col_widths_twips};
 mod cell_rich;
 mod format;
 mod merge;
 mod packed;
+mod parsed;
 mod styles;
 
 use crate::decode_budget::DecodeBudget;
@@ -534,8 +536,8 @@ fn absolute_row(tile_id: u64, tile_rows: u64, index: u64) -> Option<usize> {
     usize::try_from(abs).ok()
 }
 
-fn fill_tiles(
-    ctx: &mut CellContext,
+fn fill_tiles<'a>(
+    ctx: &mut CellContext<'a>,
     tiles: &Message,
     grid: &mut [Vec<String>],
     cols: usize,
@@ -551,6 +553,7 @@ fn fill_tiles(
     let mut tile_entries_seen = 0usize;
     let mut tile_rows_seen = 0usize;
     let mut tile_cells_seen = 0usize;
+    let mut parsed_tiles = ParsedObjects::default();
     tiles.for_each_sub(table::TILES_ENTRIES, |entry| {
         if tile_entries_seen >= MAX_TILE_ROWS_PER_TABLE {
             return Err(EasyOfficeError::ResourceBudgetExceeded(
@@ -560,13 +563,20 @@ fn fill_tiles(
         tile_entries_seen += 1;
         budget.charge_tile_row(0)?;
         let tile_id = entry.varint(table::TILE_ID).unwrap_or(0);
-        let tile_obj = reference(&entry, table::TILE_REF)
-            .and_then(|id| ctx.objects.get(id))
-            .filter(|o| o.type_id == ty::TABLE_TILE || o.type_id == ty::TABLE_TILE_V2);
-        let Some(tile_obj) = tile_obj else {
+        let tile_ref = reference(&entry, table::TILE_REF).and_then(|id| {
+            let object = ctx.objects.get(id)?;
+            (object.type_id == ty::TABLE_TILE || object.type_id == ty::TABLE_TILE_V2)
+                .then_some((id, object))
+        });
+        let Some((tile_ref, tile_obj)) = tile_ref else {
             return Ok(());
         };
-        let tile = Message::parse(&tile_obj.payload)?;
+        let Some(tile) = parsed_tiles.get(tile_ref, tile_obj, text_budget, "Pages 표 타일")?
+        else {
+            return Err(EasyOfficeError::CorruptedContainer(
+                "Pages 표 타일을 읽을 수 없습니다".to_string(),
+            ));
+        };
         tile.for_each_sub(table::TILE_ROWS, |row| {
             if tile_rows_seen >= MAX_TILE_ROWS_PER_TABLE {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(
@@ -719,6 +729,74 @@ mod tests {
                 extra: Vec::new(),
             },
         );
+    }
+
+    /// A table of one row whose single tile has `padding` unknown fields (3 bytes each) and is
+    /// named by `entries` tile entries; returns the table-info object.
+    fn shared_tile_table(
+        objects: &mut ObjectTable,
+        entries: usize,
+        padding: usize,
+    ) -> ArchiveObject {
+        let offsets = table::NO_CELL_OFFSET.to_le_bytes();
+        let row = [
+            f_varint(table::ROW_INDEX, 0),
+            f_bytes(table::ROW_CELL_OFFSETS, &offsets),
+        ]
+        .concat();
+        let mut tile = f_bytes(table::TILE_ROWS, &row);
+        for _ in 0..padding {
+            tile.extend_from_slice(&f_varint(99, 1));
+        }
+        insert_obj(objects, 13, ty::TABLE_TILE, tile);
+        let entry = [f_varint(table::TILE_ID, 0), f_ref(table::TILE_REF, 13)].concat();
+        let mut tiles = f_varint(table::TILES_SIZE, 1);
+        for _ in 0..entries {
+            tiles.extend_from_slice(&f_bytes(table::TILES_ENTRIES, &entry));
+        }
+        let store = f_bytes(table::STORE_TILES, &tiles);
+        let model = [
+            f_varint(table::MODEL_ROWS, 1),
+            f_varint(table::MODEL_COLS, 1),
+            f_bytes(table::MODEL_DATA_STORE, &store),
+        ]
+        .concat();
+        insert_obj(objects, 14, ty::TABLE_MODEL, model);
+        insert_obj(objects, 15, ty::TABLE_INFO, f_ref(table::INFO_MODEL, 14));
+        objects.get(15).unwrap().clone()
+    }
+
+    #[test]
+    fn one_tile_named_by_many_entries_is_parsed_once() {
+        let mut objects = ObjectTable::default();
+        let info = shared_tile_table(&mut objects, 19_000, 30_000);
+        let files = HashMap::new();
+        let mut images = PageImages::new(&objects, &files);
+        let mut budget = TableBudget::default();
+        let mut text_budget = DecodeBudget::new();
+        let start = std::time::Instant::now();
+        let outcome = read_table(&objects, &info, &mut budget, &mut images, &mut text_budget);
+        let took = start.elapsed();
+        assert!(matches!(outcome, Ok(TableOutcome::Read(_))));
+        assert!(took < std::time::Duration::from_secs(2), "{took:?}");
+        // the tile payload is paid for once, not once per entry
+        let used = DecodeBudget::new().remaining() - text_budget.remaining();
+        assert!(used < 2 * 1024 * 1024, "{used}");
+    }
+
+    #[test]
+    fn a_tile_payload_is_charged_to_the_decoded_byte_budget() {
+        let mut objects = ObjectTable::default();
+        let info = shared_tile_table(&mut objects, 3, 30_000);
+        let files = HashMap::new();
+        let mut images = PageImages::new(&objects, &files);
+        let mut budget = TableBudget::default();
+        // room for the grid slots, not for the 90 KB tile
+        let mut text_budget = DecodeBudget::with_limit(8 * 1024);
+        assert!(matches!(
+            read_table(&objects, &info, &mut budget, &mut images, &mut text_budget),
+            Err(EasyOfficeError::ResourceBudgetExceeded(_))
+        ));
     }
 
     #[test]

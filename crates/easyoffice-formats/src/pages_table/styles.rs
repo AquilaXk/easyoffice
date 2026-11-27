@@ -5,6 +5,7 @@
 
 use std::collections::hash_map::Entry;
 
+use super::parsed::ParsedObjects;
 use super::{reference, KeyedList, TableBudget, MAX_LIST_ENTRIES, MAX_TABLE_COLS, MAX_TABLE_ROWS};
 use crate::decode_budget::DecodeBudget;
 use crate::pages_proto::{FastU64Map, Message, ObjectTable};
@@ -272,16 +273,18 @@ fn set_edge(
     Ok(())
 }
 
-struct StrokeLayerAcc {
+struct StrokeLayerAcc<'a> {
     rows: usize,
     cols: usize,
     layers_seen: usize,
     runs_seen: usize,
     cells_expanded: usize,
     borders: FastU64Map<BorderPriority>,
+    /// Each layer object is parsed once however many sidecar entries name it.
+    layers: ParsedObjects<'a>,
 }
 
-impl StrokeLayerAcc {
+impl<'a> StrokeLayerAcc<'a> {
     fn new(rows: usize, cols: usize) -> Self {
         Self {
             rows,
@@ -290,6 +293,7 @@ impl StrokeLayerAcc {
             runs_seen: 0,
             cells_expanded: 0,
             borders: FastU64Map::default(),
+            layers: ParsedObjects::default(),
         }
     }
 
@@ -312,11 +316,12 @@ impl StrokeLayerAcc {
 
     fn apply_layers(
         &mut self,
-        objects: &ObjectTable,
+        objects: &'a ObjectTable,
         sidecar: &Message,
         field: u32,
         axis: BorderAxis,
         budget: &mut TableBudget,
+        text_budget: &mut DecodeBudget,
     ) -> Result<(), EasyOfficeError> {
         let mut layer_ids = Vec::new();
         let collect_res = sidecar.for_each_sub(field, |sub| {
@@ -337,11 +342,15 @@ impl StrokeLayerAcc {
         }
 
         let (rows, cols) = (self.rows, self.cols);
+        // Taken out of `self` so a parsed layer can be read while `self` collects borders; an error
+        // ends the whole table, so the cache is not put back on that path.
+        let mut layers = std::mem::take(&mut self.layers);
         for id in layer_ids {
             let Some(layer_obj) = objects.get(id).filter(|o| o.type_id == ty::STROKE_LAYER) else {
                 continue;
             };
-            let Some(layer) = parse_msg(&layer_obj.payload)? else {
+            let Some(layer) = layers.get(id, layer_obj, text_budget, "Pages 표 테두리 레이어")?
+            else {
                 continue;
             };
             let Some(index) = layer
@@ -426,6 +435,7 @@ impl StrokeLayerAcc {
                 return Err(err);
             }
         }
+        self.layers = layers;
         Ok(())
     }
 }
@@ -451,7 +461,7 @@ pub(super) fn assemble_cell_styles(
                 (table::STROKE_SIDECAR_TOP_ROWS, BorderAxis::TopRow),
                 (table::STROKE_SIDECAR_BOTTOM_ROWS, BorderAxis::BottomRow),
             ] {
-                acc.apply_layers(objects, &sidecar, field, axis, budget)?;
+                acc.apply_layers(objects, &sidecar, field, axis, budget, text_budget)?;
             }
         }
     }
@@ -556,6 +566,68 @@ mod tests {
         f_bytes(num, &f_varint(1, id))
     }
 
+    /// A sidecar naming layer object 1 `refs` times; the layer carries `padding` unknown fields.
+    fn shared_layer(refs: usize, padding: usize) -> (ObjectTable, Vec<u8>) {
+        let mut payload = f_varint(table::STROKE_LAYER_INDEX, 0);
+        for _ in 0..padding {
+            payload.extend_from_slice(&f_varint(99, 1));
+        }
+        let mut objects = ObjectTable::default();
+        objects.objects.insert(
+            1,
+            ArchiveObject {
+                type_id: ty::STROKE_LAYER,
+                payload: payload.into(),
+                extra: Vec::new(),
+            },
+        );
+        let entry = f_ref(table::STROKE_SIDECAR_TOP_ROWS, 1);
+        (objects, entry.repeat(refs))
+    }
+
+    #[test]
+    fn one_layer_named_many_times_is_parsed_once() {
+        let (objects, sidecar_payload) = shared_layer(20_000, 30_000);
+        let sidecar = Message::parse(&sidecar_payload).unwrap();
+        let mut acc = StrokeLayerAcc::new(MAX_TABLE_ROWS, MAX_TABLE_COLS);
+        let mut budget = TableBudget::default();
+        let mut text_budget = DecodeBudget::new();
+        let start = std::time::Instant::now();
+        acc.apply_layers(
+            &objects,
+            &sidecar,
+            table::STROKE_SIDECAR_TOP_ROWS,
+            BorderAxis::TopRow,
+            &mut budget,
+            &mut text_budget,
+        )
+        .unwrap();
+        let took = start.elapsed();
+        assert!(took < std::time::Duration::from_secs(2), "{took:?}");
+        let used = DecodeBudget::new().remaining() - text_budget.remaining();
+        assert!(used < 2 * 1024 * 1024, "{used}");
+    }
+
+    #[test]
+    fn a_layer_payload_is_charged_to_the_decoded_byte_budget() {
+        let (objects, sidecar_payload) = shared_layer(3, 30_000);
+        let sidecar = Message::parse(&sidecar_payload).unwrap();
+        let mut acc = StrokeLayerAcc::new(MAX_TABLE_ROWS, MAX_TABLE_COLS);
+        let mut budget = TableBudget::default();
+        let mut text_budget = DecodeBudget::with_limit(8 * 1024);
+        let err = acc
+            .apply_layers(
+                &objects,
+                &sidecar,
+                table::STROKE_SIDECAR_TOP_ROWS,
+                BorderAxis::TopRow,
+                &mut budget,
+                &mut text_budget,
+            )
+            .unwrap_err();
+        assert!(matches!(err, EasyOfficeError::ResourceBudgetExceeded(_)));
+    }
+
     #[test]
     fn max_stroke_layers_matches_max_table_four_edge_axes_and_rejects_excess() {
         assert_eq!(
@@ -585,6 +657,7 @@ mod tests {
             table::STROKE_SIDECAR_TOP_ROWS,
             BorderAxis::TopRow,
             &mut budget,
+            &mut DecodeBudget::new(),
         )
         .expect("max 10_000 x 256 table 4-edge layer count must succeed");
 
@@ -602,6 +675,7 @@ mod tests {
                 table::STROKE_SIDECAR_TOP_ROWS,
                 BorderAxis::TopRow,
                 &mut budget2,
+                &mut DecodeBudget::new(),
             )
             .unwrap_err();
         assert!(matches!(err, EasyOfficeError::ResourceBudgetExceeded(_)));
