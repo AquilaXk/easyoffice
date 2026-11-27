@@ -238,6 +238,21 @@ fn error_message(err: &StrictJsonValue) -> String {
 struct JsonArrayReader {
     buffer: Vec<u8>,
     started: bool,
+    /// Where the scan of the object at the head of `buffer` stands, so a chunk continues it.
+    scan: ObjectScan,
+    /// Bytes the scan has looked at in all (a test checks each is looked at once).
+    #[cfg(test)]
+    examined: usize,
+}
+
+/// The state of a scan for the end of one top-level JSON object: nesting depth and whether the
+/// next byte is inside a string or after a backslash, at byte `pos` of the buffer.
+#[derive(Default)]
+struct ObjectScan {
+    pos: usize,
+    depth: usize,
+    in_string: bool,
+    escaped: bool,
 }
 
 fn parse_object(kind: ProviderKind, bytes: &[u8]) -> Option<Delta> {
@@ -259,36 +274,36 @@ fn parse_object(kind: ProviderKind, bytes: &[u8]) -> Option<Delta> {
 }
 
 /// `buf[0] == b'{'`일 때 문자열 리터럴·이스케이프를 건너뛰며 닫는 최상위 `}` 다음 바이트 오프셋을 찾는다.
-fn scan_complete_json_object(buf: &[u8]) -> Option<usize> {
+/// `scan`이 이전 호출이 멈춘 자리를 기억하므로 같은 `buf`에 바이트가 덧붙은 호출은 새 바이트만 본다.
+fn scan_complete_json_object(buf: &[u8], scan: &mut ObjectScan) -> Option<usize> {
     if buf.first() != Some(&b'{') {
         return None;
     }
-    let mut depth = 0usize;
-    let mut in_string = false;
-    let mut escaped = false;
-    for (idx, &b) in buf.iter().enumerate() {
-        if in_string {
-            if escaped {
-                escaped = false;
+    for (idx, &b) in buf.iter().enumerate().skip(scan.pos) {
+        if scan.in_string {
+            if scan.escaped {
+                scan.escaped = false;
             } else if b == b'\\' {
-                escaped = true;
+                scan.escaped = true;
             } else if b == b'"' {
-                in_string = false;
+                scan.in_string = false;
             }
             continue;
         }
         match b {
-            b'"' => in_string = true,
-            b'{' => depth += 1,
+            b'"' => scan.in_string = true,
+            b'{' => scan.depth += 1,
             b'}' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
+                scan.depth = scan.depth.saturating_sub(1);
+                if scan.depth == 0 {
+                    *scan = ObjectScan::default();
                     return Some(idx + 1);
                 }
             }
             _ => {}
         }
     }
+    scan.pos = buf.len();
     None
 }
 
@@ -327,7 +342,11 @@ impl JsonArrayReader {
             if self.buffer.is_empty() {
                 break;
             }
-            let Some(obj_end) = scan_complete_json_object(&self.buffer) else {
+            #[cfg(test)]
+            {
+                self.examined += self.buffer.len().saturating_sub(self.scan.pos);
+            }
+            let Some(obj_end) = scan_complete_json_object(&self.buffer, &mut self.scan) else {
                 break;
             };
             if let Some(delta) = parse_object(kind, &self.buffer[..obj_end]) {
@@ -964,5 +983,40 @@ mod tests {
         }
         assert_eq!(whole.finish("").unwrap().0, "안녕");
         assert_eq!(bytewise.finish("").unwrap().0, "안녕");
+    }
+
+    fn google_object(text: &str) -> String {
+        format!(r#"{{"candidates":[{{"content":{{"parts":[{{"text":"{text}"}}]}}}}]}}"#)
+    }
+
+    #[test]
+    fn a_json_array_object_that_arrives_in_pieces_is_scanned_once() {
+        let object = google_object(&"가\\\"}".repeat(20_000));
+        let body = format!("[{object},{object}]");
+        let mut reader = JsonArrayReader::default();
+        let mut texts = 0;
+        for chunk in body.as_bytes().chunks(64) {
+            texts += reader.push(ProviderKind::Google, chunk).unwrap().len();
+        }
+        assert_eq!(texts, 2, "both objects came out");
+        // Scanning again from the start of the object on every chunk would examine about
+        // len/64 times len bytes in all.
+        assert!(
+            reader.examined <= 2 * body.len(),
+            "{} bytes examined for a body of {}",
+            reader.examined,
+            body.len()
+        );
+    }
+
+    #[test]
+    fn an_object_with_braces_in_strings_and_a_split_escape_still_ends_at_its_own_brace() {
+        let body = format!("[{},{}]", google_object(r#"a}{\\\"}"#), google_object("b"));
+        let mut reader = JsonArrayReader::default();
+        let mut deltas = Vec::new();
+        for byte in body.as_bytes() {
+            deltas.extend(reader.push(ProviderKind::Google, std::slice::from_ref(byte)).unwrap());
+        }
+        assert_eq!(deltas.len(), 2);
     }
 }
