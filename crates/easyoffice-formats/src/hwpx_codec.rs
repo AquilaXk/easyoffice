@@ -313,6 +313,7 @@ impl ShapeTables {
                     ratio_percent,
                     offset_percent,
                     kerning,
+                    fx: run.advanced.fx.hwpx_kept(run.underline),
                 };
                 let char_pr = intern(&mut self.char_shapes, &mut self.char_map, shape);
                 if let Some(key) = run.note_ref {

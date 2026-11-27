@@ -202,10 +202,18 @@ fn hwpx_and_pages_drop_them_and_pages_says_so() {
     ] {
         let bytes = UniversalFormatConverter::encode_rich(&doc, fmt, None).unwrap();
         let back = the_run(&decode(&bytes, name), "모두");
-        // HWPX keeps the double line (`DOUBLE_SLIM`), the rest is dropped; Pages drops all of it.
-        let kept = TextFx {
-            double_strike: name == "a.hwpx",
-            ..TextFx::default()
+        // HWPX keeps the double line (`DOUBLE_SLIM`), the underline shape and colour and the mark (PD-379), and drops the
+        // capitals and the hidden text; Pages drops all of it.
+        let kept = if name == "a.hwpx" {
+            TextFx {
+                double_strike: true,
+                emphasis: 1,
+                underline_style: 14,
+                underline_color: Some(0xFF_0000),
+                ..TextFx::default()
+            }
+        } else {
+            TextFx::default()
         };
         assert_eq!(back.advanced.fx, kept, "{name}");
     }

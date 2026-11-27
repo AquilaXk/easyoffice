@@ -8,7 +8,7 @@
 use crate::rich_table_style::{CellFill, TableBorderEdge, TableBorderKind, TableCellBorders};
 use crate::{
     RichBinding, RichBindingKind, RichColumns, RichLineSpacing, RichPageMargins, RichPaper,
-    RichScript, XmlSanitizer,
+    RichScript, TextFx, XmlSanitizer,
 };
 
 pub(crate) const MAX_HWPX_BORDER_FILLS: usize = 4_096;
@@ -153,6 +153,8 @@ pub(crate) struct HwpxCharShape {
     pub offset_percent: i8,
     /// Pair kerning (`useKerning`).
     pub kerning: bool,
+    /// The underline shape and colour and the emphasis mark; see `TextFx::hwpx_kept`.
+    pub fx: TextFx,
 }
 
 impl Default for HwpxCharShape {
@@ -173,6 +175,7 @@ impl Default for HwpxCharShape {
             ratio_percent: 100,
             offset_percent: 0,
             kerning: false,
+            fx: TextFx::default(),
         }
     }
 }
@@ -223,10 +226,11 @@ fn char_pr_xml(id: usize, shape: &HwpxCharShape) -> String {
         .shade_color
         .map_or_else(|| "none".to_string(), |c| format!("#{c:06X}"));
     let mut xml = format!(
-        "<hh:charPr id=\"{id}\" height=\"{}\" textColor=\"#{:06X}\" shadeColor=\"{shade}\" useFontSpace=\"0\" useKerning=\"{}\" symMark=\"NONE\" borderFillIDRef=\"1\">",
+        "<hh:charPr id=\"{id}\" height=\"{}\" textColor=\"#{:06X}\" shadeColor=\"{shade}\" useFontSpace=\"0\" useKerning=\"{}\" symMark=\"{}\" borderFillIDRef=\"1\">",
         shape.height,
         shape.text_color.unwrap_or(0),
-        u8::from(shape.kerning)
+        u8::from(shape.kerning),
+        shape.fx.hwpx_sym_mark()
     );
     // The Hangul, Hanja and Japanese slots take the East Asian face, the others the Latin one (the same for one font).
     let (latin, east) = (shape.font.to_string(), shape.font_east.to_string());
@@ -252,9 +256,18 @@ fn char_pr_xml(id: usize, shape: &HwpxCharShape) -> String {
     if shape.bold {
         xml.push_str("<hh:bold/>");
     }
+    // The automatic colour is the text colour, which a file has no word for.
+    let (kind, line, color) = if shape.underline {
+        (
+            "BOTTOM",
+            shape.fx.hwpx_line_shape(),
+            shape.fx.underline_color.or(shape.text_color).unwrap_or(0),
+        )
+    } else {
+        ("NONE", "SOLID", 0)
+    };
     xml.push_str(&format!(
-        "<hh:underline type=\"{}\" shape=\"SOLID\" color=\"#000000\"/>",
-        if shape.underline { "BOTTOM" } else { "NONE" }
+        "<hh:underline type=\"{kind}\" shape=\"{line}\" color=\"#{color:06X}\"/>"
     ));
     xml.push_str(&format!(
         "<hh:strikeout shape=\"{}\" color=\"#000000\"/>",

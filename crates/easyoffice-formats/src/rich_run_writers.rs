@@ -303,18 +303,19 @@ impl RtfRunTables {
     /// Control words (each followed by a delimiter space) for size, font, color, and highlight.
     pub(crate) fn run_words(&self, run: &RichRun) -> String {
         let mut out = String::new();
-        if let Some(font) = &run.font {
-            if let Some(&idx) = self.font_map.get(font) {
-                out.push_str(&format!("\\f{idx} "));
-            }
-        }
-        // The associated font (`\af`) is the one East Asian text uses when it is not the Latin face.
+        // The East Asian face is the `\af` of the double byte text type (`\dbch`); `\loch` puts the run back on the low ANSI
+        // type, whose face is `\f` (RTF 1.9.1), so text after the run is not read as double byte.
         if let Some(&idx) = run
             .font_east_asia
             .as_ref()
             .and_then(|font| self.font_map.get(font))
         {
-            out.push_str(&format!("\\af{idx} "));
+            out.push_str(&format!("\\dbch\\af{idx}\\loch "));
+        }
+        if let Some(font) = &run.font {
+            if let Some(&idx) = self.font_map.get(font) {
+                out.push_str(&format!("\\f{idx} "));
+            }
         }
         if let Some(size) = run.size_half_pt {
             out.push_str(&format!("\\fs{size} "));

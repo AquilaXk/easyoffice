@@ -9,7 +9,9 @@
 //! `style:text-line-through-type`, `style:text-emphasize`, `fo:font-variant`, `fo:text-transform`, `text:display`, and the RTF
 //! control words `\ul*`, `\striked`, `\caps`, `\scaps`, `\v`, `\accdot`, `\acccomma`.
 //!
-//! Only DOCX, ODT and RTF carry them (the RTF underline colour has no word here); HWPX and Pages drop them.
+//! DOCX, ODT and RTF carry them (the RTF underline colour has no word here). HWPX carries the double strikethrough, the
+//! underline shape and colour and the emphasis mark (`rich_char_fx_hwpx.rs`, PD-379), not the capitals or hidden text; Pages
+//! drops them.
 
 use crate::rich_xml::toggle_on;
 use crate::xml_stream::{attr, Attrs};
