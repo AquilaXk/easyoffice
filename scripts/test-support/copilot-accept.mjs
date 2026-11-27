@@ -1,4 +1,4 @@
-// Helpers for the copilot page tests (PD-268): an edit answer shows what it would change and waits for 수락, and the
+// Helpers for the copilot page tests (PD-268, PD-385): an edit answer shows what it would change and waits for 바꾸기, and the
 // pointer and typing run only when the user has not asked for reduced motion.
 import { flushAsyncTurns } from "../webui-dom-harness.mjs";
 
@@ -17,9 +17,12 @@ export const FULL_MOTION = (query) => ({ ...REDUCED_MOTION(query), matches: fals
 
 export const reviewButton = (document, action) => Array.from(document.querySelectorAll(`#copilot-thread button[data-copilot-action="${action}"]`)).at(-1);
 
-/** Clicks 수락 on the latest answer that is waiting and lets the apply finish. Returns whether there was one to accept. */
+/**
+ * Settles the latest answer that is waiting and lets the apply finish: 바꾸기 for a change that was only previewed, 유지 for
+ * a draft (new content only; it is in the document already). Returns whether there was one to settle.
+ */
 export async function acceptProposal(document, userClick, turns = 16) {
-  const button = reviewButton(document, "accept");
+  const button = reviewButton(document, "accept") || reviewButton(document, "keep");
   if (!button) return false;
   userClick(button);
   await flushAsyncTurns(turns);

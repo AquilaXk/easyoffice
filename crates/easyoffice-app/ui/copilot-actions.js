@@ -67,6 +67,7 @@
     const { clipCodePoints } = host.__EASYOFFICE_COPILOT_TEXT__;
     const docHtml = host.__EASYOFFICE_COPILOT_DOC_HTML__ || null;
     const sheetOps = host.__EASYOFFICE_COPILOT_SHEET_OPS__ || null;
+    const editMode = host.__EASYOFFICE_COPILOT_EDIT_MODE__;
     const extOps = typeof host.__EASYOFFICE_CREATE_COPILOT_EXT_OPS__ === "function"
       ? host.__EASYOFFICE_CREATE_COPILOT_EXT_OPS__(deps)
       : createFallbackExtOps();
@@ -498,6 +499,10 @@
 
       const existing = docBlocksOf(editor);
       const tracking = Boolean(docHtml?.isTrackChangesActive?.(editor));
+      if (kind === editMode.INSERT_BELOW_KIND) {
+        editMode.applyInserts({ document, docHtml, editor, existing, inserts: op.inserts, tracking, buildBlock: (item) => buildDocBlockElement(document, item), locations });
+        return true;
+      }
       if (kind === "doc.replace_span") {
         const idx = Number(op?.index);
         if (!Number.isInteger(idx) || idx < 0 || idx >= existing.length) {
@@ -745,7 +750,7 @@
               else if (kind === "sheet.format") executeSheetFormat(op, sheetDataStore[sheetName], sheetName, derivedLocations);
               else if (kind === "sheet.chart") executeSheetChart(op, sheetName, derivedLocations);
               else sheetOps.executeExtendedSheetOp(kind, op, { sheetName, sheetDataStore, sheetRowCounts, locations: derivedLocations });
-            } else if (kind === "doc.append" || kind === "doc.replace_paragraphs" || kind === "doc.replace_span" || kind === "doc.scrub_pii") {
+            } else if (kind === "doc.append" || kind === "doc.replace_paragraphs" || kind === "doc.replace_span" || kind === "doc.scrub_pii" || kind === editMode.INSERT_BELOW_KIND) {
               touchedDoc = executeDocOperation(kind, op, derivedLocations) || touchedDoc;
             } else if (kind === "slide.add" || kind === "slide.update" || kind === "slide.add_element") {
               focusSlideIdx = executeSlideOperation(kind, op, derivedLocations);
@@ -888,6 +893,26 @@
       return preview.fingerprint(mod, operations) === expectedFp;
     }
 
+    // 편집 방식 판정이 쓰는 문서 상태: 시트 쓰기 대상 셀이 차 있는지.
+    const editProbe = {
+      isCellFilled(op, coord) {
+        const entry = sheetDataStore[String(op?.sheet || getActiveSheetName())]?.[coord.trim().toUpperCase()];
+        return Boolean(entry && (entry.formula || String(entry.value ?? "") !== ""));
+      },
+    };
+
+    // 아래에 삽입: 교체 연산을 원문 아래에 새 문단을 넣는 연산으로 바꾼다(문단 글은 지금 문서에서 읽는다).
+    function insertBelowOperations(mod, operations) {
+      const embedHwp = mod === "HWP" && Boolean(extOps.getEmbedHwpHost());
+      const snapshot = embedHwp ? extOps.getHwpSnapshot() : null;
+      if (embedHwp && !snapshot) throw new Error("한글 문서를 아직 읽지 못했습니다.");
+      const blocks = snapshot ? null : docBlocksOf(document.getElementById("doc-editor"));
+      const reader = snapshot
+        ? { count: snapshot.totalParagraphs || 0, text: (index) => snapshot.byIndex?.get(index)?.text ?? null }
+        : { count: blocks.length, text: (index) => (docHtml?.plainActiveTextOfBlock ? docHtml.plainActiveTextOfBlock(blocks[index]) : String(blocks[index].textContent || "")) };
+      return editMode.toInsertBelowOperations(operations, reader);
+    }
+
     const locateTarget = (loc) => extOps.locateTarget?.(loc, { docBlocksOf }) ?? Promise.resolve(false);
 
     return {
@@ -909,6 +934,8 @@
       whenIdle,
       // 제안 때 활성 슬라이드를 연산에 고정한다(수락 전에 다른 슬라이드로 옮겨도 제안한 슬라이드에 적용한다).
       normalizeOperations,
+      editProbe,
+      insertBelowOperations,
       isPerforming: () => activeRun !== null,
       buildChanges: preview.buildChanges,
       fingerprint: preview.fingerprint,

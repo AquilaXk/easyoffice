@@ -92,6 +92,7 @@
       setStatusFeedback,
     } = deps;
     const copilotActions = deps.copilotActions || host.__EASYOFFICE_CREATE_COPILOT_ACTIONS__(deps);
+    const editMode = host.__EASYOFFICE_COPILOT_EDIT_MODE__;
 
     const byId = (id) => document.getElementById(id);
     let isOpen = false;
@@ -227,7 +228,7 @@
     // Undo and regenerate follow the document: a user edit after the answer turns them off without a redraw.
     function actionDisabled(action, msg) {
       if (!msg) return true;
-      if (action === "accept" || action === "reject") return running || regenerating;
+      if (editMode.REVIEW_ACTIONS.has(action)) return running || regenerating || (action === "discard" && !copilotActions.canUndoTurn(msg.id));
       const undoGone = Boolean(msg.applied) && !msg.undone && !copilotActions.canUndoTurn(msg.id);
       return action === "undo" ? undoGone : undoGone || running || regenerating;
     }
@@ -320,20 +321,19 @@
 
       const locs = Array.isArray(msg.locations) ? msg.locations : [];
       const proposing = msg.change?.state === "pending";
-      const showUndo = !msg.undone && copilotActions.hasUndoEntry(msg.id);
+      const reviewButtons = editMode.reviewActions(msg.change);
+      const showUndo = !msg.undone && copilotActions.hasUndoEntry(msg.id) && msg.change?.state !== "draft";
       const showRegenerate = !msg.pending && Boolean(msg.request) && messages.at(-1) === msg;
-      if (locs.length > 0 || showUndo || showRegenerate || proposing) {
+      if (locs.length > 0 || showUndo || showRegenerate || reviewButtons.length > 0) {
         const chipRow = mkEl("div", "eo-copilot-chip-row");
-        if (proposing) {
-          for (const [action, label, handler] of [["accept", "수락", acceptChange], ["reject", "거절", rejectChange]]) {
-            const btn = mkEl("button", "eo-copilot-chip-btn eo-copilot-review-btn", label);
-            btn.type = "button";
-            btn.dataset.turn = msg.id;
-            btn.dataset.copilotAction = action;
-            btn.disabled = actionDisabled(action, msg);
-            btn.addEventListener("click", () => void handler(msg));
-            chipRow.appendChild(btn);
-          }
+        for (const [action, label] of reviewButtons) {
+          const btn = mkEl("button", "eo-copilot-chip-btn eo-copilot-review-btn", label);
+          btn.type = "button";
+          btn.dataset.turn = msg.id;
+          btn.dataset.copilotAction = action;
+          btn.disabled = actionDisabled(action, msg);
+          btn.addEventListener("click", () => void reviewHandlers[action](msg));
+          chipRow.appendChild(btn);
         }
         for (const loc of locs) {
           const chip = mkEl("button", "eo-copilot-loc-chip");
@@ -375,8 +375,8 @@
 
       if (proposing) {
         wrap.appendChild(copilotActions.renderChangeList(msg.change.changes, (loc) => void copilotActions.locateTarget(loc).then(() => syncSelectionBadge())));
-      } else if (msg.change?.state === "rejected") {
-        wrap.appendChild(mkEl("div", "eo-copilot-inplace-row", "거절함"));
+      } else if (editMode.isDiscarded(msg.change)) {
+        wrap.appendChild(mkEl("div", "eo-copilot-inplace-row", editMode.DISCARDED_LABEL));
       }
 
       if (msg.reply) {
@@ -544,18 +544,39 @@
       }
     }
 
-    // 연산이 있는 편집 응답은 적용하지 않고 바뀔 곳을 보여 준다. 수락해야 적용한다.
-    function propose(entry, mod, rawOperations, frozenSelection) {
-      const operations = copilotActions.normalizeOperations(mod, rawOperations, frozenSelection);
+    // 기존 내용을 고치는 편집 응답은 적용하지 않고 바뀔 곳을 보여 준다. 바꾸기나 아래에 삽입을 눌러야 적용한다.
+    function propose(entry, mod, operations) {
       const changes = copilotActions.buildChanges(mod, operations);
-      entry.change = { state: "pending", mod, operations, changes, fingerprint: copilotActions.fingerprint(mod, operations) };
+      entry.change = { state: "pending", mod, operations, changes, fingerprint: copilotActions.fingerprint(mod, operations), insertBelow: editMode.canInsertBelow(mod, operations) };
       if (mod === "DOC") copilotActions.showDocPreview(changes);
     }
 
-    function dismissPreview() {
-      for (const msg of messages) {
-        if (msg.change?.state === "pending") msg.change.state = "rejected";
+    // 새 내용만 더하는 응답은 미리보기 없이 문서에 초안으로 바로 넣는다(포인터·타이핑 연출 포함). 유지하거나 버릴 때까지 되돌리기 한 단계로 둔다.
+    async function applyDraft(entry, mod, operations) {
+      entry.change = { state: "draft", mod, operations };
+      renderThread();
+      try {
+        const res = await copilotActions.applyOperationsAnimated(mod, "edit", operations, entry.id);
+        entry.applied = res.applied;
+        entry.updatedInPlace = res.applied;
+        if (entry.locations.length === 0) entry.locations = res.locations;
+        if (!res.applied) entry.change.state = "none";
+        if (res.interrupted) setStatusFeedback?.("코파일럿 편집을 중지했습니다");
+      } catch (err) {
+        entry.change.state = "none";
+        entry.error = true;
+        entry.reply = String(err?.message || "코파일럿 편집을 적용하지 못했습니다.");
       }
+    }
+
+    function presentEdit(entry, mod, rawOperations, frozenSelection) {
+      const operations = copilotActions.normalizeOperations(mod, rawOperations, frozenSelection);
+      if (editMode.classifyEditMode(mod, operations, copilotActions.editProbe) === editMode.DRAFT) return applyDraft(entry, mod, operations);
+      return propose(entry, mod, operations);
+    }
+
+    function dismissPreview() {
+      for (const msg of messages) editMode.settle(msg.change);
       copilotActions.clearPreview();
     }
 
@@ -622,7 +643,7 @@
         assistantEntry.reply = String(res?.reply || "요청을 처리했습니다.");
         assistantEntry.reasoning = String(res?.reasoning || "");
         assistantEntry.locations = explicitLocs;
-        if (mode === "edit" && ops.length > 0) propose(assistantEntry, mod, ops, turn.frozenSelection);
+        if (mode === "edit" && ops.length > 0) await presentEdit(assistantEntry, mod, ops, turn.frozenSelection);
         const dropped = Number(res?.droppedOperations) || 0;
         if (dropped > 0) setStatusFeedback?.("형식이 맞지 않는 작업 " + dropped + "개를 건너뛰었습니다");
       } catch (err) {
@@ -639,8 +660,9 @@
       }
     }
 
-    // 수락: 문서가 미리보기를 본 때와 같으면 포인터·타이핑 연출과 함께 적용한다(되돌리기는 한 단계).
-    async function acceptChange(msg) {
+    // 바꾸기: 문서가 미리보기를 본 때와 같으면 포인터·타이핑 연출과 함께 적용한다(되돌리기는 한 단계).
+    // 아래에 삽입(`below`): 같은 지문 검사 뒤 원문은 두고 새 글을 원 문단 아래 새 문단으로 넣는다(연출 없이).
+    async function acceptChange(msg, { below = false } = {}) {
       const change = msg?.change;
       if (!change || change.state !== "pending" || running || regenerating) return;
       copilotActions.clearPreview();
@@ -658,7 +680,9 @@
       renderThread();
       syncComposerControls();
       try {
-        const appliedRes = await copilotActions.applyOperationsAnimated(change.mod, "edit", change.operations, msg.id);
+        const appliedRes = below
+          ? await copilotActions.applyOperations(change.mod, "edit", copilotActions.insertBelowOperations(change.mod, change.operations), msg.id)
+          : await copilotActions.applyOperationsAnimated(change.mod, "edit", change.operations, msg.id);
         msg.applied = appliedRes.applied;
         msg.updatedInPlace = appliedRes.applied;
         if (msg.locations.length === 0) msg.locations = appliedRes.locations;
@@ -679,6 +703,34 @@
       copilotActions.clearPreview();
       renderThread();
     }
+
+    // 유지: 초안을 문서에 두고 결정을 닫는다(이어서 실행 취소 칩이 남는다).
+    function keepDraft(msg) {
+      if (msg?.change?.state !== "draft" || running || regenerating) return;
+      msg.change.state = "kept";
+      renderThread();
+    }
+
+    // 버리기(초안): 넣은 것을 되돌린다. 그 사이 문서를 고쳤으면 되돌릴 수 없다.
+    async function discardDraft(msg) {
+      if (msg?.change?.state !== "draft" || running || regenerating) return;
+      if (!(await copilotActions.undoLastTurn(msg.id))) {
+        setStatusFeedback?.("문서가 바뀌어 초안을 버릴 수 없습니다");
+        renderThread();
+        return;
+      }
+      msg.undone = true;
+      msg.change.state = "discarded";
+      renderThread();
+    }
+
+    const reviewHandlers = {
+      accept: acceptChange,
+      "insert-below": (msg) => acceptChange(msg, { below: true }),
+      reject: rejectChange,
+      keep: keepDraft,
+      discard: discardDraft,
+    };
 
     function runTurn(request, options) {
       const turn = startTurn(request, options);
@@ -706,10 +758,8 @@
       regenerating = true;
       syncMessageActions();
       try {
-        if (last.change?.state === "pending") {
-          last.change.state = "rejected";
-          copilotActions.clearPreview();
-        }
+        if (last.change?.state === "pending") copilotActions.clearPreview();
+        editMode.settle(last.change);
         if (last.applied && !last.undone) {
           if (!(await copilotActions.undoLastTurn(last.id))) {
             renderThread();

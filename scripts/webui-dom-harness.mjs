@@ -221,6 +221,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/copilot-diff.js",
   "../crates/easyoffice-app/ui/copilot-markdown.js",
   "../crates/easyoffice-app/ui/copilot-doc-html.js",
+  "../crates/easyoffice-app/ui/copilot-edit-mode.js",
   "../crates/easyoffice-app/ui/copilot-sheet-ops.js",
   "../crates/easyoffice-app/ui/copilot-ext-ops.js",
   "../crates/easyoffice-app/ui/copilot-typing.js",

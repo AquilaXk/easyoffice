@@ -22,7 +22,7 @@ test("an edit answer shows what it would change and writes nothing until 수락"
   assert.equal(p.textContent, "이번 분기 매출은 늘었다", "the document is untouched");
   const msg = assistants()[0];
   assert.ok(reviewButton(document, "accept") && reviewButton(document, "reject"));
-  assert.deepEqual(Array.from(msg.querySelectorAll(".eo-copilot-review-btn")).map((b) => b.textContent.trim()), ["수락", "거절"]);
+  assert.deepEqual(Array.from(msg.querySelectorAll(".eo-copilot-review-btn")).map((b) => b.textContent.trim()), ["바꾸기", "아래에 삽입", "버리기"]);
   const change = msg.querySelector(".eo-copilot-change");
   assert.equal(change.querySelector(".eo-copilot-change-label").textContent, "문단 1");
   assert.equal(change.querySelector(".eo-copilot-change-kind").textContent, "변경");
@@ -54,7 +54,7 @@ test("거절 leaves the document as it was and clears the overlay", async () => 
   assert.equal(p.textContent, "원래 문장");
   assert.equal(document.querySelector(".eo-copilot-diff-block"), null);
   assert.equal(reviewButton(document, "accept"), undefined, "the buttons are gone once decided");
-  assert.match(assistants()[0].textContent, /거절함/);
+  assert.match(assistants()[0].textContent, /버림/);
   assert.equal(assistants()[0].querySelector(".eo-copilot-undo-btn"), null);
 });
 
@@ -91,7 +91,7 @@ test("a new question drops a change that is still waiting", async () => {
   await send("다른 질문");
   assert.equal(document.querySelector(".eo-copilot-diff-block"), null);
   assert.equal(p.textContent, "원래 문장");
-  assert.match(assistants()[0].textContent, /거절함/);
+  assert.match(assistants()[0].textContent, /버림/);
 });
 
 test("with reduced motion no pointer is drawn and the change is applied at once", async () => {

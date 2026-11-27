@@ -89,6 +89,7 @@ export type CopilotEditStep =
   | { kind: 'replace_paragraphs'; replacements: Array<{ index: number; text: string }> }
   | { kind: 'replace_span'; index: number; search: string; replace: string }
   | { kind: 'replace_range'; startIndex: number; endIndex: number; texts: string[] }
+  | { kind: 'insert_after'; index: number; texts: string[] }
   | { kind: 'append'; texts: string[] };
 
 export interface ApplyCopilotEditsParams {
@@ -411,6 +412,13 @@ export function parseApplyCopilotEditsParams(raw: Record<string, unknown>): Appl
       for (const t of texts) chargeText(t);
       return { kind: 'replace_range', startIndex, endIndex, texts };
     }
+    if (kind === 'insert_after') {
+      assertOnlyKeys(obj, ['kind', 'index', 'texts'], `steps[${stepIdx}]`);
+      const index = asNonNegativeSafeInt(obj.index, `steps[${stepIdx}].index`);
+      const texts = parseTextsList(obj.texts, `steps[${stepIdx}].texts`);
+      for (const t of texts) chargeText(t);
+      return { kind: 'insert_after', index, texts };
+    }
     if (kind === 'append') {
       assertOnlyKeys(obj, ['kind', 'texts'], `steps[${stepIdx}]`);
       const texts = parseTextsList(obj.texts, `steps[${stepIdx}].texts`);
@@ -465,6 +473,20 @@ function replaceSingleParagraphWithLines(
   return { paragraph: curPara, charOffset: curOffset };
 }
 
+// 글 목록을 줄 단위 문단 목록으로 편다. 줄 수가 상한을 넘으면 `overflowMessage`로 거부한다.
+function splitTextLines(rawTexts: string[], overflowMessage: string): string[] {
+  const lines: string[] = [];
+  for (const t of rawTexts) {
+    for (const piece of t.split('\n')) {
+      lines.push(piece);
+      if (lines.length > COPILOT_MAX_STEP_PARAGRAPHS * 2) {
+        throw new Error(overflowMessage);
+      }
+    }
+  }
+  return lines;
+}
+
 function applyRangeReplaceStep(
   wasm: CopilotWasmSource,
   startIndex: number,
@@ -488,15 +510,7 @@ function applyRangeReplaceStep(
     assertEditableParagraph(wasm, sec, p0 + k, pLen);
   }
 
-  const lines: string[] = [];
-  for (const t of rawTexts) {
-    for (const piece of t.split('\n')) {
-      lines.push(piece);
-      if (lines.length > COPILOT_MAX_STEP_PARAGRAPHS * 2) {
-        throw new Error('교체 문단 줄 수가 허용 상한을 초과했습니다.');
-      }
-    }
-  }
+  const lines = splitTextLines(rawTexts, '교체 문단 줄 수가 허용 상한을 초과했습니다.');
   if (lines.length === 0) lines.push('');
 
   const common = Math.min(oldCount, lines.length);
@@ -539,18 +553,31 @@ function applyRangeReplaceStep(
   };
 }
 
+// 아래에 삽입: 문단 `index`의 글과 서식은 그대로 두고, 그 바로 아래에 줄마다 새 문단을 넣는다.
+function applyInsertAfterStep(wasm: CopilotWasmSource, index: number, rawTexts: string[]): CopilotCursorPosition {
+  const { coords } = buildFlatParagraphTable(wasm);
+  if (index >= coords.length) {
+    throw new Error(`문단 번호(${index + 1})가 문서 범위를 벗어났습니다.`);
+  }
+  const lines = splitTextLines(rawTexts, '삽입 문단 줄 수가 허용 상한을 초과했습니다.');
+  const sec = coords[index].section;
+  let curPara = coords[index].paragraph;
+  let curLen = wasm.getParagraphLength(sec, curPara);
+  for (const line of lines) {
+    wasm.splitParagraph(sec, curPara, curLen);
+    curPara += 1;
+    if (line.length > 0) {
+      wasm.insertText(sec, curPara, 0, line);
+    }
+    curLen = wasm.getParagraphLength(sec, curPara);
+  }
+  return { sectionIndex: sec, paragraphIndex: curPara, charOffset: curLen };
+}
+
 function applyAppendStep(wasm: CopilotWasmSource, rawTexts: string[]): CopilotCursorPosition {
   const secCount = wasm.getSectionCount();
   if (secCount <= 0) throw new Error('문서가 로드되지 않았습니다.');
-  const lines: string[] = [];
-  for (const t of rawTexts) {
-    for (const piece of t.split('\n')) {
-      lines.push(piece);
-      if (lines.length > COPILOT_MAX_STEP_PARAGRAPHS * 2) {
-        throw new Error('추가 문단 줄 수가 허용 상한을 초과했습니다.');
-      }
-    }
-  }
+  const lines = splitTextLines(rawTexts, '추가 문단 줄 수가 허용 상한을 초과했습니다.');
   if (lines.length === 0) return { sectionIndex: 0, paragraphIndex: 0, charOffset: 0 };
 
   const lastSec = secCount - 1;
@@ -653,6 +680,8 @@ export function applyCopilotEdits(
             pos = { sectionIndex: target.section, paragraphIndex: res.paragraph, charOffset: res.charOffset };
           } else if (step.kind === 'replace_range') {
             pos = applyRangeReplaceStep(targetWasm, step.startIndex, step.endIndex, step.texts);
+          } else if (step.kind === 'insert_after') {
+            pos = applyInsertAfterStep(targetWasm, step.index, step.texts);
           } else if (step.kind === 'append') {
             pos = applyAppendStep(targetWasm, step.texts);
           }

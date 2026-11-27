@@ -305,6 +305,7 @@ test("SLIDE omits duplicate body/notes/default layout, PDF sends activePage, SHE
   loadUiModule(UI("copilot-preview.js"), env);
   loadUiModule(UI("copilot-perform-slide.js"), env);
   loadUiModule(UI("copilot-perform.js"), env);
+  loadUiModule(UI("copilot-edit-mode.js"), env);
   loadUiModule(UI("copilot-actions.js"), env);
   const bigMap = {};
   for (let r = 1; r <= 540; r += 1) bigMap["A" + r] = { value: "R" + r, formula: "" };

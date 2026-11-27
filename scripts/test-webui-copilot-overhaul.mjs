@@ -144,7 +144,8 @@ test("multi-turn agent loop executes on-demand read tools and self-corrects SLID
   assert.equal(deck[0].elements?.length || 0, 0);
   await slideH.send("글상자 추가", 28);
   assert.equal(slideCall, 2, "retried once after layout_lint failure");
-  assert.equal(deck[0].elements?.length || 0, 0, "dry-run gate left live slideDeckState untouched before 수락");
+  // The dry-run gate ran on a copy: only the final answer's one box is in the deck, put in as a draft (PD-385).
+  assert.equal(deck[0].elements?.length, 1, "dry-run gate left live slideDeckState untouched; the final box is the only element");
   assert.ok(await acceptProposal(slideH.document, slideH.userClick));
   assert.equal(deck[0].elements[0].x, 120);
   assert.equal(deck[0].elements[0].text, "경계 안 상자");
@@ -694,7 +695,9 @@ test("DOC table cell HTML escaping, ul Track Changes, layout_lint offscreen clon
   const initialHtml = h.editor.innerHTML;
   await h.send("조건 표 추가", 28);
   assert.equal(docGateTurn, 2);
-  assert.equal(h.editor.innerHTML, initialHtml, "DOC dry-run gate ran on offscreen clone without mutating #doc-editor");
+  // The new table is in the document as a draft (PD-385); the wide first attempt never touched it (one table, the retried one).
+  assert.notEqual(h.editor.innerHTML, initialHtml);
+  assert.equal(h.editor.querySelectorAll("table").length, 1, "DOC dry-run gate ran on offscreen clone without mutating #doc-editor");
   assert.ok(await acceptProposal(h.document, h.userClick));
   const cells = Array.from(h.editor.querySelectorAll("table td")).map((td) => td.textContent);
   assert.deepEqual(cells, ["조건", "식", "범위", "x < y & z > 0"]);

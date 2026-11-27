@@ -589,6 +589,7 @@ test("엔드포인트 주소를 바꾸고 새 키를 넣지 않으면 저장된 
   const seenRequests = [];
   const { document, sandbox, userClick } = await createWorkspaceHarness({
     search: "?module=DOC&win=w-copilot-key-url",
+    matchMedia: REDUCED_MOTION,
     testIpc: async (command, payload) => {
       if (command === "run_smart_assistant") {
         const parsed = JSON.parse(payload);

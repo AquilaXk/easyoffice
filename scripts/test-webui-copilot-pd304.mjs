@@ -13,14 +13,34 @@ const visibleCards = (document) => cards(document).filter((card) => !card.classL
 const thumbs = (document) => document.querySelectorAll("#slide-thumb-list .slide-thumb");
 const zoneText = (document, id) => document.getElementById(id).textContent.trim();
 
-async function slides(run, motion = true) {
-  const h = await open({ module: "SLIDE", motion, run });
-  // Plays the accepted change to its end (the harness's timers are virtual).
-  h.runAccepted = async (ms = 9000) => {
-    h.userClick(reviewButton(h.document, "accept"));
+function withReviewSteps(h) {
+  // A change that edits what is there waits for 바꾸기; new content only is typed into the document as a draft as soon as the answer is in (PD-385).
+  h.begin = async () => {
+    const accept = reviewButton(h.document, "accept");
+    if (accept) h.userClick(accept);
     await flushAsyncTurns(6);
-    await h.play(ms);
   };
+  // Plays the change to its end (the harness's timers are virtual) and keeps a draft so its 실행 취소 chip is there.
+  h.runAccepted = async (ms = 9000) => {
+    await h.begin();
+    await h.play(ms);
+    const keep = reviewButton(h.document, "keep");
+    if (keep) h.userClick(keep);
+    await flushAsyncTurns(4);
+  };
+  // One 실행 취소 of the answer at `index` (a draft is kept first, which is what puts the chip there).
+  h.undo = async (index) => {
+    const keep = reviewButton(h.document, "keep");
+    if (keep) h.userClick(keep);
+    await flushAsyncTurns(2);
+    h.userClick(h.assistants()[index].querySelector(".eo-copilot-undo-btn"));
+    await flushAsyncTurns(12);
+  };
+  return h;
+}
+
+async function slides(run, motion = true) {
+  const h = withReviewSteps(await open({ module: "SLIDE", motion, run }));
   h.select = async (index) => {
     thumbs(h.document)[index].click();
     await flushAsyncTurns(4);
@@ -43,9 +63,9 @@ const addElement = (element, extra = {}) => ({ op: "slide.add_element", element,
 test("a new slide: the pointer presses 새 슬라이드, a blank slide opens, the title is typed, and one undo removes it", async () => {
   const h = await slides(() => answer([{ op: "slide.add", title: "새로 만든 슬라이드 제목", bullets: ["첫째 줄", "둘째 줄"], layout: "twoColumn" }]));
   await h.send("슬라이드를 추가해 주세요");
-  assert.equal(thumbs(h.document).length, 1, "nothing is added before 수락");
-  h.userClick(reviewButton(h.document, "accept"));
-  await flushAsyncTurns(6);
+  assert.ok(layerOf(h.document) || thumbs(h.document).length >= 1, "new content is typed in as a draft without a preview (PD-385)");
+  assert.equal(reviewButton(h.document, "accept"), undefined, "there is no 바꾸기 for new content");
+  await h.begin();
   assert.ok(layerOf(h.document), "the pointer shows");
   let opened = false;
   const titles = new Set();
@@ -64,16 +84,14 @@ test("a new slide: the pointer presses 새 슬라이드, a blank slide opens, th
   assert.equal(thumbs(h.document).length, 2, "the real slide replaced the temporary thumbnail");
   assert.equal(zoneText(h.document, "slide-title-zone"), "새로 만든 슬라이드 제목");
   assert.equal(zoneText(h.document, "slide-lower-zone"), "첫째 줄\n둘째 줄");
-  h.userClick(h.assistants()[0].querySelector(".eo-copilot-undo-btn"));
-  await flushAsyncTurns(12);
+  await h.undo(0);
   assert.equal(thumbs(h.document).length, 1, "one undo takes the slide back");
 });
 
 test("stopping while a new slide's title is typed leaves a slide with what was typed", async () => {
   const h = await slides(() => answer([{ op: "slide.add", title: "멈추기 전까지만 쓰는 긴 슬라이드 제목입니다", bullets: ["본문은 쓰지 못합니다"] }]));
   await h.send("슬라이드를 추가해 주세요");
-  h.userClick(reviewButton(h.document, "accept"));
-  await flushAsyncTurns(6);
+  await h.begin();
   await playUntil(h, () => zoneText(h.document, "slide-title-zone").length >= 3);
   const typed = zoneText(h.document, "slide-title-zone");
   assert.ok(typed.length > 0 && typed.length < 20, "typing is under way: " + typed);
@@ -84,8 +102,7 @@ test("stopping while a new slide's title is typed leaves a slide with what was t
   const kept = zoneText(h.document, "slide-title-zone");
   assert.ok(kept.length > 0 && "멈추기 전까지만 쓰는 긴 슬라이드 제목입니다".startsWith(kept), "the typed part stays: " + kept);
   assert.equal(zoneText(h.document, "slide-lower-zone"), "", "the body was never typed");
-  h.userClick(h.assistants()[0].querySelector(".eo-copilot-undo-btn"));
-  await flushAsyncTurns(12);
+  await h.undo(0);
   assert.equal(thumbs(h.document).length, 1);
 });
 
@@ -94,9 +111,8 @@ test("stopping while a new slide's title is typed leaves a slide with what was t
 test("a text box is drawn open with the pointer, selected, typed into, and ends as the one real object", async () => {
   const h = await slides(() => answer([addElement(textbox("글상자에 쓰는 내용입니다"))]));
   await h.send("글상자를 넣어 주세요");
-  assert.equal(cards(h.document).length, 0);
-  h.userClick(reviewButton(h.document, "accept"));
-  await flushAsyncTurns(6);
+  assert.equal(reviewButton(h.document, "accept"), undefined, "there is no 바꾸기 for new content");
+  await h.begin();
   const seen = new Set();
   let selected = false;
   for (let i = 0; i < 160; i += 1) {
@@ -111,16 +127,14 @@ test("a text box is drawn open with the pointer, selected, typed into, and ends 
   assert.equal(layerOf(h.document), null);
   assert.equal(cards(h.document).length, 1, "the temporary object is gone and the real one stands");
   assert.equal(cards(h.document)[0].querySelector(".slide-el-textbox").textContent, "글상자에 쓰는 내용입니다");
-  h.userClick(h.assistants()[0].querySelector(".eo-copilot-undo-btn"));
-  await flushAsyncTurns(12);
+  await h.undo(0);
   assert.equal(cards(h.document).length, 0, "one undo removes it");
 });
 
 test("a chart is drawn as a frame and appears whole", async () => {
   const h = await slides(() => answer([addElement({ kind: "chart", chartType: "column", x: 460, y: 240, w: 360, h: 190, title: "실적 요약" })]));
   await h.send("차트를 넣어 주세요");
-  h.userClick(reviewButton(h.document, "accept"));
-  await flushAsyncTurns(6);
+  await h.begin();
   let temp = 0;
   for (let i = 0; i < 80; i += 1) {
     await h.play(32);
@@ -145,8 +159,7 @@ test("an object that is in the slide already is grabbed and moved, and the old o
   const left = () => cards(h.document)[0].style.left;
   const original = left();
   await h.send("오른쪽 아래로 옮겨 주세요");
-  h.userClick(reviewButton(h.document, "accept"));
-  await flushAsyncTurns(6);
+  await h.begin();
   let hidden = false;
   const lefts = new Set();
   for (let i = 0; i < 100; i += 1) {
@@ -160,8 +173,7 @@ test("an object that is in the slide already is grabbed and moved, and the old o
   assert.equal(cards(h.document).length, 1);
   assert.notEqual(left(), original);
   assert.equal(cards(h.document)[0].classList.contains("eo-copilot-ghost"), false);
-  h.userClick(h.assistants()[1].querySelector(".eo-copilot-undo-btn"));
-  await flushAsyncTurns(12);
+  await h.undo(1);
   assert.equal(left(), original, "one undo puts it back");
 });
 
@@ -176,8 +188,7 @@ test("an object that the new list leaves out is selected and then removed", asyn
   await h.runAccepted();
   assert.equal(cards(h.document).length, 1);
   await h.send("글상자를 지워 주세요");
-  h.userClick(reviewButton(h.document, "accept"));
-  await flushAsyncTurns(6);
+  await h.begin();
   await h.play(400);
   assert.ok(layerOf(h.document).querySelectorAll(".eo-copilot-selection").length > 0, "the object is selected first");
   assert.equal(visibleCards(h.document).length, 1, "and still there");
@@ -189,8 +200,7 @@ test("stopping in the middle of a text box's text keeps the box with the typed p
   const text = "중간에 멈추면 쓴 만큼만 남는 글상자의 긴 내용입니다";
   const h = await slides(() => answer([addElement(textbox(text))]));
   await h.send("글상자를 넣어 주세요");
-  h.userClick(reviewButton(h.document, "accept"));
-  await flushAsyncTurns(6);
+  await h.begin();
   const typed = () => cards(h.document)[0]?.querySelector(".slide-el-textbox").textContent ?? "";
   await playUntil(h, () => typed().length >= 3);
   const typing = typed();
@@ -200,16 +210,14 @@ test("stopping in the middle of a text box's text keeps the box with the typed p
   assert.equal(cards(h.document).length, 1);
   const kept = cards(h.document)[0].querySelector(".slide-el-textbox").textContent;
   assert.ok(kept.length > 0 && text.startsWith(kept) && kept.length < text.length, "the typed part stays: " + kept);
-  h.userClick(h.assistants()[0].querySelector(".eo-copilot-undo-btn"));
-  await flushAsyncTurns(12);
+  await h.undo(0);
   assert.equal(cards(h.document).length, 0);
 });
 
 test("stopping before the pointer has drawn the object leaves the slide as it was", async () => {
   const h = await slides(() => answer([addElement(textbox("그리기 전에 멈춥니다"))]));
   await h.send("글상자를 넣어 주세요");
-  h.userClick(reviewButton(h.document, "accept"));
-  await flushAsyncTurns(6);
+  await h.begin();
   await h.play(100);
   h.userClick(h.document.getElementById("btn-copilot-send"));
   await flushAsyncTurns(14);
@@ -226,8 +234,7 @@ test("the layout is picked with the pointer, shown on the stage, and written at 
   const select = h.document.getElementById("slide-layout-select");
   const before = stage.dataset.layout;
   await h.send("두 개의 내용으로 바꿔 주세요");
-  h.userClick(reviewButton(h.document, "accept"));
-  await flushAsyncTurns(6);
+  await h.begin();
   let shown = false;
   for (let i = 0; i < 60; i += 1) {
     await h.play(32);
@@ -237,8 +244,7 @@ test("the layout is picked with the pointer, shown on the stage, and written at 
   await h.play(4000);
   assert.equal(layerOf(h.document), null);
   assert.equal(stage.dataset.layout, "twoColumn");
-  h.userClick(h.assistants()[0].querySelector(".eo-copilot-undo-btn"));
-  await flushAsyncTurns(12);
+  await h.undo(0);
   assert.equal(stage.dataset.layout, before);
 });
 
@@ -246,8 +252,7 @@ test("the speaker notes are typed into their field and written at the end", asyn
   const h = await slides(() => answer([{ op: "slide.update", notes: "발표할 때 강조할 요점입니다" }]));
   const notes = h.document.getElementById("slide-presenter-notes");
   await h.send("노트를 써 주세요");
-  h.userClick(reviewButton(h.document, "accept"));
-  await flushAsyncTurns(6);
+  await h.begin();
   const seen = new Set();
   for (let i = 0; i < 100; i += 1) {
     await h.play(32);
@@ -309,7 +314,7 @@ const rangeOp = (extra, ...texts) => ({ op: "doc.replace_paragraphs", ...extra, 
 const paragraphs = (editor) => Array.from(editor.querySelectorAll("p")).filter((p) => !p.classList.contains("manuscript-notice") && !p.classList.contains("eo-copilot-ghost")).map((p) => p.textContent);
 
 async function range(op, motion = true) {
-  const h = await open({ motion, run: () => answer([op]) });
+  const h = withReviewSteps(await open({ motion, run: () => answer([op]) }));
   h.editor.innerHTML = "<p>첫째 문단</p><p>둘째 문단입니다</p><p>셋째 문단</p><p>넷째 문단</p>";
   await h.send("바꿔 주세요");
   return h;
@@ -317,8 +322,7 @@ async function range(op, motion = true) {
 
 test("a range of paragraphs is selected with the pointer first, then replaced by the typed blocks", async () => {
   const h = await range(rangeOp({ startIndex: 1, endIndex: 2 }, "새로 쓴 둘째 문단", "새로 쓴 셋째 문단"));
-  h.userClick(reviewButton(h.document, "accept"));
-  await flushAsyncTurns(6);
+  await h.begin();
   assert.ok(layerOf(h.document), "the pointer shows");
   let selected = 0;
   let hidden = false;
@@ -336,15 +340,13 @@ test("a range of paragraphs is selected with the pointer first, then replaced by
   assert.equal(layerOf(h.document), null);
   assert.deepEqual(paragraphs(h.editor), ["첫째 문단", "새로 쓴 둘째 문단", "새로 쓴 셋째 문단", "넷째 문단"]);
   assert.equal(h.editor.querySelectorAll(".eo-copilot-ghost").length, 0);
-  h.userClick(h.assistants()[0].querySelector(".eo-copilot-undo-btn"));
-  await flushAsyncTurns(12);
+  await h.undo(0);
   assert.deepEqual(paragraphs(h.editor), ["첫째 문단", "둘째 문단입니다", "셋째 문단", "넷째 문단"], "one undo puts the range back");
 });
 
 test("stopping in the middle of a range keeps the blocks typed so far in place of the range", async () => {
   const h = await range(rangeOp({ startIndex: 1, endIndex: 2 }, "첫 블록은 끝까지 씁니다", "둘째 블록은 쓰다가 멈춥니다 길게 이어지는 문장"));
-  h.userClick(reviewButton(h.document, "accept"));
-  await flushAsyncTurns(6);
+  await h.begin();
   await playUntil(h, () => h.editor.querySelectorAll(".eo-copilot-ghost").length === 2 && paragraphs(h.editor).length >= 3 && paragraphs(h.editor)[1].length >= 3);
   const typing = paragraphs(h.editor);
   assert.ok(typing.length >= 3, "typing has reached a new block: " + typing.join("/"));
@@ -354,15 +356,13 @@ test("stopping in the middle of a range keeps the blocks typed so far in place o
   assert.equal(kept[0], "첫째 문단");
   assert.equal(kept.at(-1), "넷째 문단");
   assert.ok(kept.length >= 3 && !kept.includes("둘째 문단입니다") && !kept.includes("셋째 문단"), "the old range is gone: " + kept.join("/"));
-  h.userClick(h.assistants()[0].querySelector(".eo-copilot-undo-btn"));
-  await flushAsyncTurns(12);
+  await h.undo(0);
   assert.deepEqual(paragraphs(h.editor), ["첫째 문단", "둘째 문단입니다", "셋째 문단", "넷째 문단"]);
 });
 
 test("stopping while the pointer is still selecting the range leaves the document untouched", async () => {
   const h = await range(rangeOp({ startIndex: 0, endIndex: 1 }, "쓰기 전에 멈춥니다"));
-  h.userClick(reviewButton(h.document, "accept"));
-  await flushAsyncTurns(6);
+  await h.begin();
   await h.play(150);
   h.userClick(h.document.getElementById("btn-copilot-send"));
   await flushAsyncTurns(14);
@@ -373,8 +373,7 @@ test("stopping while the pointer is still selecting the range leaves the documen
 
 test("a replacement that names no range covers the whole document", async () => {
   const h = await range(rangeOp({}, "문서 전체를 바꾼 글"));
-  h.userClick(reviewButton(h.document, "accept"));
-  await flushAsyncTurns(6);
+  await h.begin();
   await h.play(6000);
   assert.deepEqual(paragraphs(h.editor), ["문서 전체를 바꾼 글"]);
 });

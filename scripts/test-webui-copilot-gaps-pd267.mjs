@@ -110,7 +110,7 @@ test("regenerate in edit mode takes the earlier edit back before applying the ne
   });
   const editor = document.getElementById("doc-editor");
   await send("문단을 추가해 주세요");
-  assert.equal(editor.textContent.includes("추가 1"), false, "nothing is written until 수락");
+  assert.equal(editor.textContent.includes("추가 1"), true, "new content goes into the document as a draft at once (PD-385)");
   await accept();
   assert.ok(editor.textContent.includes("추가 1"));
   userClick(button(assistants()[0], "다시 생성"));

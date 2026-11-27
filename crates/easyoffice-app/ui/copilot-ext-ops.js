@@ -314,6 +314,18 @@
           const items = Array.isArray(op.blocks) ? op.blocks : Array.isArray(op.paragraphs) ? op.paragraphs : [String(op.text ?? "")];
           const texts = items.map(plainTextFromDocItem);
           steps.push({ kind: "append", texts });
+        } else if (kind === "doc.insert_below" && Array.isArray(op.inserts)) {
+          // 아래에 삽입: 문단마다 한 단계. 번호가 큰 문단부터 넣어 앞 번호가 밀리지 않게 한다. 같은 문단 아래 글은 순서대로 모은다.
+          const byAnchor = new Map();
+          for (const entry of op.inserts) {
+            const texts = byAnchor.get(entry.after) || [];
+            for (const item of entry.blocks) texts.push(entry.plain ? String(item) : plainTextFromDocItem(item));
+            byAnchor.set(entry.after, texts);
+          }
+          for (const [index, texts] of [...byAnchor].sort((a, b) => b[0] - a[0])) {
+            steps.push({ kind: "insert_after", index, texts });
+            locations.push({ module: "HWP", label: "문단 " + (index + 2), paragraphIndex: index + 1 });
+          }
         } else {
           throw new Error("한글 편집기에서 지원하지 않는 코파일럿 작업입니다: " + kind);
         }

@@ -230,6 +230,15 @@
     targetParent.appendChild(span);
   }
 
+  // 평문은 태그·엔티티 문법으로 다시 읽지 않고 그대로 텍스트 노드로 넣는다(`\n`은 줄바꿈). 빈 글이면 빈 줄 하나가 남는다.
+  function appendPlainText(document, parent, text) {
+    String(text ?? "").split("\n").forEach((part, idx) => {
+      if (idx > 0) parent.appendChild(document.createElement("br"));
+      if (part) parent.appendChild(document.createTextNode(part));
+    });
+    if (!parent.firstChild) parent.appendChild(document.createElement("br"));
+  }
+
   function populateSanitizedInline(document, parent, rawInput) {
     const str = String(rawInput ?? "");
     if (!str) return;
@@ -750,6 +759,7 @@
     docBlocksOf,
     serializeBlockForContext,
     populateSanitizedInline,
+    appendPlainText,
     buildDocBlockElement,
     isTrackChangesActive,
     nextRevisionId,
