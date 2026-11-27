@@ -134,6 +134,7 @@
       (p) =>
         NON_DEFAULT_CELL_ALIGNS.has(p.align) ||
         (Number.isInteger(p.lineSpacingPercent) && p.lineSpacingPercent !== 100) ||
+        Boolean(p.lineSpacingKind) ||
         (Array.isArray(p.runs) && p.runs.some(runHasRichFormat))
     );
   }
@@ -147,7 +148,8 @@
     const kept = runs.filter((r) => r.text.length > 0);
     const out = { runs: kept };
     if (para.align) out.align = para.align;
-    if (para.lineSpacingPercent) out.lineSpacingPercent = para.lineSpacingPercent;
+    if (para.special) Object.assign(out, host.__EASYOFFICE_DOC_LINE_SPACING__.jsonFields(para.special));
+    else if (para.lineSpacingPercent) out.lineSpacingPercent = para.lineSpacingPercent;
     return out;
   }
 
@@ -155,15 +157,17 @@
     const { isSkippedElement, styleFormat, normalizeAlign, parseLineSpacing, applyFmtFields, sameFormat } = helpers;
     const cellAlign = normalizeAlign(cell.style?.textAlign);
     const cellLs = parseLineSpacing(cell.style?.lineHeight || "");
+    const lineKinds = host.__EASYOFFICE_DOC_LINE_SPACING__;
+    const cellKind = lineKinds?.specialOf(cell) || null;
     const paragraphs = [];
     let hasBlockChild = false;
 
-    function pushStream(nodes, align, lineSpacingPercent, initialFmt) {
+    function pushStream(nodes, align, lineSpacingPercent, initialFmt, special) {
       let curRuns = [];
       let pushedInStream = 0;
       const startFmt = initialFmt || { bold: false, italic: false, underline: false, strike: false };
       const pushCurPara = () => {
-        paragraphs.push(finalizeParagraphRuns({ runs: curRuns, align, lineSpacingPercent }));
+        paragraphs.push(finalizeParagraphRuns({ runs: curRuns, align, lineSpacingPercent, special }));
         curRuns = [];
       };
       const appendText = (text, fmt) => {
@@ -203,7 +207,7 @@
     let pendingInline = [];
     const flushInline = () => {
       if (pendingInline.length === 0) return;
-      pushStream(pendingInline, cellAlign, cellLs, null);
+      pushStream(pendingInline, cellAlign, cellLs, null, cellKind);
       pendingInline = [];
     };
     for (const child of Array.from(cell.childNodes || [])) {
@@ -225,7 +229,7 @@
           if (col && blkFmt.color === undefined) blkFmt.color = col;
           if (hi && blkFmt.highlight === undefined) blkFmt.highlight = hi;
         }
-        pushStream(Array.from(child.childNodes || []), blkAlign, blkLs, blkFmt);
+        pushStream(Array.from(child.childNodes || []), blkAlign, blkLs, blkFmt, lineKinds?.specialOf(child) || cellKind);
       } else {
         pendingInline.push(child);
       }
@@ -236,7 +240,8 @@
       paragraphs.length > 0 &&
       paragraphs[paragraphs.length - 1].runs.length === 0 &&
       !paragraphs[paragraphs.length - 1].align &&
-      !paragraphs[paragraphs.length - 1].lineSpacingPercent
+      !paragraphs[paragraphs.length - 1].lineSpacingPercent &&
+      !paragraphs[paragraphs.length - 1].lineSpacingKind
     ) {
       paragraphs.pop();
     }
@@ -340,7 +345,9 @@
       const cellStyle = {};
       const cellData = {};
       if (p.align) cellStyle.textAlign = p.align;
-      if (Number.isInteger(p.lineSpacingPercent) && p.lineSpacingPercent > 0 && p.lineSpacingPercent !== 100) {
+      const lengthRule = host.__EASYOFFICE_DOC_LINE_SPACING__?.fromJson(p);
+      if (lengthRule) host.__EASYOFFICE_DOC_LINE_SPACING__.applyToSpec({ style: cellStyle, data: cellData }, lengthRule);
+      else if (Number.isInteger(p.lineSpacingPercent) && p.lineSpacingPercent > 0 && p.lineSpacingPercent !== 100) {
         cellStyle.lineHeight = String(p.lineSpacingPercent / 100);
         cellData.eoLineSpacing = String(p.lineSpacingPercent);
       }
@@ -353,7 +360,9 @@
       const st = {};
       const ds = {};
       if (p.align) st.textAlign = p.align;
-      if (Number.isInteger(p.lineSpacingPercent) && p.lineSpacingPercent > 0 && p.lineSpacingPercent !== 100) {
+      const lengthRule = host.__EASYOFFICE_DOC_LINE_SPACING__?.fromJson(p);
+      if (lengthRule) host.__EASYOFFICE_DOC_LINE_SPACING__.applyToSpec({ style: st, data: ds }, lengthRule);
+      else if (Number.isInteger(p.lineSpacingPercent) && p.lineSpacingPercent > 0 && p.lineSpacingPercent !== 100) {
         st.lineHeight = String(p.lineSpacingPercent / 100);
         ds.eoLineSpacing = String(p.lineSpacingPercent);
       }

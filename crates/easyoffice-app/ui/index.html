@@ -803,6 +803,7 @@
               <option value="180">180 %</option>
               <option value="200">200 %</option>
               <option value="300">300 %</option>
+              <option value="options">줄 간격 옵션…</option>
             </select>
             <span class="sb-stepper-col">
               <button id="btn-ls-up" type="button" class="sb-step-btn" data-icon="chevron-up" title="줄 간격 넓게" aria-label="줄 간격 넓게"></button>
@@ -915,7 +916,16 @@
                     </div>
                     <div class="pages-insp-section">
                       <span class="pages-insp-label">간격</span>
-                      <div class="pages-insp-row"><select id="pages-insp-linespacing" class="sb-combo sb-select" aria-label="간격"></select></div>
+                      <div class="pages-insp-row pages-insp-line-row">
+                        <select id="pages-insp-linekind" class="sb-combo sb-select" aria-label="줄 간격 방식">
+                          <option value="multiple">줄</option>
+                          <option value="atLeast">최소</option>
+                          <option value="exact">고정</option>
+                          <option value="between">줄 사이</option>
+                        </select>
+                        <input id="pages-insp-lineamount" class="pages-insp-num" type="number" min="0.1" max="10" step="0.1" value="1.1" aria-label="줄 간격 값" />
+                        <span id="pages-insp-lineunit" class="pages-insp-unit" hidden>pt</span>
+                      </div>
                       <div class="pages-insp-row">
                         <label class="pages-insp-sublabel" for="pages-insp-space-before">단락 앞</label>
                         <input id="pages-insp-space-before" class="pages-insp-num" type="number" min="0" max="400" step="1" value="0" aria-label="단락 앞" />
@@ -1575,6 +1585,30 @@
         <div class="dialog-footer">
           <button id="btn-doc-link-remove" type="button" class="dialog-btn" hidden>링크 제거</button>
           <button id="btn-doc-link-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-paragraph-dialog" class="tool-dialog" aria-labelledby="doc-paragraph-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-paragraph-dialog-title">단락</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="doc-paragraph-linekind">줄 간격(N)</label>
+            <select id="doc-paragraph-linekind" class="dialog-text-input">
+              <option value="single">한 줄</option>
+              <option value="oneHalf">1.5줄</option>
+              <option value="double">2줄</option>
+              <option value="atLeast">최소</option>
+              <option value="exact">고정</option>
+              <option value="multiple">배수</option>
+            </select>
+          </div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-paragraph-linevalue">값(A)</label><input id="doc-paragraph-linevalue" class="dialog-text-input" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-status-row"><span id="doc-paragraph-status" class="dialog-status" role="status" aria-live="polite"></span></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-paragraph-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>
       </div>
@@ -3138,6 +3172,7 @@
     <script src="./doc-clipboard-images.js"></script>
     <script src="./doc-paste-model.js"></script>
     <script src="./doc-paste.js"></script>
+    <script src="./doc-line-spacing.js"></script>
     <script src="./doc-runs-ui.js"></script>
     <script src="./doc-link.js"></script>
     <script src="./doc-toc.js"></script>

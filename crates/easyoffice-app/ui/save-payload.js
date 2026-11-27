@@ -156,8 +156,10 @@
     if (right !== null && right > 0) out.rightIndentTwips = right;
     const first = twipsFor(st.textIndent, data.eoFirstLineTwips);
     if (first !== null && first !== 0) out.firstLineIndentTwips = first;
+    const lineKinds = host.__EASYOFFICE_DOC_LINE_SPACING__;
     const percent = parseLineSpacingPercent(String(st.lineHeight || baseLineHeight || ""));
-    if (percent !== null) out.lineSpacingPercent = percent;
+    if (lineKinds?.specialOf(node)) Object.assign(out, lineKinds.jsonFields(lineKinds.specialOf(node)));
+    else if (percent !== null) out.lineSpacingPercent = percent;
     const docTableRuns = host.__EASYOFFICE_DOC_TABLE_RUNS__;
     if (docTableRuns) Object.assign(out, docTableRuns.paragraphSpacingLayout(node));
     return out;

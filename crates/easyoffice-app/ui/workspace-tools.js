@@ -836,7 +836,7 @@
       document.getElementById("doc-style-select")?.addEventListener("change", (ev) => getDocRuns().setStyle(ev.target.value));
       bindCharacterRunControls();
       const lsSelect = document.getElementById("doc-linespacing-select");
-      lsSelect?.addEventListener("change", () => applyStudioLineSpacing(Number.parseInt(lsSelect.value, 10)));
+      lsSelect?.addEventListener("change", () => host.__EASYOFFICE_DOC_LINE_SPACING__.chooseFromSelect(lsSelect, getDocRuns(), document));
       bindLineSpacingDoubleClick(editor, lsSelect);
       document.getElementById("btn-ls-up")?.addEventListener("click", () => {
         const cur = Number.parseInt(lsSelect?.value || "108", 10) || 108;

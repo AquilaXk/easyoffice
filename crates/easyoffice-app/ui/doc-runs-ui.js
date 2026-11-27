@@ -107,6 +107,7 @@
     const editor = () => byId("doc-editor");
     const isDocModule = () => ["DOC", "HWP"].includes(getActiveModule());
     const defaultLinePercent = () => (getActiveModule() === "HWP" ? HWP_LINE_PERCENT : DEFAULT_LINE_PERCENT);
+    const lineSpacingKinds = () => host.__EASYOFFICE_DOC_LINE_SPACING__;
     const defaultFontName = () => (getActiveModule() === "HWP" ? HWP_DEFAULT_FONT : DOC_DEFAULT_FONT);
 
     function setFeedback(text) {
@@ -422,22 +423,11 @@
     }
 
     // The line spacing list gets an entry for a custom value, then shows it.
-    function showLineSpacing(percent) {
+    // The line spacing list shows a multiple (`percent`) or a length kind (`special`, `{ kind, twips }`).
+    function showLineSpacing(percent, special) {
       const select = byId("doc-linespacing-select");
       if (!select) return;
-      const str = String(percent);
-      // Only one custom value is kept in the list: the one that is showing.
-      Array.from(select.querySelectorAll("option")).filter((o) => o.dataset.custom && o.value !== str).forEach((o) => o.remove());
-      const options = Array.from(select.querySelectorAll("option"));
-      if (!options.some((o) => o.value === str)) {
-        const opt = document.createElement("option");
-        opt.value = str;
-        opt.dataset.custom = "true";
-        opt.textContent = percent + " %";
-        const next = options.find((o) => Number(o.value) > percent);
-        select.insertBefore(opt, next || null);
-      }
-      select.value = str;
+      lineSpacingKinds().showInSelect(select, percent, special);
       host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(select);
     }
 
@@ -449,10 +439,19 @@
         stale.forEach((b) => {
           b.style.lineHeight = value;
           delete b.dataset.eoLineSpacing; // the exact value read from a file no longer matches
+          lineSpacingKinds().clearSpecial(b);
         });
         return stale.length > 0;
       }, "줄 간격을 적용할 문단을 먼저 선택하세요", alignmentTargets);
       if (res.blocks === 0) showLineSpacing(lineSpacingOf(null)); // nothing selected: the box keeps showing what applies
+      return res;
+    }
+
+    // 최소·고정·줄 사이 give the paragraphs `twips` of that kind; 줄 takes a percent (`setLineSpacing`).
+    function setLineSpacingRule(kind, value) {
+      if (kind === "multiple") return setLineSpacing(value);
+      const res = runOnParagraphs((blocks) => blocks.filter((b) => lineSpacingKinds().writeSpecial(b, kind, value)).length > 0, "줄 간격을 적용할 문단을 먼저 선택하세요", alignmentTargets);
+      if (res.blocks === 0) showLineSpacing(lineSpacingOf(null));
       return res;
     }
 
@@ -667,8 +666,15 @@
     }
 
     function lineSpacingOf(block) {
+      if (lineSpacingKinds().specialOf(block)) return defaultLinePercent();
       const raw = Number.parseFloat(block?.style?.lineHeight || editor()?.style?.lineHeight || "");
       return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 100) : defaultLinePercent();
+    }
+
+    // The kind and amount a paragraph shows: percent for 줄, twips for 최소, 고정 and 줄 사이.
+    function lineSpecOf(block) {
+      const special = lineSpacingKinds().specialOf(block);
+      return special ? { kind: special.kind, value: special.twips } : { kind: "multiple", value: lineSpacingOf(block) };
     }
 
     function styleNameOf(block, modOverride, flavorOverride) {
@@ -711,7 +717,7 @@
         btn.setAttribute("aria-pressed", on ? "true" : "false");
         btn.classList.toggle("active", on);
       });
-      showLineSpacing(lineSpacingOf(blk));
+      showLineSpacing(lineSpacingOf(blk), lineSpacingKinds().specialOf(blk));
       const helper = host.__EASYOFFICE_DOC_TABLE_RUNS__;
       if (helper) {
         const beforeEl = byId("doc-space-before-input");
@@ -961,7 +967,7 @@
 
     return {
       bind, applyPatch, toggle, setSize, bumpSize, setFont, setColor, toggleColor, getState, syncToolbar,
-      shiftIndent, setBlockIndent, setAlign, setLineSpacing, showLineSpacing, setSpacing, toggleList, toggleTaskChecked, shiftListLevel, setStyle, styleNameOf, syncStyleOptions, syncRuler, resolveRulerScale, handleBeforeInput, handleSelectionChange,
+      shiftIndent, setBlockIndent, setAlign, setLineSpacing, setLineSpacingRule, lineSpecOf, showLineSpacing, setSpacing, toggleList, toggleTaskChecked, shiftListLevel, setStyle, styleNameOf, syncStyleOptions, syncRuler, resolveRulerScale, handleBeforeInput, handleSelectionChange,
       currentRange, withUndo,
       getPending: () => pending,
       getLastRange: () => lastRange,

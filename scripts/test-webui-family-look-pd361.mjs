@@ -554,6 +554,43 @@ test("The Pages format sidebar has the product's structure and its controls form
   before.dispatchEvent({ type: "change", target: before, bubbles: true });
   await flushAsyncTurns(4);
   assert.equal(Number.parseFloat(para().style.marginTop) > 0, true, "단락 앞 spacing");
+
+  // 간격: the popup names the kind (줄, 최소, 고정, 줄 사이) and the field beside it takes lines or points (PD-365)
+  const lineKind = byId("pages-insp-linekind");
+  const lineAmount = byId("pages-insp-lineamount");
+  assert.deepEqual([...lineKind.querySelectorAll("option")].map((o) => o.textContent), ["줄", "최소", "고정", "줄 사이"]);
+  const setLine = async (kindValue, amount) => {
+    select();
+    if (kindValue !== undefined) {
+      lineKind.value = kindValue;
+      lineKind.dispatchEvent({ type: "change", target: lineKind, bubbles: true });
+      await flushAsyncTurns(4);
+    }
+    if (amount !== undefined) {
+      lineAmount.value = amount;
+      lineAmount.dispatchEvent({ type: "change", target: lineAmount, bubbles: true });
+      await flushAsyncTurns(4);
+    }
+  };
+  await setLine("exact", "18");
+  assert.deepEqual([para().dataset.eoLineKind, para().dataset.eoLineTwips, para().style.lineHeight], ["exact", "360", "24px"], "고정 18 pt");
+  assert.equal(byId("pages-insp-lineunit").hidden, false, "points show their unit");
+  await setLine("between", "6");
+  assert.deepEqual([para().dataset.eoLineKind, para().dataset.eoLineTwips], ["between", "120"], "줄 사이 6 pt");
+  await setLine("atLeast");
+  assert.deepEqual([para().dataset.eoLineKind, para().dataset.eoLineTwips], ["atLeast", "320"], "최소 starts at 16 pt");
+  await setLine(undefined, "99999");
+  assert.equal(para().dataset.eoLineTwips, "320", "an amount out of range changes nothing");
+  await setLine("multiple");
+  assert.equal(para().dataset.eoLineKind, undefined, "줄 is a multiple again");
+  assert.equal(para().style.lineHeight, "1.08", "줄 starts at the document's own spacing");
+  assert.equal(byId("pages-insp-lineunit").hidden, true);
+  await setLine(undefined, "1.5");
+  assert.equal(para().style.lineHeight, "1.50", "줄 1.5");
+  select();
+  doc.dispatchEvent({ type: "selectionchange" });
+  await flushAsyncTurns(10);
+  assert.deepEqual([lineKind.value, lineAmount.value], ["multiple", "1.5"], "the controls show the paragraph's own spacing");
   const listSelect = byId("pages-insp-list");
   const pickList = async (value) => {
     select();

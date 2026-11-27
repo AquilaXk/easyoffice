@@ -95,4 +95,29 @@ export const docSteps = [
       imgFormats: ["png", "png"],
     });
   }],
+
+  // PD-365: the line-height of 최소, 고정 and 줄 사이 is a CSS length the browser really lays out.
+  ["최소, 고정 and 줄 사이 line spacing lays the lines out at their lengths", async (page) => {
+    await page.evaluate(() => {
+      document.querySelector("#doc-editor").innerHTML = ["a", "b", "c", "d"].map((t) => `<p style="font-size:20px"><span>${t}${"가".repeat(3)}<br>${t}${"나".repeat(3)}</span></p>`).join("");
+    });
+    const heights = await page.evaluate(() => {
+      const kinds = window.__EASYOFFICE_DOC_LINE_SPACING__;
+      const paras = [...document.querySelectorAll("#doc-editor > p")];
+      kinds.writeSpecial(paras[0], "exact", 600); // 40px
+      kinds.writeSpecial(paras[1], "atLeast", 150); // 10px, less than the 20px glyph line
+      kinds.writeSpecial(paras[2], "atLeast", 900); // 60px
+      kinds.writeSpecial(paras[3], "between", 300); // single line + 20px
+      const base = document.createElement("p");
+      base.style.cssText = "font-size:20px;line-height:1";
+      base.innerHTML = "가<br>나";
+      document.querySelector("#doc-editor").appendChild(base);
+      return [...paras, base].map((p) => p.getBoundingClientRect().height);
+    });
+    const [exact, atLeastSmall, atLeastLarge, between, single] = heights;
+    assert.ok(Math.abs(exact - 80) < 1.5, `exact 40px x 2 lines: ${exact}`);
+    assert.ok(Math.abs(atLeastSmall - single) < 1.5, `at least 10px does not shrink the 20px line: ${atLeastSmall} vs ${single}`);
+    assert.ok(Math.abs(atLeastLarge - 120) < 1.5, `at least 60px x 2 lines: ${atLeastLarge}`);
+    assert.ok(Math.abs(between - (single + 40)) < 1.5, `single line plus 20px per line: ${between} vs ${single}`);
+  }],
 ];

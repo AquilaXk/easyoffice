@@ -44,7 +44,7 @@ test("initial DOC toolbar and 편집 용지 dialog open with Korean word process
   assert.equal(lsSelect.value, "108");
   assert.deepEqual(
     Array.from(lsSelect.querySelectorAll("option")).map((o) => o.value),
-    ["100", "108", "115", "130", "160", "180", "200", "300"]
+    ["100", "108", "115", "130", "160", "180", "200", "300", "options"]
   );
   assert.equal(document.getElementById("btn-align-left").classList.contains("active"), true);
   assert.equal(document.getElementById("btn-align-justify").classList.contains("active"), false);

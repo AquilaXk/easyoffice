@@ -104,7 +104,9 @@
       spec.style.textIndent = twipsToPx(first);
       spec.data.eoFirstLineTwips = String(first);
     }
-    if (Number.isFinite(spacing) && spacing > 0 && spacing !== 100) {
+    const lengthRule = host.__EASYOFFICE_DOC_LINE_SPACING__?.fromJson(block);
+    if (lengthRule) host.__EASYOFFICE_DOC_LINE_SPACING__.applyToSpec(spec, lengthRule);
+    else if (Number.isFinite(spacing) && spacing > 0 && spacing !== 100) {
       spec.style.lineHeight = String(spacing / 100);
       spec.data.eoLineSpacing = String(spacing);
     }
@@ -465,7 +467,7 @@
     const zones = [null, null, null];
     let prev = -1;
     for (const b of blocks) {
-      if (b?.type !== "paragraph" || b.heading || b.list || b.leftIndentTwips || b.rightIndentTwips || b.firstLineIndentTwips || b.lineSpacingPercent || b.toc !== undefined || b.pageBreakBefore) {
+      if (b?.type !== "paragraph" || b.heading || b.list || b.leftIndentTwips || b.rightIndentTwips || b.firstLineIndentTwips || b.lineSpacingPercent || b.lineSpacingKind || b.toc !== undefined || b.pageBreakBefore) {
         return null;
       }
       const slot = b.align === "center" ? 1 : b.align === "right" ? 2 : (!b.align || b.align === "left") ? 0 : -1;

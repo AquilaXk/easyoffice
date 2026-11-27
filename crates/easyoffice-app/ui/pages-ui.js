@@ -82,11 +82,36 @@
       host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(dst);
     }
 
+    // 간격: the kind popup (줄, 최소, 고정, 줄 사이) and its amount, in lines for 줄 and in points for the rest.
+    const LINE_AMOUNT_LIMITS = { multiple: [0.1, 5, 0.1], atLeast: [1, 1584, 1], exact: [1, 1584, 1], between: [0, 1584, 1] };
+    const LINE_KIND_START = { atLeast: "16", exact: "16", between: "0" };
+    const lineKinds = () => host.__EASYOFFICE_DOC_LINE_SPACING__;
+
+    function syncLineSpacing(block) {
+      const kindEl = byId("pages-insp-linekind");
+      const amountEl = byId("pages-insp-lineamount");
+      const spec = deps.getDocRuns?.()?.lineSpecOf?.(block);
+      if (!kindEl || !amountEl || !spec) return;
+      if (doc.activeElement !== kindEl) {
+        kindEl.value = spec.kind;
+        host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(kindEl);
+      }
+      const [min, max, step] = LINE_AMOUNT_LIMITS[spec.kind];
+      Object.assign(amountEl, { min: String(min), max: String(max), step: String(step) });
+      byId("pages-insp-lineunit").hidden = spec.kind === "multiple";
+      if (doc.activeElement !== amountEl) amountEl.value = lineKinds().amountOf(spec.kind, spec.value);
+    }
+
+    function applyLineSpacing(kind, amountText) {
+      const value = lineKinds().valueOf(kind, amountText);
+      if (value !== null) deps.getDocRuns?.()?.setLineSpacingRule?.(kind, value);
+      syncInspectorValues();
+    }
+
     function syncInspectorValues() {
       if (!byId("pages-inspector")) return;
       mirrorSelect("doc-style-select", "pages-insp-style");
       mirrorSelect("doc-font-select", "pages-insp-font");
-      mirrorSelect("doc-linespacing-select", "pages-insp-linespacing");
       const sizeSrc = byId("doc-font-size-input");
       const sizeDst = byId("pages-insp-size");
       if (sizeSrc && sizeDst && doc.activeElement !== sizeDst) sizeDst.value = sizeSrc.value;
@@ -111,6 +136,7 @@
         if (src && dst && doc.activeElement !== dst) dst.value = src.value;
       }
       const block = selectedBlocks()[0];
+      syncLineSpacing(block);
       const listSel = byId("pages-insp-list");
       if (listSel && doc.activeElement !== listSel) {
         const kind = listKindOf(block);
@@ -312,10 +338,15 @@
           syncInspectorValues();
         });
       }
+      byId("pages-insp-linekind")?.addEventListener("change", (ev) => {
+        const kind = ev.target.value;
+        const fallback = kind === "multiple" ? lineKinds().amountOf("multiple", deps.getDocRuns?.()?.lineSpecOf?.(null)?.value ?? 108) : LINE_KIND_START[kind];
+        applyLineSpacing(kind, fallback);
+      });
+      byId("pages-insp-lineamount")?.addEventListener("change", (ev) => applyLineSpacing(byId("pages-insp-linekind").value, ev.target.value));
       for (const [inspId, srcId] of [
         ["pages-insp-style", "doc-style-select"],
         ["pages-insp-font", "doc-font-select"],
-        ["pages-insp-linespacing", "doc-linespacing-select"],
       ]) {
         byId(inspId)?.addEventListener("change", () => {
           const inspEl = byId(inspId);

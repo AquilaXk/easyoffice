@@ -101,6 +101,119 @@ test("line spacing applies to the selected paragraphs only and is the value that
   assert.equal(a.style.lineHeight, "1.30");
 });
 
+const pickLine = (h, value) => {
+  const box = h.document.getElementById("doc-linespacing-select");
+  box.value = value;
+  box.dispatchEvent({ type: "change", target: box });
+  return box;
+};
+
+test("PD-365: 최소, 고정 and 줄 사이 line spacing is kept per paragraph, shown in the list and saved with its kind", async () => {
+  const h = await createRunHarness([p("가"), p("나"), p("다")]);
+  const [a, b, c] = h.blocks;
+  await selectAcross(h, a, a);
+  const box = pickLine(h, "exact:300");
+  assert.equal(a.style.lineHeight, "20px", "exact 15 pt is a fixed line height");
+  assert.equal(a.dataset.eoLineKind, "exact");
+  assert.equal(a.dataset.eoLineTwips, "300");
+  assert.equal(box.value, "exact:300");
+  assert.equal(Array.from(box.querySelectorAll("option")).find((o) => o.value === "exact:300").textContent, "고정 15 pt");
+  await selectAcross(h, b, b);
+  pickLine(h, "atLeast:360");
+  assert.equal(b.style.lineHeight, "max(1em, 24px)");
+  await selectAcross(h, c, c);
+  pickLine(h, "between:120");
+  assert.equal(c.style.lineHeight, "calc(1em + 8px)");
+  assert.deepEqual(
+    saved(h).map((blk) => [blk.lineSpacingKind, blk.lineSpacingTwips, blk.lineSpacingPercent]),
+    [["exact", 300, undefined], ["atLeast", 360, undefined], ["between", 120, undefined]]
+  );
+  const customs = Array.from(box.querySelectorAll("option")).filter((o) => o.dataset.custom);
+  assert.equal(customs.length, 1, "one custom entry holds the showing value");
+  assert.equal(box.querySelectorAll("option").at(-1).value, "options", "줄 간격 옵션… stays the last entry");
+
+  await selectAcross(h, a, a);
+  assert.equal(box.value, "exact:300", "a paragraph shows its own kind");
+  pickLine(h, "150");
+  assert.equal(a.style.lineHeight, "1.50");
+  assert.equal(a.dataset.eoLineKind, undefined, "a multiple takes the kind off");
+  assert.equal(saved(h)[0].lineSpacingKind, undefined);
+  assert.equal(saved(h)[0].lineSpacingPercent, 150);
+});
+
+test("PD-365: 줄 간격 옵션… opens the 단락 dialog with the paragraph's values and 확인 applies them", async () => {
+  const h = await createRunHarness([p("가")]);
+  const [a] = h.blocks;
+  await selectAcross(h, a, a);
+  pickLine(h, "options");
+  const dialog = h.document.getElementById("doc-paragraph-dialog");
+  const kind = h.document.getElementById("doc-paragraph-linekind");
+  const value = h.document.getElementById("doc-paragraph-linevalue");
+  assert.equal(dialog.open, true);
+  assert.deepEqual(Array.from(kind.querySelectorAll("option")).map((o) => o.textContent), ["한 줄", "1.5줄", "2줄", "최소", "고정", "배수"]);
+  assert.equal(kind.value, "multiple", "108% is no named multiple");
+  assert.equal(value.value, "1.08");
+  assert.equal(h.document.getElementById("doc-linespacing-select").value, "108", "the list goes back to what applies");
+
+  kind.value = "exact";
+  kind.dispatchEvent({ type: "change", target: kind });
+  value.value = "18 pt";
+  h.userClick(h.document.getElementById("btn-doc-paragraph-apply"));
+  assert.equal(a.dataset.eoLineKind, "exact");
+  assert.equal(a.dataset.eoLineTwips, "360");
+  assert.equal(dialog.open, false);
+
+  pickLine(h, "options");
+  assert.equal(kind.value, "exact");
+  assert.equal(value.value, "18");
+  value.value = "99999";
+  h.userClick(h.document.getElementById("btn-doc-paragraph-apply"));
+  assert.equal(a.dataset.eoLineTwips, "360", "an out-of-range value changes nothing");
+  assert.match(h.document.getElementById("doc-paragraph-status").textContent, /범위/);
+  assert.equal(dialog.open, true);
+  kind.value = "double";
+  kind.dispatchEvent({ type: "change", target: kind });
+  assert.equal(value.disabled, true, "한 줄, 1.5줄 and 2줄 take no value");
+  h.userClick(h.document.getElementById("btn-doc-paragraph-apply"));
+  assert.equal(a.style.lineHeight, "2.00");
+  assert.equal(a.dataset.eoLineKind, undefined);
+});
+
+test("PD-365: a decoded 최소·고정·줄 사이 paragraph keeps its kind through open and save, and hostile kinds are ignored", async () => {
+  const h = await createRunHarness([p("가")]);
+  const lineKinds = h.host.__EASYOFFICE_DOC_LINE_SPACING__;
+  const spec = () => ({ style: {}, data: {} });
+  for (const [json, kind, twips, css] of [
+    [{ lineSpacingKind: "exact", lineSpacingTwips: 360 }, "exact", "360", "24px"],
+    [{ lineSpacingKind: "atLeast", lineSpacingTwips: 240 }, "atLeast", "240", "max(1em, 16px)"],
+    [{ lineSpacingKind: "between", lineSpacingTwips: 0 }, "between", "0", "calc(1em + 0px)"],
+  ]) {
+    const s = spec();
+    lineKinds.applyToSpec(s, lineKinds.fromJson(json));
+    assert.deepEqual([s.data.eoLineKind, s.data.eoLineTwips, s.style.lineHeight], [kind, twips, css]);
+  }
+  for (const bad of [
+    { lineSpacingKind: "exact", lineSpacingTwips: 0 },
+    { lineSpacingKind: "exact", lineSpacingTwips: 31681 },
+    { lineSpacingKind: "exact", lineSpacingTwips: -5 },
+    { lineSpacingKind: "exact", lineSpacingTwips: 1.5 },
+    { lineSpacingKind: "exact", lineSpacingTwips: "NaN" },
+    { lineSpacingKind: "multiple", lineSpacingTwips: 150 },
+    { lineSpacingKind: "__proto__", lineSpacingTwips: 150 },
+    { lineSpacingTwips: 150 },
+    {},
+  ]) {
+    assert.equal(lineKinds.fromJson(bad), null, JSON.stringify(bad));
+  }
+  const [a] = h.blocks;
+  a.dataset.eoLineKind = "exact";
+  a.dataset.eoLineTwips = "999999";
+  assert.equal(lineKinds.specialOf(a), null, "a stored value out of range is not used");
+  a.dataset.eoLineTwips = "300";
+  a.dataset.eoLineKind = "fixed";
+  assert.equal(lineKinds.specialOf(a), null, "an unknown stored kind is not used");
+});
+
 test("numbering and bullets build list structure, convert back, and are saved as list items", async () => {
   const h = await createRunHarness([p("가"), p("나"), p("다"), p("라")]);
   const [a, b, c] = h.blocks;
@@ -287,7 +400,7 @@ test("the line spacing list keeps one custom value", async () => {
   const h = await createRunHarness([p("가"), p("나")]);
   const [a, b] = h.blocks;
   const box = h.document.getElementById("doc-linespacing-select");
-  const customs = () => Array.from(box.querySelectorAll("option")).filter((o) => !["100", "108", "115", "130", "160", "180", "200", "300"].includes(o.value)).map((o) => o.value);
+  const customs = () => Array.from(box.querySelectorAll("option")).filter((o) => !["100", "108", "115", "130", "160", "180", "200", "300", "options"].includes(o.value)).map((o) => o.value);
   a.style.lineHeight = "1.25";
   b.style.lineHeight = "1.75";
   await selectAcross(h, a, a);
