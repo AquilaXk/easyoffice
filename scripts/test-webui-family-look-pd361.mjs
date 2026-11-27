@@ -53,7 +53,7 @@ function extractTokens(cssBlock) {
   return resolved;
 }
 
-test("PD-359: light and dark tokens satisfy WCAG AA contrast for primary buttons, text, and paper guides", () => {
+test("PD-361: light and dark tokens satisfy WCAG AA contrast for primary buttons, text, and paper guides", () => {
   const tokensCss = readUi("tokens.css");
   const splitIdx = tokensCss.lastIndexOf(':root[data-theme-effective="dark"]');
   assert.ok(splitIdx > 0, "tokens.css defines dark overrides");
@@ -93,8 +93,8 @@ test("PD-359: light and dark tokens satisfy WCAG AA contrast for primary buttons
   assert.match(shellCss, /\.custom-select\.open\s+\.custom-select-menu\.slide-layout-grid-menu\s*\{/);
 });
 
-test("PD-359: START and CONV keep a minimal 5-menu chrome and clear docFlavor across transitions", async () => {
-  const start = await createWorkspaceHarness({ search: "?module=START&win=w-pd359-start" });
+test("PD-361: START and CONV keep a minimal 5-menu chrome and clear docFlavor across transitions", async () => {
+  const start = await createWorkspaceHarness({ search: "?module=START&win=w-pd361-start" });
   await flushAsyncTurns(10);
   const visibleMenus = (doc) =>
     doc.querySelectorAll("#menu-bar .menu-item")
@@ -103,13 +103,13 @@ test("PD-359: START and CONV keep a minimal 5-menu chrome and clear docFlavor ac
   assert.deepEqual(visibleMenus(start.document), ["파일", "편집", "보기", "도구", "도움말"]);
   assert.equal(start.document.getElementById("app").dataset.docFlavor, undefined);
 
-  const conv = await createWorkspaceHarness({ search: "?module=CONV&win=w-pd359-conv" });
+  const conv = await createWorkspaceHarness({ search: "?module=CONV&win=w-pd361-conv" });
   await flushAsyncTurns(10);
   assert.deepEqual(visibleMenus(conv.document), ["파일", "편집", "보기", "도구", "도움말"]);
 
   // Opening .pages activates PAGES inspector + menu bar, and switching to DOC/SLIDE isolates flavor cleanly
   const h = await createWorkspaceHarness({
-    search: "?module=DOC&win=w-pd359-pages",
+    search: "?module=DOC&win=w-pd361-pages",
     testIpc: async (cmd, raw) => {
       if (cmd !== "convert_document_format") return null;
       const req = JSON.parse(raw || "{}");
@@ -152,8 +152,8 @@ test("PD-359: START and CONV keep a minimal 5-menu chrome and clear docFlavor ac
   assert.deepEqual(visibleMenus(h.document), ["파일", "편집", "보기", "입력", "서식", "쪽", "표", "도구", "도움말"]);
 });
 
-test("PD-359: SHEET uses spreadsheet labels, BOARD omits duplicate zoom chrome, and toolbar scroller wraps wide toolbars", async () => {
-  const sheet = await createWorkspaceHarness({ search: "?module=SHEET&win=w-pd359-sheet" });
+test("PD-361: SHEET uses spreadsheet labels, BOARD omits duplicate zoom chrome, and toolbar scroller wraps wide toolbars", async () => {
+  const sheet = await createWorkspaceHarness({ search: "?module=SHEET&win=w-pd361-sheet" });
   await flushAsyncTurns(10);
   const totalsMod = sheet.host.__EASYOFFICE_SHEET_TABLE_TOTALS__;
   const fnLabels = Object.fromEntries(totalsMod.FUNCTIONS.map(([id, label]) => [id, label]));
@@ -168,12 +168,12 @@ test("PD-359: SHEET uses spreadsheet labels, BOARD omits duplicate zoom chrome, 
     assert.ok(bar.querySelector(".tb-scroll-nav-prev"), `#${id} mounts prev nav`);
     assert.ok(bar.querySelector(".tb-scroll-nav-next"), `#${id} mounts next nav`);
   }
-  const base = await createWorkspaceHarness({ search: "?module=BASE&win=w-pd359-base-tb" });
+  const base = await createWorkspaceHarness({ search: "?module=BASE&win=w-pd361-base-tb" });
   await flushAsyncTurns(10);
   const baseToolbar = base.document.getElementById("base-toolbar");
   assert.ok(baseToolbar?.querySelector(".tb-scroll-viewport .tb-scroll-track"), "#base-toolbar mounts horizontal scroller track");
 
-  const slide = await createWorkspaceHarness({ search: "?module=SLIDE&win=w-pd359-slide" });
+  const slide = await createWorkspaceHarness({ search: "?module=SLIDE&win=w-pd361-slide" });
   await flushAsyncTurns(10);
   const layoutMenu = slide.document.querySelector('.custom-select[data-select-id="slide-layout-select"] .custom-select-menu');
   assert.ok(layoutMenu.classList.contains("slide-layout-grid-menu"));
@@ -212,7 +212,7 @@ test("PD-359: SHEET uses spreadsheet labels, BOARD omits duplicate zoom chrome, 
 
   // Non-HWP table/symbol feedback and Pages margin violation terminology checks.
   const selection = createSelection();
-  const doc = await createWorkspaceHarness({ selection, search: "?module=DOC&win=w-pd359-doc-labels" });
+  const doc = await createWorkspaceHarness({ selection, search: "?module=DOC&win=w-pd361-doc-labels" });
   await flushAsyncTurns(10);
   const editor = doc.document.getElementById("doc-editor");
   editor.innerHTML = "<table class='doc-inline-table'><tbody><tr><td>A</td><td>B</td></tr></tbody></table>";
@@ -253,8 +253,8 @@ test("PD-359: SHEET uses spreadsheet labels, BOARD omits duplicate zoom chrome, 
   assert.match(pageSetupErr, /머리말·꼬리말/);
 });
 
-test("PD-359: SHEET font preview caps oversized pt, fits narrow containers, and numeric inputs keep spinner clearance", async () => {
-  const sheet = await createWorkspaceHarness({ search: "?module=SHEET&win=w-pd359-font-preview" });
+test("PD-361: SHEET font preview caps oversized pt, fits narrow containers, and numeric inputs keep spinner clearance", async () => {
+  const sheet = await createWorkspaceHarness({ search: "?module=SHEET&win=w-pd361-font-preview" });
   await flushAsyncTurns(10);
   sheet.userClick(sheet.document.querySelector('[data-sheet-numfmt="dialog"]'));
   await flushAsyncTurns(4);
