@@ -1,4 +1,4 @@
-//! The defaults of a DOCX (PD-361): `w:docDefaults` merged with the Normal style, theme typefaces
+//! The defaults of a DOCX (PD-363): `w:docDefaults` merged with the Normal style, theme typefaces
 //! resolved against `word/theme/theme1.xml`. A word processor applies them to every paragraph and run that
 //! names no value, so a writer has to give them back unchanged.
 
@@ -162,8 +162,10 @@ impl Layer {
                 };
                 self.before = twips("w:before").or(self.before);
                 self.after = twips("w:after").or(self.after);
+                // `exact` and `atLeast` count twips, not 240ths of a line: they are no multiplier
+                let multiple = text("w:lineRule").is_none_or(|rule| rule == "auto");
                 let line = number("w:line")
-                    .filter(|l| *l > 0)
+                    .filter(|l| *l > 0 && multiple)
                     .and_then(|l| u32::try_from(l).ok())
                     .map(|l| l.min(MAX_LINE_240THS));
                 self.line = line.or(self.line);
@@ -294,6 +296,18 @@ mod tests {
             (d.alignment, d.tab_stop_twips),
             (Some(RichAlignment::Center), 720)
         );
+    }
+
+    #[test]
+    fn a_fixed_line_height_is_no_line_multiplier() {
+        let styles = concat!(
+            "<w:styles xmlns:w=\"w\"><w:docDefaults><w:pPrDefault><w:pPr>",
+            "<w:spacing w:line=\"276\" w:lineRule=\"auto\"/></w:pPr></w:pPrDefault></w:docDefaults>",
+            "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:pPr>",
+            "<w:spacing w:line=\"400\" w:lineRule=\"exact\"/></w:pPr></w:style></w:styles>"
+        );
+        let d = read_doc_defaults(Some(styles), &ThemeFonts::default(), None).unwrap();
+        assert_eq!(d.line_240ths, 276);
     }
 
     #[test]

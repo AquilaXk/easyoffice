@@ -1,10 +1,11 @@
-//! The defaults of an RTF (PD-361): the Normal style of the style sheet over `\*\defpap` and
+//! The defaults of an RTF (PD-363): the Normal style of the style sheet over `\*\defpap` and
 //! `\*\defchp`, the `\deff` typeface of the font table and `\deftab`. The scan reads the header
 //! only and stops at the first paragraph; it keeps no text and never recurses.
 
 use std::collections::HashMap;
 
-use super::MAX_GROUP_DEPTH;
+use super::{DEFAULT_CODE_PAGE, MAX_GROUP_DEPTH};
+use crate::code_pages::CodePage;
 use crate::rich_defaults::RichDefaults;
 use crate::rich_document::{RichAlignment, MAX_PARA_SPACING_TWIPS};
 
@@ -19,7 +20,11 @@ const MAX_FONT_NAME_BYTES: usize = 256;
 enum Dest {
     /// The header group or a group the scan does not read.
     Other,
+    /// The font table itself; its groups are font entries.
     FontTbl,
+    /// One font entry (`{\f0 Name;}`, or the flat entries of the table). A group inside an entry
+    /// (`{\*\falt Name}`, `{\*\panose ..}`) is `Other`: its text is not the name.
+    FontEntry,
     Stylesheet,
     /// The Normal style: the first entry of the style sheet.
     Normal,
@@ -98,8 +103,14 @@ struct Header {
     fonts: HashMap<i32, String>,
     font_idx: i32,
     font_name: String,
-    /// The name holds `\'hh` bytes of a code page: it is dropped rather than read wrong.
-    name_has_code_page_bytes: bool,
+    /// `\'hh` bytes of the name not decoded yet.
+    name_bytes: Vec<u8>,
+    /// `\fcharsetN` of the entry being read.
+    entry_charset: Option<u8>,
+    /// A byte of the name has no character in its code page: the name is dropped rather than read wrong.
+    name_undecodable: bool,
+    /// `\ansicpgN` of the header.
+    ansi_code_page: Option<u32>,
     default_font: i32,
     tab_stop: Option<u32>,
     normal: Layer,
@@ -115,15 +126,48 @@ impl Header {
             Dest::Normal => Some(&mut self.normal),
             Dest::DefPap => Some(&mut self.def_pap),
             Dest::DefChp => Some(&mut self.def_chp),
-            Dest::Other | Dest::FontTbl | Dest::Stylesheet => None,
+            Dest::Other | Dest::FontTbl | Dest::FontEntry | Dest::Stylesheet => None,
         }
     }
 
+    /// Decodes the `\'hh` bytes collected so far with the code page of the entry's charset, or
+    /// `\ansicpg`, or the engine's Korean default.
+    fn flush_name_bytes(&mut self) {
+        if self.name_bytes.is_empty() {
+            return;
+        }
+        let bytes = std::mem::take(&mut self.name_bytes);
+        let page = self
+            .entry_charset
+            .and_then(CodePage::from_rtf_charset)
+            .or_else(|| CodePage::from_number(self.ansi_code_page.unwrap_or(DEFAULT_CODE_PAGE)));
+        match page.map(|p| p.decode_bytes_lossy(&bytes)) {
+            Some(text) if !text.contains('\u{FFFD}') => self.push_name(&text),
+            _ => self.name_undecodable = true,
+        }
+    }
+
+    fn push_name(&mut self, text: &str) {
+        if self.font_name.len() + text.len() <= MAX_FONT_NAME_BYTES {
+            self.font_name.push_str(text);
+        }
+    }
+
+    fn push_name_char(&mut self, ch: char) {
+        self.flush_name_bytes();
+        let mut buf = [0u8; 4];
+        self.push_name(ch.encode_utf8(&mut buf));
+    }
+
     fn end_font_entry(&mut self) {
+        self.flush_name_bytes();
         let name = self.font_name.trim().to_string();
         self.font_name.clear();
-        let undecodable = std::mem::take(&mut self.name_has_code_page_bytes);
-        if !name.is_empty() && !undecodable && self.fonts.len() < MAX_FONTS {
+        self.entry_charset = None;
+        let undecodable = std::mem::take(&mut self.name_undecodable);
+        // a new index stops at the cap; an index already there can still be redefined
+        let room = self.fonts.len() < MAX_FONTS || self.fonts.contains_key(&self.font_idx);
+        if !name.is_empty() && !undecodable && room {
             self.fonts.insert(self.font_idx, name);
         }
     }
@@ -162,7 +206,7 @@ pub(super) fn read_rtf_defaults(text: &str) -> RichDefaults {
                 }
                 // a group inside the style sheet is a style entry; inside the font table, a font
                 let child = match dest {
-                    Dest::FontTbl => Dest::FontTbl,
+                    Dest::FontTbl => Dest::FontEntry,
                     Dest::Stylesheet if !header.saw_style_entry => Dest::Normal,
                     _ => Dest::Other,
                 };
@@ -173,7 +217,7 @@ pub(super) fn read_rtf_defaults(text: &str) -> RichDefaults {
                 i += 1;
             }
             b'}' => {
-                if dest == Dest::FontTbl {
+                if matches!(dest, Dest::FontTbl | Dest::FontEntry) {
                     header.end_font_entry();
                 }
                 if dest == Dest::Normal {
@@ -188,19 +232,25 @@ pub(super) fn read_rtf_defaults(text: &str) -> RichDefaults {
                 let Some(&next) = bytes.get(i + 1) else { break };
                 if !next.is_ascii_alphabetic() {
                     // `\*`, `\'hh`, `\\`: an escape is no control word; `\*` keeps the first word open
-                    i += match next {
-                        b'\'' => 4,
-                        _ => 2,
-                    };
-                    if dest == Dest::FontTbl {
+                    let escape_len = if next == b'\'' { 4 } else { 2 };
+                    if dest == Dest::FontEntry {
                         match next {
-                            b'\'' => header.name_has_code_page_bytes = true,
-                            b'\\' | b'{' | b'}' if header.font_name.len() < MAX_FONT_NAME_BYTES => {
-                                header.font_name.push(next as char);
+                            b'\'' => {
+                                let hex = text
+                                    .get(i + 2..i + 4)
+                                    .and_then(|h| u8::from_str_radix(h, 16).ok());
+                                match hex {
+                                    Some(byte) if header.name_bytes.len() < MAX_FONT_NAME_BYTES => {
+                                        header.name_bytes.push(byte);
+                                    }
+                                    _ => header.name_undecodable = true,
+                                }
                             }
+                            b'\\' | b'{' | b'}' => header.push_name_char(next as char),
                             _ => {}
                         }
                     }
+                    i += escape_len;
                     continue;
                 }
                 let start = i + 1;
@@ -222,13 +272,11 @@ pub(super) fn read_rtf_defaults(text: &str) -> RichDefaults {
                 }
                 i = end;
                 let group = stack.last_mut().expect("the stack keeps its root group");
-                if dest == Dest::FontTbl && word == "u" {
+                if dest == Dest::FontEntry && word == "u" {
                     // `\uN?`: a UTF-16 unit and one fallback character
                     let unit = param.map(|v| v as u16);
                     if let Some(ch) = unit.and_then(|u| char::from_u32(u32::from(u))) {
-                        if header.font_name.len() < MAX_FONT_NAME_BYTES {
-                            header.font_name.push(ch);
-                        }
+                        header.push_name_char(ch);
                     }
                     i += text[i..].chars().next().map_or(0, char::len_utf8);
                     continue;
@@ -252,9 +300,22 @@ pub(super) fn read_rtf_defaults(text: &str) -> RichDefaults {
                             .and_then(|v| u32::try_from(v).ok())
                             .filter(|v| (1..=MAX_TAB_STOP_TWIPS).contains(v));
                     }
+                    (Dest::Other, "ansicpg") if stack.len() == 2 => {
+                        header.ansi_code_page = param.and_then(|v| u32::try_from(v).ok());
+                    }
                     (Dest::FontTbl, "f") => {
+                        // the flat form `{\fonttbl\f0 Name;\f1 Name;}`: the entries are the table's own text
+                        if let Some(entry) = stack.last_mut() {
+                            entry.dest = Dest::FontEntry;
+                        }
+                        header.font_idx = param.unwrap_or(0);
+                    }
+                    (Dest::FontEntry, "f") => {
                         header.end_font_entry();
                         header.font_idx = param.unwrap_or(0);
+                    }
+                    (Dest::FontEntry, "fcharset") => {
+                        header.entry_charset = param.and_then(|v| u8::try_from(v).ok());
                     }
                     (Dest::Normal | Dest::DefPap | Dest::DefChp, _) => {
                         // a style entry numbered other than 0 is not the Normal style
@@ -275,13 +336,12 @@ pub(super) fn read_rtf_defaults(text: &str) -> RichDefaults {
             b'\r' | b'\n' => i += 1,
             _ => {
                 // text: a typeface name runs to `;`
-                if dest == Dest::FontTbl {
-                    let rest = &text[i..];
-                    let ch = rest.chars().next().unwrap_or(' ');
+                if dest == Dest::FontEntry {
+                    let ch = text[i..].chars().next().unwrap_or(' ');
                     if ch == ';' {
                         header.end_font_entry();
-                    } else if header.font_name.len() < MAX_FONT_NAME_BYTES {
-                        header.font_name.push(ch);
+                    } else {
+                        header.push_name_char(ch);
                     }
                     i += ch.len_utf8();
                 } else {
@@ -340,6 +400,64 @@ mod tests {
             read_rtf_defaults("{\\rtf1 hello\\par}"),
             RichDefaults::default()
         );
+    }
+
+    fn font_of(table: &str) -> Option<String> {
+        read_rtf_defaults(&format!("{{\\rtf1\\ansi\\deff0{table}\\pard x\\par}}")).font
+    }
+
+    #[test]
+    fn text_of_a_group_inside_a_font_entry_is_not_the_name() {
+        assert_eq!(
+            font_of("{\\fonttbl{\\f0\\fswiss Arial{\\*\\falt Helvetica};}}").as_deref(),
+            Some("Arial")
+        );
+        assert_eq!(
+            font_of("{\\fonttbl{\\f0\\fnil{\\*\\panose 020b0604020202020204}Calibri;}}").as_deref(),
+            Some("Calibri")
+        );
+    }
+
+    #[test]
+    fn the_flat_font_table_form_reads_its_entries() {
+        assert_eq!(
+            font_of("{\\fonttbl\\f0\\fswiss Arial;\\f1\\froman Times;}").as_deref(),
+            Some("Arial")
+        );
+    }
+
+    #[test]
+    fn code_page_bytes_of_a_name_are_decoded_with_the_charset_of_the_font() {
+        // 맑은 고딕 in code page 949
+        let name = "\\'b8\\'bc\\'c0\\'ba \\'b0\\'ed\\'b5\\'f1";
+        assert_eq!(
+            font_of(&format!("{{\\fonttbl{{\\f0\\fnil\\fcharset129 {name};}}}}")).as_deref(),
+            Some("맑은 고딕")
+        );
+        // no charset: `\ansicpg` decides
+        let rtf = format!(
+            "{{\\rtf1\\ansi\\ansicpg949\\deff0{{\\fonttbl{{\\f0 {name};}}}}\\pard x\\par}}"
+        );
+        assert_eq!(read_rtf_defaults(&rtf).font.as_deref(), Some("맑은 고딕"));
+        // a code page without a table: the name is dropped, not guessed
+        let rtf = format!(
+            "{{\\rtf1\\ansi\\ansicpg99999\\deff0{{\\fonttbl{{\\f0 {name};}}}}\\pard x\\par}}"
+        );
+        assert_eq!(read_rtf_defaults(&rtf).font, None);
+    }
+
+    #[test]
+    fn a_font_table_at_the_cap_still_redefines_its_indexes_but_takes_no_new_one() {
+        let mut table = String::from("{\\fonttbl");
+        for i in 0..MAX_FONTS + 10 {
+            table.push_str(&format!("{{\\f{i} Face{i};}}"));
+        }
+        // index 0 is redefined after the table is full
+        table.push_str("{\\f0 Redefined;}{\\f2000 Late;}}");
+        let rtf = format!("{{\\rtf1\\deff2000{table}\\pard x\\par}}");
+        assert_eq!(read_rtf_defaults(&rtf).font, None);
+        let rtf = format!("{{\\rtf1\\deff0{table}\\pard x\\par}}");
+        assert_eq!(read_rtf_defaults(&rtf).font.as_deref(), Some("Redefined"));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! The defaults of an ODT (PD-361): the `style:default-style` of the paragraph family merged with
+//! The defaults of an ODT (PD-363): the `style:default-style` of the paragraph family merged with
 //! the `Standard` paragraph style, which is what a paragraph without a style name gets.
 
 use std::collections::HashMap;
@@ -10,6 +10,8 @@ use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::EasyOfficeError;
 
 const MAX_TAB_STOP_TWIPS: u32 = 31_680;
+/// Largest body size, in half-points, a default may carry (1638 pt), as in the DOCX and RTF readers.
+const MAX_HALF_POINTS: u16 = 3_276;
 /// The style a paragraph without a style name uses.
 const STANDARD_STYLE: &str = "Standard";
 
@@ -69,7 +71,12 @@ impl Layer {
             .or(self.asian_font.take());
         let size = ["fo:font-size", "style:font-size-asian"]
             .into_iter()
-            .find_map(|k| attr(attrs, k).as_deref().and_then(parse_points));
+            .find_map(|k| {
+                attr(attrs, k)
+                    .as_deref()
+                    .and_then(parse_points)
+                    .filter(|s| *s <= MAX_HALF_POINTS)
+            });
         self.size = size.or(self.size);
     }
 
@@ -196,6 +203,18 @@ mod tests {
             (24, 144, 276)
         );
         assert_eq!((d.alignment, d.tab_stop_twips), (None, 720));
+    }
+
+    #[test]
+    fn a_default_size_over_the_cap_is_ignored() {
+        let styles = concat!(
+            "<office:document-styles xmlns:office=\"o\"><office:styles>",
+            "<style:default-style style:family=\"paragraph\">",
+            "<style:text-properties fo:font-size=\"2000pt\"/></style:default-style>",
+            "</office:styles></office:document-styles>"
+        );
+        let d = read_odt_defaults(Some(styles)).unwrap();
+        assert_eq!(d.size_half_points, RichDefaults::default().size_half_points);
     }
 
     #[test]
