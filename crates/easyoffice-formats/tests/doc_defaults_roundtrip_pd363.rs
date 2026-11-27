@@ -5,7 +5,8 @@
 
 use easyoffice_formats::{
     DecodedContent, DocumentFormat, RichAlignment, RichBlock, RichDefaults, RichDocument,
-    RichParagraph, RichRun, UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy,
+    RichLineSpacing, RichParagraph, RichRun, UniversalFormatConverter, ZipArchiveCodec,
+    ZipSecurityPolicy,
 };
 
 fn paragraph(text: &str) -> RichBlock {
@@ -367,7 +368,7 @@ fn an_opened_hwpx_keeps_the_formatting_its_normal_style_gave_the_paragraphs() {
         panic!("a paragraph");
     };
     assert_eq!(first.alignment, Some(RichAlignment::Left));
-    assert_eq!(first.line_spacing_percent, Some(130));
+    assert_eq!(first.line_spacing, Some(RichLineSpacing::Multiple(130)));
     assert_eq!(first.runs[0].size_half_pt, Some(22));
     assert_eq!(first.runs[0].font.as_deref(), Some("바탕"));
 

@@ -10,7 +10,7 @@
 use crate::hwpx_parts::{
     header_xml, header_xml_with_all, hwpx_col_ctrl_xml, manifest_xml, section_properties_xml,
     text_width, HwpxCharShape, HwpxParaShape, HwpxStyle, CELL_HEIGHT, CONTAINER_XML,
-    DEFAULT_CHAR_HEIGHT, DEFAULT_FONT_FACE, DEFAULT_LINE_PERCENT, HEADING_BULLET, HEADING_NONE,
+    DEFAULT_CHAR_HEIGHT, DEFAULT_FONT_FACE, DEFAULT_LINE_SPACING, HEADING_BULLET, HEADING_NONE,
     HEADING_NUMBER, HEADING_OUTLINE, HWPUNIT_PER_TWIP, LIST_LEFT_MARGIN, MAX_HWPX_BORDER_FILLS,
     NS_CORE, NS_PARAGRAPH, NS_SECTION, SETTINGS_XML, VERSION_XML,
 };
@@ -229,9 +229,7 @@ impl ShapeTables {
             intent: p
                 .first_line_indent_twips
                 .map_or(0, |t| t.saturating_mul(HWPUNIT_PER_TWIP as i32)),
-            line_percent: p
-                .line_spacing_percent
-                .map_or(DEFAULT_LINE_PERCENT, u32::from),
+            line_spacing: p.line_spacing.unwrap_or(DEFAULT_LINE_SPACING),
         };
         let para_pr = intern(&mut self.para_shapes, &mut self.para_map, para);
         let base = HwpxCharShape {

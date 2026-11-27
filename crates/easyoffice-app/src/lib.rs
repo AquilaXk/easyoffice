@@ -30,6 +30,7 @@ pub mod http_server;
 pub mod hwp_bundle;
 pub mod inspect_cli;
 mod layout_lint_json;
+mod line_spacing_json;
 mod native_package_ipc;
 mod page_setup_json;
 #[cfg(test)]

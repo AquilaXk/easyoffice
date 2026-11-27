@@ -28,6 +28,7 @@ use crate::convert_structured::{
     convert_structured_defaults, convert_structured_notes, encode_source_target, StructuredContent,
 };
 use crate::convert_structured_doc::parse_pdf_options;
+use crate::line_spacing_json::write_line_spacing_json;
 use crate::page_setup_json::write_page_setup;
 use crate::sheet_look_json::write_look;
 use crate::sheet_rules_json::rules_json;
@@ -183,8 +184,8 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
     if let Some(v) = p.first_line_indent_twips {
         let _ = write!(out, ",\"firstLineIndentTwips\":{v}");
     }
-    if let Some(v) = p.line_spacing_percent {
-        let _ = write!(out, ",\"lineSpacingPercent\":{v}");
+    if let Some(spacing) = p.line_spacing {
+        write_line_spacing_json(out, spacing);
     }
     if let Some(v) = p.space_before_twips {
         let _ = write!(out, ",\"spaceBeforeTwips\":{v}");

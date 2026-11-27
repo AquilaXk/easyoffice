@@ -6,7 +6,7 @@ use crate::pages_schema::{
     baseline, char_props_layout, compact_para, heading, para_props, style, ty, CharPropFields,
     ParaPropFields, COLOR_RGBA, COMPACT_PARA_FIELDS, FULL_PARA_FIELDS, FULL_PARA_FIELDS_ALT,
 };
-use crate::{RichAlignment, RichRun, RichScript};
+use crate::{RichAlignment, RichLineSpacing, RichRun, RichScript};
 
 const MAX_FONT_SIZE_PT: f32 = 1000.0;
 const MAX_HEADING_LEVEL: u8 = 6;
@@ -17,9 +17,6 @@ const FILL_COLOR: u32 = 1;
 const MAX_INDENT_PT: f32 = 1000.0;
 const MAX_LINE_SPACING_MULTIPLE: f32 = 10.0;
 const SINGLE_SPACING_PERCENT: u16 = 100;
-const MIN_LINE_SPACING_PERCENT: f64 = 50.0;
-const MAX_LINE_SPACING_PERCENT: f64 = 1000.0;
-const DEFAULT_LINE_HEIGHT_PT: f64 = 12.0;
 
 pub(super) const FLAG_BOLD: u8 = 1 << 0;
 pub(super) const FLAG_ITALIC: u8 = 1 << 1;
@@ -43,7 +40,7 @@ pub(super) struct Fmt {
     pub left_indent_twips: Option<u32>,
     pub right_indent_twips: Option<u32>,
     pub first_line_indent_twips: Option<i32>,
-    pub line_spacing_percent: Option<u16>,
+    pub line_spacing: Option<RichLineSpacing>,
 }
 
 fn color_hex(color: &Message) -> Option<String> {
@@ -81,30 +78,34 @@ fn points_to_twips(points: f32) -> Option<i32> {
         .then(|| (points * TWIPS_PER_POINT).round() as i32)
 }
 
-/// Line spacing as a percentage of single spacing. Multiple mode keeps 100% unset as the default;
-/// point-based exact/at-least modes (`1 | 2`) convert relative to 12pt and clamp to `50..=1000`%.
-fn line_spacing_percent(p: &Message, field: u32) -> Option<u16> {
+/// Line spacing by mode: a multiple (mode 0, where 100% stays unset as the default) or points of
+/// minimum, exact or between-lines spacing (modes 1, 2, 4), converted to twips and clamped.
+/// The unused maximum mode (3) reads as unset.
+fn line_spacing(p: &Message, field: u32) -> Option<RichLineSpacing> {
     let spacing = p.sub(field).ok().flatten()?;
     let mode = spacing
         .varint(compact_para::SPACING_MODE)
         .unwrap_or(compact_para::SPACING_MULTIPLE);
     let amount = spacing.float(compact_para::SPACING_AMOUNT)?;
-    if !amount.is_finite() || amount <= 0.0 {
+    if !amount.is_finite() || amount < 0.0 {
         return None;
     }
+    let twips = (f64::from(amount) * f64::from(TWIPS_PER_POINT)).round() as i64;
     match mode {
+        _ if amount == 0.0 && mode != compact_para::SPACING_BETWEEN => None,
         compact_para::SPACING_MULTIPLE => {
             if amount > MAX_LINE_SPACING_MULTIPLE {
                 return None;
             }
-            let percent = (amount * 100.0).round() as u16;
-            (percent != SINGLE_SPACING_PERCENT).then_some(percent)
+            let percent = (amount * 100.0).round() as i64;
+            RichLineSpacing::multiple(percent)
+                .filter(|s| *s != RichLineSpacing::Multiple(SINGLE_SPACING_PERCENT))
         }
-        1 | 2 => Some(
-            ((f64::from(amount) / DEFAULT_LINE_HEIGHT_PT * 100.0)
-                .round()
-                .clamp(MIN_LINE_SPACING_PERCENT, MAX_LINE_SPACING_PERCENT)) as u16,
-        ),
+        compact_para::SPACING_MINIMUM => {
+            RichLineSpacing::from_twips(RichLineSpacing::AtLeast, twips)
+        }
+        compact_para::SPACING_EXACT => RichLineSpacing::from_twips(RichLineSpacing::Exact, twips),
+        compact_para::SPACING_BETWEEN => RichLineSpacing::between(twips),
         _ => None,
     }
 }
@@ -179,8 +180,8 @@ impl Fmt {
                 .and_then(points_to_twips)
                 .filter(|t| *t != 0);
         }
-        if self.line_spacing_percent.is_none() {
-            self.line_spacing_percent = line_spacing_percent(p, l.line_spacing);
+        if self.line_spacing.is_none() {
+            self.line_spacing = line_spacing(p, l.line_spacing);
         }
     }
 

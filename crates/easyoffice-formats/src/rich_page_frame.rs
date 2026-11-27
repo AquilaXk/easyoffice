@@ -186,7 +186,7 @@ pub(crate) fn split_horizontal_zones(
             || p.left_indent_twips.is_some()
             || p.right_indent_twips.is_some()
             || p.first_line_indent_twips.is_some()
-            || p.line_spacing_percent.is_some()
+            || p.line_spacing.is_some()
             || p.toc.is_some()
             || p.page_break_before
         {

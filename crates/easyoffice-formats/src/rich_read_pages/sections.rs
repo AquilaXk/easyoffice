@@ -316,7 +316,7 @@ impl Reader<'_> {
                 left_indent_twips: pfmt.as_ref().and_then(|f| f.left_indent_twips),
                 right_indent_twips: pfmt.as_ref().and_then(|f| f.right_indent_twips),
                 first_line_indent_twips: pfmt.as_ref().and_then(|f| f.first_line_indent_twips),
-                line_spacing_percent: pfmt.as_ref().and_then(|f| f.line_spacing_percent),
+                line_spacing: pfmt.as_ref().and_then(|f| f.line_spacing),
                 ..RichParagraph::default()
             };
             para = frame_paragraph(&para);

@@ -8,9 +8,9 @@ use easyoffice_formats::{
 };
 
 use super::super::{
-    as_array, as_object, field, invalid, opt_bounded, parse_alignment, parse_runs, Budget,
-    JsonObject, MAX_LINE_SPACING_PERCENT,
+    as_array, as_object, field, invalid, parse_alignment, parse_runs, Budget, JsonObject,
 };
+use crate::line_spacing_json::{parse_line_spacing, write_line_spacing_json};
 
 pub(crate) fn write_cell_paragraphs_json(out: &mut String, table: &RichTable) {
     let entries = table.validated_cell_paragraphs();
@@ -43,8 +43,8 @@ pub(crate) fn write_cell_paragraphs_json(out: &mut String, table: &RichTable) {
                 };
                 let _ = write!(out, ",\"align\":\"{token}\"");
             }
-            if let Some(v) = p.line_spacing_percent {
-                let _ = write!(out, ",\"lineSpacingPercent\":{v}");
+            if let Some(spacing) = p.line_spacing {
+                write_line_spacing_json(out, spacing);
             }
             out.push('}');
         }
@@ -99,13 +99,7 @@ pub(crate) fn parse_cell_paragraphs(
             paragraphs.push(RichCellParagraph {
                 runs,
                 alignment: parse_alignment(p_obj)?,
-                line_spacing_percent: opt_bounded(
-                    p_obj,
-                    "lineSpacingPercent",
-                    1,
-                    MAX_LINE_SPACING_PERCENT,
-                )?
-                .map(|v| v as u16),
+                line_spacing: parse_line_spacing(p_obj)?,
             });
         }
         let in_bounds = rows

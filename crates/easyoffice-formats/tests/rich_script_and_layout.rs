@@ -2,8 +2,8 @@
 //! writers, plus the DOCX and ODT read-back.
 
 use easyoffice_formats::{
-    DecodedContent, DocumentFormat, RichBlock, RichDocument, RichParagraph, RichRun, RichScript,
-    UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy,
+    DecodedContent, DocumentFormat, RichBlock, RichDocument, RichLineSpacing, RichParagraph,
+    RichRun, RichScript, UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy,
 };
 
 fn run(text: &str, script: RichScript) -> RichRun {
@@ -32,7 +32,7 @@ fn sample() -> RichDocument {
                 runs: vec![RichRun::plain("들여쓴 문단")],
                 left_indent_twips: Some(720),
                 first_line_indent_twips: Some(360),
-                line_spacing_percent: Some(200),
+                line_spacing: Some(RichLineSpacing::Multiple(200)),
                 ..RichParagraph::default()
             }),
             RichBlock::Paragraph(RichParagraph {

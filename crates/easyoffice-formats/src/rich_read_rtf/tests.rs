@@ -14,7 +14,7 @@ fn rtf_reads_super_sub_para_layout_and_special_characters() {
     };
     assert_eq!(p0.left_indent_twips, Some(720));
     assert_eq!(p0.first_line_indent_twips, Some(-360));
-    assert_eq!(p0.line_spacing_percent, Some(150));
+    assert_eq!(p0.line_spacing, Some(RichLineSpacing::Multiple(150)));
     assert!(p0
         .runs
         .iter()

@@ -15,7 +15,7 @@ use self::objects::{is_drawing_shape, HwpxMedia, NoteFormatSpec, OLE_SKIP_WARNIN
 use crate::decode_budget::DecodeBudget;
 use crate::hwpx_codec::section_xml;
 use crate::hwpx_parts::{
-    DEFAULT_CHAR_HEIGHT, DEFAULT_LINE_PERCENT, HWPUNIT_PER_TWIP, LIST_LEFT_MARGIN,
+    DEFAULT_CHAR_HEIGHT, DEFAULT_LINE_SPACING, HWPUNIT_PER_TWIP, LIST_LEFT_MARGIN,
 };
 use crate::office_codecs::checked_zip_xml_entries_for;
 use crate::rich_document::RichColumns;
@@ -103,10 +103,7 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
     let first_line_indent_twips = (shape.intent != 0)
         .then(|| to_twips(i64::from(shape.intent)))
         .flatten();
-    let line_spacing_percent = shape
-        .line_percent
-        .filter(|p| *p != DEFAULT_LINE_PERCENT && (1..=1_000).contains(p))
-        .and_then(|p| u16::try_from(p).ok());
+    let line_spacing = shape.line_spacing.filter(|s| *s != DEFAULT_LINE_SPACING);
     let body_default_justify = heading == 0
         && list.is_none()
         && style.is_some_and(|s| {
@@ -171,7 +168,7 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
         left_indent_twips,
         right_indent_twips,
         first_line_indent_twips,
-        line_spacing_percent,
+        line_spacing,
         columns: p.columns,
         ..RichParagraph::default()
     }

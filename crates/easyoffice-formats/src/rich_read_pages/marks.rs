@@ -10,7 +10,21 @@ use super::{
 use crate::pages_proto::Message;
 use crate::pages_schema::{change, hyperlink, settings, storage, style, ty};
 use crate::pdf_text_wrap::wrap_spans;
-use crate::{EasyOfficeError, RichListNumber};
+use crate::{EasyOfficeError, RichLineSpacing, RichListNumber};
+
+/// Height of one text line in points, for the page estimate that numbers per-page footnotes.
+fn line_height_pt(size_pt: f32, spacing: Option<RichLineSpacing>) -> f32 {
+    let single = size_pt * DEFAULT_LINE_HEIGHT_FACTOR;
+    let pt = |twips: u16| f32::from(twips) / TWIPS_PER_POINT;
+    let height = match spacing {
+        None => single,
+        Some(RichLineSpacing::Multiple(pct)) => (f32::from(pct) / 100.0) * single,
+        Some(RichLineSpacing::AtLeast(twips)) => single.max(pt(twips)),
+        Some(RichLineSpacing::Exact(twips)) => pt(twips),
+        Some(RichLineSpacing::Between(twips)) => single + pt(twips),
+    };
+    height.max(1.0)
+}
 
 pub(super) const MAX_MARK_ENTRIES: usize = 50_000;
 const MAX_COMMENTS: usize = 50_000;
@@ -144,13 +158,7 @@ impl Reader<'_> {
                 .and_then(|f| f.size_half_pt)
                 .or_else(|| pfmt.as_ref().and_then(|f| f.size_half_pt))
                 .map_or(DEFAULT_FONT_SIZE_PT, |hp| f32::from(hp) * 0.5);
-            let spacing_mult = pfmt
-                .as_ref()
-                .and_then(|f| f.line_spacing_percent)
-                .map_or(DEFAULT_LINE_HEIGHT_FACTOR, |pct| {
-                    (f32::from(pct) / 100.0) * DEFAULT_LINE_HEIGHT_FACTOR
-                });
-            let line_h_pt = (size_pt * spacing_mult).max(1.0);
+            let line_h_pt = line_height_pt(size_pt, pfmt.as_ref().and_then(|f| f.line_spacing));
             let page_cap_pt = self.body_height_pt.max(MIN_BODY_HEIGHT_PT) * (col_count as f32);
             let max_units = ((col_width_pt / size_pt) * 1000.0).round().max(1000.0) as u32;
 

@@ -1,6 +1,6 @@
 //! Per-cell rich paragraph formatting (inner runs, alignment, and line spacing) for [`RichTable`].
 
-use crate::{RichAlignment, RichParagraph, RichRun, RichScript};
+use crate::{RichAlignment, RichLineSpacing, RichParagraph, RichRun, RichScript};
 
 /// Maximum cells carrying rich paragraph formatting per table.
 pub const MAX_CELL_PARAGRAPH_ENTRIES: usize = 50_000;
@@ -14,7 +14,7 @@ pub const MAX_RUNS_PER_CELL_PARA: usize = 10_000;
 pub struct RichCellParagraph {
     pub runs: Vec<RichRun>,
     pub alignment: Option<RichAlignment>,
-    pub line_spacing_percent: Option<u16>,
+    pub line_spacing: Option<RichLineSpacing>,
 }
 
 /// Rich paragraph content for cell `(row, col)` of a [`crate::RichTable`].
@@ -44,7 +44,9 @@ pub(crate) fn cell_para_has_formatting(paragraphs: &[RichCellParagraph]) -> bool
         matches!(
             p.alignment,
             Some(RichAlignment::Center | RichAlignment::Right | RichAlignment::Justify)
-        ) || p.line_spacing_percent.is_some_and(|pct| pct != 100)
+        ) || p
+            .line_spacing
+            .is_some_and(|spacing| spacing != RichLineSpacing::Multiple(100))
             || p.runs.iter().any(run_has_formatting)
     })
 }
@@ -158,7 +160,7 @@ pub(crate) fn join_rich_cell_paragraphs(
     while end_idx > 0
         && paras[end_idx - 1].runs.iter().all(|r| r.text.is_empty())
         && paras[end_idx - 1].alignment.is_none()
-        && paras[end_idx - 1].line_spacing_percent.is_none()
+        && paras[end_idx - 1].line_spacing.is_none()
     {
         end_idx -= 1;
     }
@@ -217,7 +219,7 @@ pub(crate) fn join_rich_cell_paragraphs(
             cell_paras.push(RichCellParagraph {
                 runs: kept_runs,
                 alignment: p.alignment,
-                line_spacing_percent: p.line_spacing_percent,
+                line_spacing: p.line_spacing,
             });
         }
     }
@@ -283,7 +285,7 @@ mod tests {
                 ..RichRun::default()
             }],
             alignment: Some(RichAlignment::Center),
-            line_spacing_percent: Some(150),
+            line_spacing: Some(RichLineSpacing::Multiple(150)),
         }];
         let expected = std::mem::size_of::<RichCellParagraph>()
             + std::mem::size_of::<RichRun>()

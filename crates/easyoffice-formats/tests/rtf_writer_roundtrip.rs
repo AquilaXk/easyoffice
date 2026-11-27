@@ -2,8 +2,8 @@
 //! does not leak into the paragraph after it.
 
 use easyoffice_formats::{
-    DecodedContent, DocumentFormat, RichAlignment, RichBlock, RichDocument, RichListKind,
-    RichParagraph, RichRun, RichScript, UniversalFormatConverter,
+    DecodedContent, DocumentFormat, RichAlignment, RichBlock, RichDocument, RichLineSpacing,
+    RichListKind, RichParagraph, RichRun, RichScript, UniversalFormatConverter,
 };
 
 fn paragraph(runs: Vec<RichRun>) -> RichParagraph {
@@ -104,13 +104,13 @@ fn scripts_indents_line_spacing_and_lists_roundtrip() {
         RichBlock::Paragraph(RichParagraph {
             first_line_indent_twips: Some(480),
             left_indent_twips: Some(360),
-            line_spacing_percent: Some(150),
+            line_spacing: Some(RichLineSpacing::Multiple(150)),
             alignment: Some(RichAlignment::Justify),
             ..paragraph(vec![plain("들여쓰기와 줄 간격")])
         }),
         RichBlock::Paragraph(RichParagraph {
             first_line_indent_twips: Some(-240),
-            line_spacing_percent: Some(115),
+            line_spacing: Some(RichLineSpacing::Multiple(115)),
             ..paragraph(vec![plain("내어쓰기")])
         }),
         RichBlock::Paragraph(RichParagraph {
@@ -153,7 +153,7 @@ fn format_words_never_leak_into_the_line_based_text_decoder() {
     let rtf = encode(vec![RichBlock::Paragraph(RichParagraph {
         first_line_indent_twips: Some(480),
         left_indent_twips: Some(360),
-        line_spacing_percent: Some(150),
+        line_spacing: Some(RichLineSpacing::Multiple(150)),
         list: Some(RichListKind::Ordered),
         ..paragraph(vec![
             plain("물 "),

@@ -4,8 +4,8 @@
 
 use easyoffice_formats::{
     DecodedContent, DocumentFormat, RichAlignment, RichBlock, RichDocument, RichImage,
-    RichImageFormat, RichListKind, RichParagraph, RichRun, RichScript, UniversalFormatConverter,
-    ZipArchiveCodec, ZipSecurityPolicy,
+    RichImageFormat, RichLineSpacing, RichListKind, RichParagraph, RichRun, RichScript,
+    UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy,
 };
 
 fn open(name: &str) -> (RichDocument, Vec<String>) {
@@ -421,33 +421,33 @@ fn text_fixture_font_script_indent_and_line_spacing() {
         (
             left.left_indent_twips,
             left.first_line_indent_twips,
-            left.line_spacing_percent
+            left.line_spacing
         ),
         // The 115% comes from the root style's line spacing (field 13 of the full layout).
-        (Some(720), None, Some(115))
+        (Some(720), None, Some(RichLineSpacing::Multiple(115)))
     );
     let first = paragraph_with(&doc, "첫 줄 들여쓰기");
     assert_eq!(
         (
             first.left_indent_twips,
             first.first_line_indent_twips,
-            first.line_spacing_percent
+            first.line_spacing
         ),
-        (None, Some(720), Some(115))
+        (None, Some(720), Some(RichLineSpacing::Multiple(115)))
     );
     let spacing = paragraph_with(&doc, "줄 간격 2배");
     assert_eq!(
         (
             spacing.left_indent_twips,
             spacing.first_line_indent_twips,
-            spacing.line_spacing_percent
+            spacing.line_spacing
         ),
-        (None, None, Some(200))
+        (None, None, Some(RichLineSpacing::Multiple(200)))
     );
     let plain = paragraph_with(&doc, "왼쪽 정렬이");
     assert_eq!(plain.left_indent_twips, None);
     // The template's default spacing (1.1458) sits in field 13 of the style's paragraph properties.
-    assert_eq!(plain.line_spacing_percent, Some(115));
+    assert_eq!(plain.line_spacing, Some(RichLineSpacing::Multiple(115)));
 }
 
 #[test]

@@ -3,9 +3,10 @@
 
 use easyoffice_formats::{
     pages_write_loss, CellFill, CellMerge, DecodedContent, DocumentFormat, EasyOfficeError,
-    RichAlignment, RichBlock, RichCellParagraph, RichDocument, RichParagraph, RichRun, RichScript,
-    RichTable, TableCellBorders, TableCellLink, TableCellParagraphs, TableCellStyleEntry,
-    UniversalFormatConverter, ZipArchiveCodec, MAX_CELL_PARAGRAPH_ENTRIES, MAX_PARAGRAPHS_PER_CELL,
+    RichAlignment, RichBlock, RichCellParagraph, RichDocument, RichLineSpacing, RichParagraph,
+    RichRun, RichScript, RichTable, TableCellBorders, TableCellLink, TableCellParagraphs,
+    TableCellStyleEntry, UniversalFormatConverter, ZipArchiveCodec, MAX_CELL_PARAGRAPH_ENTRIES,
+    MAX_PARAGRAPHS_PER_CELL,
 };
 
 fn build_doc_with_spacing_and_rich_table() -> RichDocument {
@@ -66,7 +67,7 @@ fn build_doc_with_spacing_and_rich_table() -> RichDocument {
                     },
                 ],
                 alignment: Some(RichAlignment::Right),
-                line_spacing_percent: Some(150),
+                line_spacing: Some(RichLineSpacing::Multiple(150)),
             }],
         },
         TableCellParagraphs {
@@ -80,7 +81,7 @@ fn build_doc_with_spacing_and_rich_table() -> RichDocument {
                     ..RichRun::default()
                 }],
                 alignment: Some(RichAlignment::Center),
-                line_spacing_percent: Some(200),
+                line_spacing: Some(RichLineSpacing::Multiple(200)),
             }],
         },
     ];
@@ -178,7 +179,11 @@ fn table_cell_runs_alignment_line_spacing_and_merges_roundtrip_in_docx_and_odt()
             .unwrap_or_else(|| panic!("{fmt:?} missing cell (0,0) paragraphs"));
         let p0 = &c00.paragraphs[0];
         assert_eq!(p0.alignment, Some(RichAlignment::Right), "{fmt:?}");
-        assert_eq!(p0.line_spacing_percent, Some(150), "{fmt:?}");
+        assert_eq!(
+            p0.line_spacing,
+            Some(RichLineSpacing::Multiple(150)),
+            "{fmt:?}"
+        );
         assert!(
             p0.runs
                 .iter()
@@ -218,7 +223,11 @@ fn table_cell_runs_alignment_line_spacing_and_merges_roundtrip_in_docx_and_odt()
             Some(RichAlignment::Center),
             "{fmt:?}"
         );
-        assert_eq!(c10.paragraphs[0].line_spacing_percent, Some(200), "{fmt:?}");
+        assert_eq!(
+            c10.paragraphs[0].line_spacing,
+            Some(RichLineSpacing::Multiple(200)),
+            "{fmt:?}"
+        );
     }
 }
 
@@ -298,7 +307,7 @@ fn pages_write_loss_counts_rich_cell_paragraphs() {
                 ..RichRun::default()
             }],
             alignment: Some(RichAlignment::Center),
-            line_spacing_percent: Some(150),
+            line_spacing: Some(RichLineSpacing::Multiple(150)),
         }],
     }];
     let doc_fmt = RichDocument {

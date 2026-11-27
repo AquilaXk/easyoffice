@@ -8,6 +8,7 @@
 
 use crate::pdf_writer::PdfWriteOptions;
 use crate::rich_image::RichImage;
+pub use crate::rich_line_spacing::{RichLineSpacing, MAX_LINE_PERCENT, MAX_LINE_SPACING_TWIPS};
 use crate::rich_notes::{
     is_deleted_run, validate_comments, validate_notes, RichComment, RichNote, RichNoteKind,
     RichRevision,
@@ -385,7 +386,7 @@ pub fn frame_paragraph(p: &RichParagraph) -> RichParagraph {
         left_indent_twips: p.left_indent_twips,
         right_indent_twips: p.right_indent_twips,
         first_line_indent_twips: p.first_line_indent_twips,
-        line_spacing_percent: p.line_spacing_percent,
+        line_spacing: p.line_spacing,
         space_before_twips: p.space_before_twips,
         space_after_twips: p.space_after_twips,
         ..RichParagraph::default()
@@ -525,8 +526,8 @@ pub struct RichParagraph {
     pub right_indent_twips: Option<u32>,
     /// First-line indent in twips; `None` inherits.
     pub first_line_indent_twips: Option<i32>,
-    /// Line height as a percentage of single spacing (200 = double); `None` inherits.
-    pub line_spacing_percent: Option<u16>,
+    /// How the lines are spaced (multiple, at least, exact, between lines); `None` inherits.
+    pub line_spacing: Option<RichLineSpacing>,
     /// Spacing before paragraph in twips (`0..=8000`); `None` inherits.
     pub space_before_twips: Option<u32>,
     /// Spacing after paragraph in twips (`0..=8000`); `None` inherits.

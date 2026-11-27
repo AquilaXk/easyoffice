@@ -34,13 +34,12 @@ pub(crate) mod convert_structured_notes;
 pub(crate) mod convert_structured_table;
 
 use crate::convert_structured_doc::parse_pdf_options;
+use crate::line_spacing_json::parse_line_spacing;
 use crate::page_setup_json::parse_page_setup;
 use crate::sheet_look_json::parse_look;
 
 /// Largest indent (twips, 1/20 pt) a paragraph may carry: 200 inches.
 const MAX_INDENT_TWIPS: i64 = 288_000;
-/// Largest line spacing, as a percentage of single spacing.
-const MAX_LINE_SPACING_PERCENT: i64 = 1_000;
 /// Maximum UTF-8 byte length of a `frameCopy` header/footer snapshot string.
 const MAX_FRAME_COPY_BYTES: usize = 64 * 1024;
 
@@ -498,8 +497,7 @@ fn parse_paragraph(
             MAX_INDENT_TWIPS,
         )?
         .map(|v| v as i32),
-        line_spacing_percent: opt_bounded(obj, "lineSpacingPercent", 1, MAX_LINE_SPACING_PERCENT)?
-            .map(|v| v as u16),
+        line_spacing: parse_line_spacing(obj)?,
         space_before_twips: opt_bounded(
             obj,
             "spaceBeforeTwips",

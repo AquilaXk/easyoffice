@@ -15,8 +15,8 @@ use crate::pdf_writer::{
 };
 use crate::rich_defaults::RichDefaults;
 use crate::rich_document::{
-    RichAlignment, RichBlock, RichColumns, RichDocument, RichListKind, RichParagraph,
-    MAX_PARA_SPACING_TWIPS, TOC_BOOKMARK_PREFIX,
+    RichAlignment, RichBlock, RichColumns, RichDocument, RichLineSpacing, RichListKind,
+    RichParagraph, MAX_PARA_SPACING_TWIPS, TOC_BOOKMARK_PREFIX,
 };
 use crate::rich_image::{check_document_images, fit_within};
 use crate::rich_image_writers::{
@@ -133,14 +133,22 @@ pub(crate) fn push_docx_text(out: &mut String, text: &str) {
     push_docx_text_tagged(out, text, "w:t");
 }
 
+/// `w:line` and `w:lineRule` of a line spacing: `auto` counts 240ths of a line, `atLeast` and
+/// `exact` twips; the between-lines rule has no DOCX form and is written as its equal multiple.
+pub(crate) fn docx_line_attributes(spacing: RichLineSpacing) -> String {
+    let (line, rule) = match spacing {
+        RichLineSpacing::AtLeast(twips) => (u32::from(twips), "atLeast"),
+        RichLineSpacing::Exact(twips) => (u32::from(twips), "exact"),
+        other => (line_spacing_240ths(other.multiple_percent()), "auto"),
+    };
+    format!(" w:line=\"{line}\" w:lineRule=\"{rule}\"")
+}
+
 /// WordprocessingML `w:spacing` (line height, 240 = single) and `w:ind` for a paragraph, in
 /// schema order; empty when the paragraph inherits both.
 pub(crate) fn docx_paragraph_layout(p: &RichParagraph) -> String {
     let mut xml = String::new();
-    if p.space_before_twips.is_some()
-        || p.space_after_twips.is_some()
-        || p.line_spacing_percent.is_some()
-    {
+    if p.space_before_twips.is_some() || p.space_after_twips.is_some() || p.line_spacing.is_some() {
         xml.push_str("<w:spacing");
         if let Some(before) = p.space_before_twips {
             xml.push_str(&format!(
@@ -154,9 +162,8 @@ pub(crate) fn docx_paragraph_layout(p: &RichParagraph) -> String {
                 after.min(MAX_PARA_SPACING_TWIPS)
             ));
         }
-        if let Some(percent) = p.line_spacing_percent {
-            let line = line_spacing_240ths(percent);
-            xml.push_str(&format!(" w:line=\"{line}\" w:lineRule=\"auto\""));
+        if let Some(spacing) = p.line_spacing {
+            xml.push_str(&docx_line_attributes(spacing));
         }
         xml.push_str("/>");
     }
@@ -510,7 +517,7 @@ pub(crate) struct OdtParaKey {
     pub(crate) left_twips: Option<u32>,
     pub(crate) right_twips: Option<u32>,
     pub(crate) first_line_twips: Option<i32>,
-    pub(crate) line_percent: Option<u16>,
+    pub(crate) line_spacing: Option<RichLineSpacing>,
     pub(crate) space_before_twips: Option<u32>,
     pub(crate) space_after_twips: Option<u32>,
     pub(crate) page_break: bool,
@@ -548,7 +555,7 @@ pub(crate) fn push_odt_paragraph(
         left_twips: p.left_indent_twips,
         right_twips: p.right_indent_twips,
         first_line_twips: p.first_line_indent_twips,
-        line_percent: p.line_spacing_percent,
+        line_spacing: p.line_spacing,
         space_before_twips: p.space_before_twips.map(|v| v.min(MAX_PARA_SPACING_TWIPS)),
         space_after_twips: p.space_after_twips.map(|v| v.min(MAX_PARA_SPACING_TWIPS)),
         page_break: p.page_break_before,
@@ -602,7 +609,7 @@ pub(crate) fn odt_para_style_xml(number: usize, key: &OdtParaKey) -> String {
         left_twips,
         right_twips,
         first_line_twips,
-        line_percent,
+        line_spacing,
         space_before_twips,
         space_after_twips,
         page_break,
@@ -649,8 +656,23 @@ pub(crate) fn odt_para_style_xml(number: usize, key: &OdtParaKey) -> String {
             odt_twips_to_pt(i64::from(*first))
         ));
     }
-    if let Some(percent) = line_percent {
-        styles.push_str(&format!(" fo:line-height=\"{percent}%\""));
+    match line_spacing {
+        Some(RichLineSpacing::Multiple(percent)) => {
+            styles.push_str(&format!(" fo:line-height=\"{percent}%\""));
+        }
+        Some(RichLineSpacing::Exact(twips)) => styles.push_str(&format!(
+            " fo:line-height=\"{}\"",
+            odt_twips_to_pt(i64::from(*twips))
+        )),
+        Some(RichLineSpacing::AtLeast(twips)) => styles.push_str(&format!(
+            " style:line-height-at-least=\"{}\"",
+            odt_twips_to_pt(i64::from(*twips))
+        )),
+        Some(RichLineSpacing::Between(twips)) => styles.push_str(&format!(
+            " style:line-spacing=\"{}\"",
+            odt_twips_to_pt(i64::from(*twips))
+        )),
+        None => {}
     }
     if *page_break {
         styles.push_str(" fo:break-before=\"page\"");

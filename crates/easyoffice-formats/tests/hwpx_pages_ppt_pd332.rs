@@ -8,11 +8,11 @@ use easyoffice_formats::pages_proto::{Message, WireValue};
 use easyoffice_formats::{
     convert_eqedit_to_latex, pages_write_loss, ppt_legacy_slides_loss, ppt_save_loss, ChartKind,
     ChartLegendPos, DecodedContent, DocumentFormat, PagesWriteLoss, PptSaveLoss, RichBlock,
-    RichDocument, RichImage, RichListKind, RichListNumber, RichNote, RichNoteKind,
+    RichDocument, RichImage, RichLineSpacing, RichListKind, RichListNumber, RichNote, RichNoteKind,
     RichNumberEnclosure, RichNumberFormat, RichPageMargins, RichParagraph, RichRevision,
     RichRevisionKind, RichRun, RichScript, RichSlide, RichSlideDeck, RichTable, SlideBox,
     SlideChartSeries, SlideElement, TableCellImage, UniversalFormatConverter, ZipArchiveCodec,
-    ZipSecurityPolicy,
+    ZipSecurityPolicy, MAX_LINE_SPACING_TWIPS,
 };
 use image_fixture::{make_jpeg, make_png};
 use pages_fixture::{cat, f_bytes, f_f32, f_ref, f_str, f_varint, pages_zip, DocBuilder};
@@ -294,12 +294,23 @@ fn hwpx_reads_non_percent_line_spacing_with_checked_arithmetic() {
     let base_header = zip_text(&entries, "Contents/header.xml");
 
     let cases = [
-        ("FIXED", "1800", Some(150u16)),
-        ("AT_LEAST", "2400", Some(200)),
-        ("BETWEEN_LINES", "600", Some(150)),
-        ("FIXED", "300", Some(50)),
-        ("FIXED", "9223372036854775807", Some(1000)),
-        ("BETWEEN_LINES", "9223372036854775807", Some(1000)),
+        // HWPUNIT values keep their rule and become twips (PD-365); a huge one is clamped.
+        ("FIXED", "1800", Some(RichLineSpacing::Exact(360))),
+        ("AT_LEAST", "2400", Some(RichLineSpacing::AtLeast(480))),
+        ("BETWEEN_LINES", "600", Some(RichLineSpacing::Between(120))),
+        ("BETWEEN_LINES", "0", Some(RichLineSpacing::Between(0))),
+        ("FIXED", "300", Some(RichLineSpacing::Exact(60))),
+        ("FIXED", "0", None),
+        (
+            "FIXED",
+            "9223372036854775807",
+            Some(RichLineSpacing::Exact(MAX_LINE_SPACING_TWIPS)),
+        ),
+        (
+            "BETWEEN_LINES",
+            "9223372036854775807",
+            Some(RichLineSpacing::Between(MAX_LINE_SPACING_TWIPS)),
+        ),
         ("FIXED", "-500", None),
         ("BETWEEN_LINES", "-500", None),
     ];
@@ -324,10 +335,7 @@ fn hwpx_reads_non_percent_line_spacing_with_checked_arithmetic() {
         let RichBlock::Paragraph(p) = &doc.blocks[0] else {
             panic!("expected paragraph");
         };
-        assert_eq!(
-            p.line_spacing_percent, expected,
-            "type={ls_type}, value={ls_val}"
-        );
+        assert_eq!(p.line_spacing, expected, "type={ls_type}, value={ls_val}");
     }
 }
 
@@ -449,21 +457,22 @@ fn pages_write_adds_table_geometry_uuid_defaults_and_cell_image_loss_warning() {
 #[test]
 fn pages_reader_defaults_omitted_margins_keeps_explicit_zero_and_maps_point_line_spacing() {
     let mut b = DocBuilder::default();
-    let spacing_exact = cat(&[f_varint(1, 1), f_f32(2, 18.0)]);
-    let spacing_min = cat(&[f_varint(1, 2), f_f32(2, 3.0)]);
+    // Modes of the line spacing message: 1 minimum, 2 exact (PD-365), amounts in points.
+    let spacing_min = cat(&[f_varint(1, 1), f_f32(2, 18.0)]);
+    let spacing_exact = cat(&[f_varint(1, 2), f_f32(2, 3.0)]);
     let spacing_huge = cat(&[f_varint(1, 1), f_f32(2, 240.0)]);
-    let p_exact = b.add(
-        2022,
-        &cat(&[
-            f_bytes(1, &f_str(2, "p-exact")),
-            f_bytes(12, &f_bytes(19, &spacing_exact)),
-        ]),
-    );
     let p_min = b.add(
         2022,
         &cat(&[
             f_bytes(1, &f_str(2, "p-min")),
             f_bytes(12, &f_bytes(19, &spacing_min)),
+        ]),
+    );
+    let p_exact = b.add(
+        2022,
+        &cat(&[
+            f_bytes(1, &f_str(2, "p-exact")),
+            f_bytes(12, &f_bytes(19, &spacing_exact)),
         ]),
     );
     let p_huge = b.add(
@@ -477,7 +486,7 @@ fn pages_reader_defaults_omitted_margins_keeps_explicit_zero_and_maps_point_line
         2001,
         &DocBuilder::storage_payload(
             "첫줄\n둘째\n셋째",
-            &[(0, Some(p_exact)), (3, Some(p_min)), (6, Some(p_huge))],
+            &[(0, Some(p_min)), (3, Some(p_exact)), (6, Some(p_huge))],
             &[],
             &[],
             &[],
@@ -492,15 +501,22 @@ fn pages_reader_defaults_omitted_margins_keeps_explicit_zero_and_maps_point_line
         doc_omitted.page_frame.margins,
         Some(RichPageMargins::PAGES_DEFAULT)
     );
-    let spacings: Vec<Option<u16>> = doc_omitted
+    let spacings: Vec<Option<RichLineSpacing>> = doc_omitted
         .blocks
         .iter()
         .filter_map(|blk| match blk {
-            RichBlock::Paragraph(p) => Some(p.line_spacing_percent),
+            RichBlock::Paragraph(p) => Some(p.line_spacing),
             _ => None,
         })
         .collect();
-    assert_eq!(spacings, vec![Some(150), Some(50), Some(1000)]);
+    assert_eq!(
+        spacings,
+        vec![
+            Some(RichLineSpacing::AtLeast(360)),
+            Some(RichLineSpacing::Exact(60)),
+            Some(RichLineSpacing::AtLeast(4800)),
+        ]
+    );
 
     // Case B: explicit 0.0 margins -> preserved as 0.
     let mut b2 = DocBuilder::default();

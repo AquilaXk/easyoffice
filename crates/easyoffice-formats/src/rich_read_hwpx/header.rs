@@ -5,17 +5,13 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use super::table_style::BorderFillReader;
-use crate::hwpx_parts::DEFAULT_FONT_FACE;
+use crate::hwpx_parts::{DEFAULT_FONT_FACE, HWPUNIT_PER_TWIP};
 use crate::rich_document::normalize_hex_color;
 use crate::rich_list_writers::HwpxNumberingReader;
 use crate::rich_table_style::{CellFill, TableCellBorders};
 use crate::rich_xml::CharFmt;
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
-use crate::{EasyOfficeError, RichScript};
-
-const HWPX_BASE_LINE_HWPUNIT: u64 = 1_200;
-const MIN_NON_PERCENT_LINE: u64 = 50;
-const MAX_LINE_PERCENT: u64 = 1_000;
+use crate::{EasyOfficeError, RichLineSpacing, RichScript};
 
 #[derive(Default, Clone)]
 pub(super) struct ParaShape {
@@ -28,8 +24,8 @@ pub(super) struct ParaShape {
     pub(super) right: u32,
     /// First-line indent (`hc:intent`), HWPUNIT.
     pub(super) intent: i32,
-    /// `hh:lineSpacing` mapped to percentage of single spacing.
-    pub(super) line_percent: Option<u32>,
+    /// `hh:lineSpacing` with its type.
+    pub(super) line_spacing: Option<RichLineSpacing>,
 }
 
 #[derive(Default, Clone)]
@@ -51,30 +47,16 @@ pub(super) struct Header {
     pub(super) numberings: HwpxNumberingReader,
 }
 
-fn scale_hwpunit_to_percent(total_hwpunit: u64) -> u32 {
-    let pct = total_hwpunit
-        .checked_mul(100)
-        .and_then(|v| v.checked_add(HWPX_BASE_LINE_HWPUNIT / 2))
-        .map_or(MAX_LINE_PERCENT, |v| {
-            (v / HWPX_BASE_LINE_HWPUNIT).clamp(MIN_NON_PERCENT_LINE, MAX_LINE_PERCENT)
-        });
-    pct as u32
-}
-
-fn parse_line_spacing(attrs: &Attrs<'_>) -> Option<u32> {
-    let raw_str = attr(attrs, "value")?;
-    let raw: i64 = raw_str.trim().parse().ok()?;
+/// `hh:lineSpacing`: `PERCENT` is a multiple, the other types count HWPUNIT (`FIXED` exact,
+/// `AT_LEAST` minimum, `BETWEEN_LINES` the margin between lines).
+fn parse_line_spacing(attrs: &Attrs<'_>) -> Option<RichLineSpacing> {
+    let raw: i64 = attr(attrs, "value")?.trim().parse().ok()?;
+    let twips = raw / i64::from(HWPUNIT_PER_TWIP);
     match attr(attrs, "type").as_deref() {
-        Some("PERCENT") => u32::try_from(raw).ok(),
-        Some("FIXED" | "AT_LEAST") => {
-            let v = u64::try_from(raw).ok().filter(|&n| n > 0)?;
-            Some(scale_hwpunit_to_percent(v))
-        }
-        Some("BETWEEN_LINES") => {
-            let gap = u64::try_from(raw).ok()?;
-            let total = HWPX_BASE_LINE_HWPUNIT.checked_add(gap);
-            Some(total.map_or(MAX_LINE_PERCENT as u32, scale_hwpunit_to_percent))
-        }
+        Some("PERCENT") => RichLineSpacing::multiple(raw),
+        Some("FIXED") => RichLineSpacing::from_twips(RichLineSpacing::Exact, twips),
+        Some("AT_LEAST") => RichLineSpacing::from_twips(RichLineSpacing::AtLeast, twips),
+        Some("BETWEEN_LINES") if raw >= 0 => RichLineSpacing::between(twips),
         _ => None,
     }
 }
@@ -254,7 +236,7 @@ impl HeaderBuilder {
             }
             "hh:lineSpacing" => {
                 if let Some(p) = self.para_mut() {
-                    p.line_percent = parse_line_spacing(attrs);
+                    p.line_spacing = parse_line_spacing(attrs);
                 }
             }
             "hh:style" => self.register_style(attrs),

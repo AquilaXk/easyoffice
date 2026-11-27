@@ -26,8 +26,8 @@ use crate::rich_xml::{check_paragraph_depth, take_toc_page, toc_role_from_name, 
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     DocumentFormat, EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichColumns, RichDocument,
-    RichField, RichImage, RichListKind, RichParagraph, RichRun, RichScript, ZipArchiveCodec,
-    ZipArchiveEntry, ZipSecurityPolicy,
+    RichField, RichImage, RichLineSpacing, RichListKind, RichParagraph, RichRun, RichScript,
+    ZipArchiveCodec, ZipArchiveEntry, ZipSecurityPolicy,
 };
 
 const EMU_PER_INCH: f64 = 914_400.0;
@@ -56,7 +56,7 @@ struct StyleProps {
     left_twips: Option<u32>,
     right_twips: Option<u32>,
     first_line_twips: Option<i32>,
-    line_percent: Option<u16>,
+    line_spacing: Option<RichLineSpacing>,
     space_before_twips: Option<u32>,
     space_after_twips: Option<u32>,
     page_break_before: bool,
@@ -97,6 +97,26 @@ fn line_height_percent(value: &str) -> Option<u16> {
     }
     let twips = length_twips(trimmed).filter(|t| *t > 0)?;
     Some(((i64::from(twips) * 100 + 120) / 240).clamp(50, 1000) as u16)
+}
+
+/// Line spacing of `style:paragraph-properties`: `fo:line-height` as a percentage (a multiple) or a
+/// length (exact), `style:line-height-at-least`, or `style:line-spacing` (space between lines).
+fn line_spacing_of(attrs: &Attrs<'_>) -> Option<RichLineSpacing> {
+    let length = |key: &str| attr(attrs, key).and_then(|v| length_twips(&v));
+    if let Some(height) = attr(attrs, "fo:line-height") {
+        let height = height.trim();
+        if let Some(raw) = height.strip_suffix('%') {
+            let percent = raw.trim().parse::<f64>().ok().filter(|n| n.is_finite())?;
+            return RichLineSpacing::multiple(percent.round() as i64);
+        }
+        if let Some(twips) = length_twips(height) {
+            return RichLineSpacing::from_twips(RichLineSpacing::Exact, i64::from(twips));
+        }
+    }
+    if let Some(twips) = length("style:line-height-at-least") {
+        return RichLineSpacing::from_twips(RichLineSpacing::AtLeast, i64::from(twips));
+    }
+    length("style:line-spacing").and_then(|t| RichLineSpacing::between(i64::from(t)))
 }
 
 fn off(value: Option<&str>) -> bool {
@@ -183,9 +203,7 @@ fn apply_paragraph_properties(p: &mut StyleProps, attrs: &Attrs<'_>) {
         .as_deref()
         .and_then(length_twips)
         .filter(|t| *t != 0);
-    p.line_percent = attr(attrs, "fo:line-height")
-        .as_deref()
-        .and_then(line_height_percent);
+    p.line_spacing = line_spacing_of(attrs);
     p.space_before_twips = attr(attrs, "fo:margin-top")
         .as_deref()
         .and_then(length_twips)
@@ -333,8 +351,8 @@ fn resolve_style_parents(styles: &mut HashMap<String, StyleProps>) {
             if props.first_line_twips.is_none() {
                 props.first_line_twips = p.first_line_twips;
             }
-            if props.line_percent.is_none() {
-                props.line_percent = p.line_percent;
+            if props.line_spacing.is_none() {
+                props.line_spacing = p.line_spacing;
             }
             if props.space_before_twips.is_none() {
                 props.space_before_twips = p.space_before_twips;
@@ -818,7 +836,7 @@ impl<'a> OdtWalker<'a> {
             self.cell_paras.push(RichParagraph {
                 runs: p.runs,
                 alignment: p.style.align,
-                line_spacing_percent: p.style.line_percent,
+                line_spacing: p.style.line_spacing,
                 ..RichParagraph::default()
             });
         } else if text.trim().is_empty() && !has_special_run {
@@ -858,7 +876,7 @@ impl<'a> OdtWalker<'a> {
                 left_indent_twips: p.style.left_twips,
                 right_indent_twips: p.style.right_twips,
                 first_line_indent_twips: p.style.first_line_twips,
-                line_spacing_percent: p.style.line_percent,
+                line_spacing: p.style.line_spacing,
                 space_before_twips: p.style.space_before_twips,
                 space_after_twips: p.style.space_after_twips,
                 toc: p.toc,

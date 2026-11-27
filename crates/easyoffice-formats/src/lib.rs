@@ -69,6 +69,7 @@ pub mod rich_document;
 mod rich_image;
 mod rich_image_probe;
 mod rich_image_writers;
+mod rich_line_spacing;
 mod rich_link_writers;
 mod rich_list_writers;
 mod rich_markdown_writer;
@@ -147,11 +148,11 @@ pub use pdf_writer::PdfWriteOptions;
 pub use rich_defaults::RichDefaults;
 pub use rich_document::{
     evaluate_table_formulas, frame_paragraph, normalize_hex_color, safe_link_target, RichAlignment,
-    RichBinding, RichBindingKind, RichBlock, RichColumns, RichDocument, RichField, RichListKind,
-    RichListNumber, RichNumberEnclosure, RichNumberFormat, RichPageFrame, RichPageMargins,
-    RichPaper, RichParagraph, RichRun, RichScript, RichToc, MAX_PAGE_FRAME_PARAGRAPHS,
-    MAX_PAGE_MARGIN_TWIPS, MAX_PARA_SPACING_TWIPS, MAX_TOC_LEVEL, MAX_TOC_PAGE,
-    TOC_BOOKMARK_PREFIX,
+    RichBinding, RichBindingKind, RichBlock, RichColumns, RichDocument, RichField, RichLineSpacing,
+    RichListKind, RichListNumber, RichNumberEnclosure, RichNumberFormat, RichPageFrame,
+    RichPageMargins, RichPaper, RichParagraph, RichRun, RichScript, RichToc, MAX_LINE_PERCENT,
+    MAX_LINE_SPACING_TWIPS, MAX_PAGE_FRAME_PARAGRAPHS, MAX_PAGE_MARGIN_TWIPS,
+    MAX_PARA_SPACING_TWIPS, MAX_TOC_LEVEL, MAX_TOC_PAGE, TOC_BOOKMARK_PREFIX,
 };
 pub use rich_image::{
     check_document_images, ImageBudget, RichImage, IMAGE_PLACEHOLDER_TEXT, MAX_ALT_TEXT_BYTES,

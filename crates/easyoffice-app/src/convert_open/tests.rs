@@ -1,7 +1,7 @@
 use super::*;
 use easyoffice_formats::{
-    OoxmlCodec, RichDocument, RichImage, RichParagraph, RichRun, RichScript, ZipArchiveCodec,
-    ZipSecurityPolicy,
+    OoxmlCodec, RichDocument, RichImage, RichLineSpacing, RichParagraph, RichRun, RichScript,
+    ZipArchiveCodec, ZipSecurityPolicy,
 };
 
 pub(super) fn request(action: Option<&str>, file: &str, bytes: &[u8], extra: &str) -> String {
@@ -646,7 +646,7 @@ fn rich_sample(png: &[u8]) -> RichDocument {
                 ],
                 left_indent_twips: Some(720),
                 first_line_indent_twips: Some(-360),
-                line_spacing_percent: Some(200),
+                line_spacing: Some(RichLineSpacing::Multiple(200)),
                 ..RichParagraph::default()
             }),
             RichBlock::Image(RichImage::new(png.to_vec(), "작은 \"그림\"").unwrap()),

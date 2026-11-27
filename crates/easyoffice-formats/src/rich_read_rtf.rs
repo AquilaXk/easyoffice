@@ -17,7 +17,7 @@ use crate::rich_writers::heading_half_points;
 use crate::rich_xml::{push_run, CharFmt};
 use crate::{
     EasyOfficeError, RichAlignment, RichBinding, RichBindingKind, RichBlock, RichDocument,
-    RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun, RichScript,
+    RichLineSpacing, RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun, RichScript,
 };
 
 const MAX_GROUP_DEPTH: usize = 256;
@@ -403,10 +403,9 @@ impl Reader {
             } else {
                 para.left_indent
             };
-            let line_spacing_percent = para
+            let line_spacing = para
                 .sl
-                .filter(|s| para.slmult && *s > 0)
-                .and_then(|s| u16::try_from((i64::from(s) * 100 + 120) / 240).ok());
+                .and_then(|sl| RichLineSpacing::from_rtf(i64::from(sl), para.slmult));
             self.blocks.push(RichBlock::Paragraph(RichParagraph {
                 runs,
                 alignment: para.align,
@@ -416,7 +415,7 @@ impl Reader {
                 left_indent_twips,
                 right_indent_twips: para.right_indent,
                 first_line_indent_twips: para.first_line,
-                line_spacing_percent,
+                line_spacing,
                 ..RichParagraph::default()
             }));
         }

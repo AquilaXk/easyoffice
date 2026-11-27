@@ -477,7 +477,13 @@ pub(crate) mod para_props {
 /// Compact paragraph property layout (`style::COMPACT_PARA_PROPS`), matches the fixture text (검증 필요:
 /// not in the independent notes)
 /// file: first-line indent 6 (float, points), left indent 7 (float, points), line spacing 8
-/// (`{ mode = 1, amount = 2 }`, mode 0 = multiple of single spacing).
+/// (`{ mode = 1, amount = 2 }`).
+///
+/// The line spacing message itself (`mode` 1, `amount` 2, and the modes below) is the same in
+/// every layout. 확인: the published `.proto` of an MIT-licensed iWork reader names the modes
+/// `kRelativeLineSpacing = 0` (amount = multiple of single spacing), `kMinimumLineSpacing = 1`,
+/// `kExactLineSpacing = 2`, `kMaximumLineSpacing = 3` (no UI) and `kSpaceBetweenLineSpacing = 4`
+/// (amounts in points); see `THIRD_PARTY_NOTICES.md` and PD-365.
 pub(crate) mod compact_para {
     pub const FIRST_LINE_INDENT: u32 = 6;
     pub const LEFT_INDENT: u32 = 7;
@@ -485,6 +491,9 @@ pub(crate) mod compact_para {
     pub const SPACING_MODE: u32 = 1;
     pub const SPACING_AMOUNT: u32 = 2;
     pub const SPACING_MULTIPLE: u64 = 0;
+    pub const SPACING_MINIMUM: u64 = 1;
+    pub const SPACING_EXACT: u64 = 2;
+    pub const SPACING_BETWEEN: u64 = 4;
 }
 
 /// Field numbers of one paragraph property layout.

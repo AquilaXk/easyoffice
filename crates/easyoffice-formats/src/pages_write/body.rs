@@ -23,8 +23,8 @@ use crate::rich_notes::{collect_note_ordinals, is_deleted_run};
 use crate::rich_table::safe_cell_link_url;
 use crate::{
     normalize_hex_color, EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichField,
-    RichImage, RichImageFormat, RichListKind, RichNumberEnclosure, RichNumberFormat, RichParagraph,
-    RichRun,
+    RichImage, RichImageFormat, RichLineSpacing, RichListKind, RichNumberEnclosure,
+    RichNumberFormat, RichParagraph, RichRun, MAX_LINE_SPACING_TWIPS,
 };
 
 const TYPE_STORAGE: u32 = ty::STORAGE;
@@ -110,8 +110,7 @@ pub(super) fn paragraph_loses_format(p: &RichParagraph) -> bool {
             .is_some_and(|t| t > MAX_INDENT_TWIPS as u32)
         || p.first_line_indent_twips
             .is_some_and(|t| t.saturating_abs() > MAX_INDENT_TWIPS)
-        || p.line_spacing_percent
-            .is_some_and(|pct| pct == 0 || pct > MAX_SPACING_PERCENT)
+        || p.line_spacing.is_some_and(|s| !line_spacing_fits(s))
         || p.space_before_twips.is_some_and(|v| v > 0)
         || p.space_after_twips.is_some_and(|v| v > 0)
 }
@@ -170,9 +169,22 @@ pub(super) fn para_look_of(p: &RichParagraph) -> ParaLook {
         right_indent_twips: p
             .right_indent_twips
             .filter(|t| *t > 0 && *t <= MAX_INDENT_TWIPS as u32),
-        line_spacing_percent: p
-            .line_spacing_percent
-            .filter(|pct| *pct > 0 && *pct != 100 && *pct <= MAX_SPACING_PERCENT),
+        line_spacing: p
+            .line_spacing
+            .filter(|s| *s != RichLineSpacing::Multiple(100) && line_spacing_fits(*s)),
+    }
+}
+
+/// Whether the line spacing is one the writer stores as it is: a multiple of at least 1% and at
+/// most [`MAX_SPACING_PERCENT`], or a length in `MAX_LINE_SPACING_TWIPS` (zero is no spacing at
+/// all, except between lines where it is the single line).
+fn line_spacing_fits(spacing: RichLineSpacing) -> bool {
+    match spacing {
+        RichLineSpacing::Multiple(pct) => (1..=MAX_SPACING_PERCENT).contains(&pct),
+        RichLineSpacing::AtLeast(twips) | RichLineSpacing::Exact(twips) => {
+            (1..=MAX_LINE_SPACING_TWIPS).contains(&twips)
+        }
+        RichLineSpacing::Between(twips) => twips <= MAX_LINE_SPACING_TWIPS,
     }
 }
 

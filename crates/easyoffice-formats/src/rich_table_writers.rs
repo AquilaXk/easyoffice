@@ -8,7 +8,6 @@ use crate::rich_image_writers::{
     docx_image_paragraph, docx_image_relationship, odt_image_paragraph, MediaParts,
 };
 use crate::rich_link_writers::{docx_linked_run_properties, DocxLinks};
-use crate::rich_rtf_writer::line_spacing_240ths;
 use crate::rich_run_writers::{
     docx_run_properties, odt_text_key, odt_text_key_is_plain, OdtTextKey,
 };
@@ -19,8 +18,10 @@ use crate::rich_table_style::{
     next_cell_style, slice_cell_images, CellFill, TableBorderEdge, TableBorderKind,
     TableCellBorders, TableCellImage,
 };
-use crate::rich_writers::{push_docx_text, push_odt_text, OdtParaKey, StyleTable};
-use crate::{RichAlignment, XmlSanitizer};
+use crate::rich_writers::{
+    docx_line_attributes, push_docx_text, push_odt_text, OdtParaKey, StyleTable,
+};
+use crate::{RichAlignment, RichLineSpacing, XmlSanitizer};
 
 const DOCX_TABLE_CELL_PPR: &str =
     "<w:pPr><w:spacing w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/><w:jc w:val=\"left\"/></w:pPr>";
@@ -159,14 +160,8 @@ fn push_docx_tc_borders(out: &mut String, borders: TableCellBorders) {
 fn push_docx_cell_paragraphs(out: &mut String, paras: &[RichCellParagraph], links: &mut DocxLinks) {
     for p in paras {
         out.push_str("<w:p><w:pPr>");
-        let line = p
-            .line_spacing_percent
-            .map(line_spacing_240ths)
-            .unwrap_or(240);
-        let _ = write!(
-            out,
-            "<w:spacing w:after=\"0\" w:line=\"{line}\" w:lineRule=\"auto\"/>"
-        );
+        let line = docx_line_attributes(p.line_spacing.unwrap_or(RichLineSpacing::Multiple(100)));
+        let _ = write!(out, "<w:spacing w:after=\"0\"{line}/>");
         let jc = match p.alignment.unwrap_or(RichAlignment::Left) {
             RichAlignment::Left => "left",
             RichAlignment::Center => "center",
@@ -530,7 +525,7 @@ fn push_odt_cell_paragraphs(
     for p in paras {
         let key = OdtParaKey {
             align: p.alignment,
-            line_percent: p.line_spacing_percent,
+            line_spacing: p.line_spacing,
             ..OdtParaKey::default()
         };
         if key == OdtParaKey::default() {

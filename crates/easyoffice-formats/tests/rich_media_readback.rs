@@ -2,9 +2,9 @@
 //! super/subscripts, and rejection of external, escaping, damaged or too many pictures.
 
 use easyoffice_formats::{
-    DecodedContent, DocumentFormat, RichBlock, RichDocument, RichImage, RichParagraph, RichRun,
-    RichScript, UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy,
-    MAX_IMAGES_PER_DOCUMENT,
+    DecodedContent, DocumentFormat, RichBlock, RichDocument, RichImage, RichLineSpacing,
+    RichParagraph, RichRun, RichScript, UniversalFormatConverter, ZipArchiveCodec,
+    ZipSecurityPolicy, MAX_IMAGES_PER_DOCUMENT,
 };
 
 mod image_fixture;
@@ -32,7 +32,7 @@ fn sample(png: &[u8], jpeg: &[u8]) -> RichDocument {
                 ],
                 left_indent_twips: Some(720),
                 first_line_indent_twips: Some(360),
-                line_spacing_percent: Some(200),
+                line_spacing: Some(RichLineSpacing::Multiple(200)),
                 ..RichParagraph::default()
             }),
             RichBlock::Image(RichImage::new(png.to_vec(), "파란 <사각형> & \"별\"").unwrap()),

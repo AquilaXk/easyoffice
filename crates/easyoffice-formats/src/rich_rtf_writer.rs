@@ -9,8 +9,8 @@ use std::collections::HashMap;
 
 use crate::rich_defaults::RichDefaults;
 use crate::rich_document::{
-    RichAlignment, RichBindingKind, RichBlock, RichDocument, RichListKind, RichPageMargins,
-    RichPaper, RichParagraph, RichRun, RichScript,
+    RichAlignment, RichBindingKind, RichBlock, RichDocument, RichLineSpacing, RichListKind,
+    RichPageMargins, RichPaper, RichParagraph, RichRun, RichScript,
 };
 use crate::rich_notes::{collect_note_ordinals, is_deleted_run, RichNoteKind};
 use crate::rich_rtf_table::rtf_table_lines;
@@ -191,6 +191,19 @@ pub(crate) fn line_spacing_240ths(percent: u16) -> u32 {
     (u32::from(percent) * SINGLE_LINE_240THS + 50) / 100
 }
 
+/// `\sl` and `\slmult` of a line spacing. The between-lines rule has no RTF form and is written as
+/// its equal multiple.
+fn rtf_line_words(spacing: RichLineSpacing) -> String {
+    match spacing {
+        RichLineSpacing::AtLeast(twips) => format!("\\sl{twips}\\slmult0"),
+        RichLineSpacing::Exact(twips) => format!("\\sl-{twips}\\slmult0"),
+        other => format!(
+            "\\sl{}\\slmult1",
+            line_spacing_240ths(other.multiple_percent())
+        ),
+    }
+}
+
 /// One RTF paragraph line (`\pard\plain ... \par`).
 fn rtf_paragraph_line(
     p: &RichParagraph,
@@ -227,8 +240,8 @@ fn rtf_paragraph_line(
     if let Some(first) = p.first_line_indent_twips.filter(|v| *v != 0) {
         line.push_str(&format!("\\fi{first}"));
     }
-    if let Some(percent) = p.line_spacing_percent.filter(|v| *v > 0) {
-        line.push_str(&format!("\\sl{}\\slmult1", line_spacing_240ths(percent)));
+    if let Some(spacing) = p.line_spacing {
+        line.push_str(&rtf_line_words(spacing));
     }
     line.push(' ');
     for run in &p.runs {

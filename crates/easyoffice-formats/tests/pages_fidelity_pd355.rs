@@ -8,8 +8,8 @@ use easyoffice_formats::pages_iwa::{decompress_iwa, split_records, IwaRecord};
 use easyoffice_formats::pages_proto::{Message, WireValue};
 use easyoffice_formats::{
     pages_write_loss, CellFill, DecodedContent, DocumentFormat, EasyOfficeError, PagesWriteLoss,
-    RichAlignment, RichBinding, RichBindingKind, RichBlock, RichDocument, RichPageFrame,
-    RichPageMargins, RichPaper, RichParagraph, RichRun, RichTable, TableBorderEdge,
+    RichAlignment, RichBinding, RichBindingKind, RichBlock, RichDocument, RichLineSpacing,
+    RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun, RichTable, TableBorderEdge,
     TableBorderKind, TableCellBorders, TableCellLink, TableCellStyleEntry,
     UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy,
 };
@@ -263,7 +263,7 @@ fn headings_h1_to_h6_right_indent_and_landscape_margins_roundtrip() {
         left_indent_twips: Some(480),
         right_indent_twips: Some(640),
         first_line_indent_twips: Some(360),
-        line_spacing_percent: Some(150),
+        line_spacing: Some(RichLineSpacing::Multiple(150)),
         ..para(vec![run("좌우 들여쓰기와 양쪽 정렬 문단")])
     }));
 
@@ -321,7 +321,7 @@ fn headings_h1_to_h6_right_indent_and_landscape_margins_roundtrip() {
     assert_eq!(indented.left_indent_twips, Some(480));
     assert_eq!(indented.right_indent_twips, Some(640));
     assert_eq!(indented.first_line_indent_twips, Some(360));
-    assert_eq!(indented.line_spacing_percent, Some(150));
+    assert_eq!(indented.line_spacing, Some(RichLineSpacing::Multiple(150)));
 
     assert_eq!(back.page_frame.paper, Some(landscape_paper));
     assert_eq!(back.page_frame.margins, Some(margins));
@@ -534,7 +534,7 @@ fn right_indent_float_and_web_edition_line_spacing_field_19_do_not_interfere() {
     let source = doc(vec![
         RichBlock::Paragraph(RichParagraph {
             right_indent_twips: Some(720),
-            line_spacing_percent: Some(180),
+            line_spacing: Some(RichLineSpacing::Multiple(180)),
             ..para(vec![run("오른쪽 들여쓰기 + 줄간격")])
         }),
         RichBlock::Paragraph(RichParagraph {
@@ -605,12 +605,12 @@ fn right_indent_float_and_web_edition_line_spacing_field_19_do_not_interfere() {
         panic!("expected first paragraph");
     };
     assert_eq!(first.right_indent_twips, Some(720));
-    assert_eq!(first.line_spacing_percent, Some(180));
+    assert_eq!(first.line_spacing, Some(RichLineSpacing::Multiple(180)));
     let RichBlock::Paragraph(second) = &back.blocks[1] else {
         panic!("expected second paragraph");
     };
     assert_eq!(second.right_indent_twips, None);
-    assert_eq!(second.line_spacing_percent, Some(140));
+    assert_eq!(second.line_spacing, Some(RichLineSpacing::Multiple(140)));
 }
 
 #[test]

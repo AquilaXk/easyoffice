@@ -7,8 +7,9 @@
 
 use easyoffice_formats::{
     DecodedContent, DocumentFormat, RichAlignment, RichBinding, RichBindingKind, RichBlock,
-    RichDocument, RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun, RtfCodec,
-    UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy, MAX_PAGE_MARGIN_TWIPS,
+    RichDocument, RichLineSpacing, RichPageFrame, RichPageMargins, RichPaper, RichParagraph,
+    RichRun, RtfCodec, UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy,
+    MAX_PAGE_MARGIN_TWIPS,
 };
 
 fn default_doc(paragraphs: Vec<RichParagraph>) -> RichDocument {
@@ -275,7 +276,7 @@ fn defaults_preserve_none_on_untouched_text_while_keeping_explicit_overrides() {
                 ..RichRun::default()
             }],
             alignment: Some(RichAlignment::Center),
-            line_spacing_percent: Some(150),
+            line_spacing: Some(RichLineSpacing::Multiple(150)),
             ..RichParagraph::default()
         },
     ]);
@@ -303,7 +304,7 @@ fn defaults_preserve_none_on_untouched_text_while_keeping_explicit_overrides() {
             panic!("first block not paragraph");
         };
         assert_eq!(first.alignment, None, "{name}");
-        assert_eq!(first.line_spacing_percent, None, "{name}");
+        assert_eq!(first.line_spacing, None, "{name}");
         assert_eq!(first.runs[0].font, None, "{name}");
         assert_eq!(first.runs[0].size_half_pt, None, "{name}");
         assert_eq!(first.runs[0].text, "기본 문단\t두번째", "{name}");
@@ -312,7 +313,11 @@ fn defaults_preserve_none_on_untouched_text_while_keeping_explicit_overrides() {
             panic!("second block not paragraph");
         };
         assert_eq!(second.alignment, Some(RichAlignment::Center), "{name}");
-        assert_eq!(second.line_spacing_percent, Some(150), "{name}");
+        assert_eq!(
+            second.line_spacing,
+            Some(RichLineSpacing::Multiple(150)),
+            "{name}"
+        );
         assert_eq!(second.runs[0].font.as_deref(), Some("함초롬바탕"), "{name}");
         assert_eq!(second.runs[0].size_half_pt, Some(28), "{name}");
     }

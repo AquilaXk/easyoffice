@@ -16,11 +16,12 @@
 use super::package::{Blueprint, ComponentId, ROOT};
 use super::wire::{bytes, float, msg, reference, string, varint, Fld};
 use crate::{
-    EasyOfficeError, RichColumns, RichListNumber, RichNumberEnclosure, RichNumberFormat, RichScript,
+    EasyOfficeError, RichColumns, RichLineSpacing, RichListNumber, RichNumberEnclosure,
+    RichNumberFormat, RichScript,
 };
 use std::collections::BTreeMap;
 
-use crate::pages_schema::{para_props, table, ty};
+use crate::pages_schema::{compact_para, para_props, table, ty};
 
 const TYPE_STYLESHEET: u32 = 401;
 const TYPE_CHARACTER_STYLE: u32 = 2021;
@@ -125,7 +126,7 @@ pub(super) struct ParaLook {
     pub first_line_indent_twips: Option<i32>,
     pub left_indent_twips: Option<u32>,
     pub right_indent_twips: Option<u32>,
-    pub line_spacing_percent: Option<u16>,
+    pub line_spacing: Option<RichLineSpacing>,
 }
 
 impl ParaLook {
@@ -134,7 +135,7 @@ impl ParaLook {
             && self.first_line_indent_twips.is_none()
             && self.left_indent_twips.is_none()
             && self.right_indent_twips.is_none()
-            && self.line_spacing_percent.is_none()
+            && self.line_spacing.is_none()
     }
 }
 
@@ -185,6 +186,24 @@ pub(super) struct Styles {
     cell_variations: BTreeMap<[u8; 3], u64>,
     /// `(theme field, style)` of every drawing preset.
     presets: Vec<(u32, u64)>,
+}
+
+/// The line spacing message of a paragraph property bag (`mode` 1, `amount` 2): the multiple as a
+/// fraction of the single line, the lengths in points.
+fn line_spacing_message(spacing: RichLineSpacing) -> Fld {
+    let (mode, amount) = match spacing {
+        RichLineSpacing::Multiple(pct) => (compact_para::SPACING_MULTIPLE, f32::from(pct) / 100.0),
+        RichLineSpacing::AtLeast(twips) => (compact_para::SPACING_MINIMUM, f32::from(twips) / 20.0),
+        RichLineSpacing::Exact(twips) => (compact_para::SPACING_EXACT, f32::from(twips) / 20.0),
+        RichLineSpacing::Between(twips) => (compact_para::SPACING_BETWEEN, f32::from(twips) / 20.0),
+    };
+    msg(
+        13,
+        vec![
+            varint(compact_para::SPACING_MODE, mode),
+            float(compact_para::SPACING_AMOUNT, amount),
+        ],
+    )
 }
 
 fn header(name: Option<(&str, &str)>, stylesheet: u64) -> Fld {
@@ -476,11 +495,8 @@ impl Styles {
             bag.push(float(11, left_tw as f32 / 20.0));
             count += 1;
         }
-        if let Some(pct) = look.line_spacing_percent {
-            bag.push(msg(
-                13,
-                vec![varint(1, 0), float(2, f32::from(pct) / 100.0)],
-            ));
+        if let Some(spacing) = look.line_spacing {
+            bag.push(line_spacing_message(spacing));
             count += 1;
         }
         if let Some(right_tw) = look.right_indent_twips {

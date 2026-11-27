@@ -5,9 +5,9 @@
 
 use easyoffice_formats::{
     doc_save_loss, DecodedContent, DocumentFormat, RichBinding, RichBindingKind, RichBlock,
-    RichComment, RichDocument, RichPageFrame, RichPageMargins, RichPaper, RichParagraph,
-    RichRevision, RichRevisionKind, RichRun, RichTable, RtfCodec, TableCellLink,
-    UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy,
+    RichComment, RichDocument, RichLineSpacing, RichPageFrame, RichPageMargins, RichPaper,
+    RichParagraph, RichRevision, RichRevisionKind, RichRun, RichTable, RtfCodec, TableCellLink,
+    UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy, MAX_LINE_SPACING_TWIPS,
 };
 
 fn unpack(bytes: &[u8]) -> Vec<(String, String)> {
@@ -168,26 +168,28 @@ fn docx_and_odt_line_spacing_rounding_explicit_100_and_fixed_lengths() {
         r#"<w:sectPr/></w:body></w:document>"#,
     );
     let docx_doc = decode_doc(&minimal_docx(docx_xml), "spacing.docx");
-    let docx_spacings: Vec<Option<u16>> = docx_doc
+    let docx_spacings: Vec<Option<RichLineSpacing>> = docx_doc
         .blocks
         .iter()
         .map(|b| match b {
-            RichBlock::Paragraph(p) => p.line_spacing_percent,
+            RichBlock::Paragraph(p) => p.line_spacing,
             _ => panic!("paragraph expected"),
         })
         .collect();
+    // PD-365: `exact` and `atLeast` keep their rule and their twips; a length past the Word
+    // dialog's 1,584 pt is clamped, a multiple past 1000% or a negative one is dropped.
     assert_eq!(
         docx_spacings,
         vec![
-            Some(108),
-            Some(100),
-            Some(150),
-            Some(50),
-            Some(1000),
+            Some(RichLineSpacing::Multiple(108)),
+            Some(RichLineSpacing::Multiple(100)),
+            Some(RichLineSpacing::Exact(360)),
+            Some(RichLineSpacing::AtLeast(60)),
+            Some(RichLineSpacing::Exact(4800)),
             None,
             None,
             None,
-            Some(1000),
+            Some(RichLineSpacing::Exact(MAX_LINE_SPACING_TWIPS)),
         ]
     );
 
@@ -196,12 +198,12 @@ fn docx_and_odt_line_spacing_rounding_explicit_100_and_fixed_lengths() {
         blocks: vec![
             RichBlock::Paragraph(RichParagraph {
                 runs: vec![RichRun::plain("108")],
-                line_spacing_percent: Some(108),
+                line_spacing: Some(RichLineSpacing::Multiple(108)),
                 ..RichParagraph::default()
             }),
             RichBlock::Paragraph(RichParagraph {
                 runs: vec![RichRun::plain("100")],
-                line_spacing_percent: Some(100),
+                line_spacing: Some(RichLineSpacing::Multiple(100)),
                 ..RichParagraph::default()
             }),
         ],
@@ -254,25 +256,26 @@ fn docx_and_odt_line_spacing_rounding_explicit_100_and_fixed_lengths() {
         r#"</office:text></office:body></office:document-content>"#,
     );
     let odt_doc = decode_doc(&minimal_odt(odt_content), "spacing.odt");
-    let odt_spacings: Vec<Option<u16>> = odt_doc
+    let odt_spacings: Vec<Option<RichLineSpacing>> = odt_doc
         .blocks
         .iter()
         .map(|b| match b {
-            RichBlock::Paragraph(p) => p.line_spacing_percent,
+            RichBlock::Paragraph(p) => p.line_spacing,
             _ => panic!("paragraph expected"),
         })
         .collect();
+    // PD-365: an absolute `fo:line-height` is the exact rule in twips (it used to be scaled to a percentage).
     assert_eq!(
         odt_spacings,
         vec![
-            Some(100),
-            Some(108),
-            Some(150),
-            Some(300),
-            Some(600),
-            Some(120),
-            Some(50),
-            Some(1000),
+            Some(RichLineSpacing::Multiple(100)),
+            Some(RichLineSpacing::Multiple(108)),
+            Some(RichLineSpacing::Exact(360)),
+            Some(RichLineSpacing::Exact(720)),
+            Some(RichLineSpacing::Exact(1440)),
+            Some(RichLineSpacing::Exact(288)),
+            Some(RichLineSpacing::Exact(20)),
+            Some(RichLineSpacing::Exact(14400)),
             None,
             None,
             None,

@@ -142,7 +142,7 @@ fn blank_and_default_hwpx_match_korean_wordprocessor_defaults() {
         panic!("expected paragraph 0");
     };
     assert_eq!(first.alignment, None);
-    assert_eq!(first.line_spacing_percent, None);
+    assert_eq!(first.line_spacing, None);
     assert_eq!(first.runs[0].font, None);
     assert_eq!(first.runs[0].size_half_pt, None);
 

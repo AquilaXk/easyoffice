@@ -7,7 +7,8 @@
 
 use crate::rich_table_style::{CellFill, TableBorderEdge, TableBorderKind, TableCellBorders};
 use crate::{
-    RichBinding, RichBindingKind, RichColumns, RichPageMargins, RichPaper, RichScript, XmlSanitizer,
+    RichBinding, RichBindingKind, RichColumns, RichLineSpacing, RichPageMargins, RichPaper,
+    RichScript, XmlSanitizer,
 };
 
 pub(crate) const MAX_HWPX_BORDER_FILLS: usize = 4_096;
@@ -27,6 +28,9 @@ const MARGIN_OTHER: u32 = 4_252;
 pub(crate) const LIST_LEFT_MARGIN: u32 = 2_000;
 /// Single-spacing-relative line spacing written when a paragraph sets none (percent).
 pub(crate) const DEFAULT_LINE_PERCENT: u32 = 160;
+/// The same as a line spacing, which a paragraph that sets none gets and the reader leaves unset.
+pub(crate) const DEFAULT_LINE_SPACING: RichLineSpacing =
+    RichLineSpacing::Multiple(DEFAULT_LINE_PERCENT as u16);
 /// HWPUNIT is 1/100 point and a twip is 1/20 point, so one twip is five HWPUNIT.
 pub(crate) const HWPUNIT_PER_TWIP: u32 = 5;
 /// Default cell height for generated tables.
@@ -167,8 +171,8 @@ pub(crate) struct HwpxParaShape {
     pub right_margin: u32,
     /// First-line indent (`hc:intent`), HWPUNIT; negative for a hanging indent.
     pub intent: i32,
-    /// Line spacing in percent of single spacing.
-    pub line_percent: u32,
+    /// Line spacing (`hh:lineSpacing`).
+    pub line_spacing: RichLineSpacing,
 }
 
 impl Default for HwpxParaShape {
@@ -182,7 +186,7 @@ impl Default for HwpxParaShape {
             left_margin: 0,
             right_margin: 0,
             intent: 0,
-            line_percent: DEFAULT_LINE_PERCENT,
+            line_spacing: DEFAULT_LINE_SPACING,
         }
     }
 }
@@ -246,6 +250,13 @@ fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
         None if id == 0 => "<hh:align horizontal=\"JUSTIFY\" vertical=\"BASELINE\"/>".to_string(),
         None => "<hh:align vertical=\"BASELINE\"/>".to_string(),
     };
+    let hwpunits = |twips: u16| u32::from(twips) * HWPUNIT_PER_TWIP;
+    let (line_type, line) = match shape.line_spacing {
+        RichLineSpacing::Multiple(percent) => ("PERCENT", u32::from(percent)),
+        RichLineSpacing::AtLeast(twips) => ("AT_LEAST", hwpunits(twips)),
+        RichLineSpacing::Exact(twips) => ("FIXED", hwpunits(twips)),
+        RichLineSpacing::Between(twips) => ("BETWEEN_LINES", hwpunits(twips)),
+    };
     let tab_pr = u8::from(shape.heading_type == HEADING_OUTLINE);
     let heading_ref = if shape.heading_type == HEADING_NONE || shape.heading_type == HEADING_OUTLINE
     {
@@ -262,7 +273,7 @@ fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
             "<hh:autoSpacing eAsianEng=\"0\" eAsianNum=\"0\"/>",
             "<hh:margin><hc:intent value=\"{intent}\" unit=\"HWPUNIT\"/><hc:left value=\"{left}\" unit=\"HWPUNIT\"/>",
             "<hc:right value=\"{right}\" unit=\"HWPUNIT\"/><hc:prev value=\"0\" unit=\"HWPUNIT\"/><hc:next value=\"0\" unit=\"HWPUNIT\"/></hh:margin>",
-            "<hh:lineSpacing type=\"PERCENT\" value=\"{line}\" unit=\"HWPUNIT\"/>",
+            "<hh:lineSpacing type=\"{line_type}\" value=\"{line}\" unit=\"HWPUNIT\"/>",
             "<hh:border borderFillIDRef=\"1\" offsetLeft=\"0\" offsetRight=\"0\" offsetTop=\"0\" offsetBottom=\"0\" connect=\"0\" ignoreMargin=\"0\"/>",
             "</hh:paraPr>"
         ),
@@ -276,7 +287,8 @@ fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
         left = shape.left_margin,
         right = shape.right_margin,
         intent = shape.intent,
-        line = shape.line_percent
+        line_type = line_type,
+        line = line
     )
 }
 

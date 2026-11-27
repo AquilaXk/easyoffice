@@ -296,7 +296,7 @@ impl<'a> Reader<'a> {
             para.left_indent_twips = f.left_indent_twips;
             para.right_indent_twips = f.right_indent_twips;
             para.first_line_indent_twips = f.first_line_indent_twips;
-            para.line_spacing_percent = f.line_spacing_percent;
+            para.line_spacing = f.line_spacing;
         }
         let level = t.list_levels.at(start).unwrap_or(0);
         if let Some(style_id) = t.list_styles.at(start) {

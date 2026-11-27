@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use crate::rich_document::{highlight_name_to_hex, normalize_hex_color, RichColumns, RichToc};
+use crate::rich_document::{
+    highlight_name_to_hex, normalize_hex_color, RichColumns, RichLineSpacing, RichToc,
+};
 use crate::rich_read_numbering::{Numbering, LIST_LEVELS};
 use crate::rich_xml::{
     heading_level_from_name, take_toc_page, toc_role_from_name, toggle_on, CharFmt,
@@ -25,7 +27,7 @@ pub(super) struct ParaState {
     pub(super) left_indent: Option<u32>,
     pub(super) right_indent: Option<u32>,
     pub(super) first_line: Option<i32>,
-    pub(super) line_percent: Option<u16>,
+    pub(super) line_spacing: Option<RichLineSpacing>,
     pub(super) space_before: Option<u32>,
     pub(super) space_after: Option<u32>,
     pub(super) bookmark: Option<u32>,
@@ -192,7 +194,7 @@ impl Resolver<'_> {
             left_indent_twips: p.left_indent,
             right_indent_twips: p.right_indent,
             first_line_indent_twips: p.first_line,
-            line_spacing_percent: p.line_percent,
+            line_spacing: p.line_spacing,
             space_before_twips: p.space_before,
             space_after_twips: p.space_after,
             toc,

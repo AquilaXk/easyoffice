@@ -27,7 +27,7 @@ fn odt_resolves_parent_style_inheritance_and_cycle_guard() {
     resolve_style_parents(&mut styles);
     let p1 = styles.get("P1").expect("P1 resolved");
     assert_eq!(p1.align, Some(RichAlignment::Center));
-    assert_eq!(p1.line_percent, Some(150));
+    assert_eq!(p1.line_spacing, Some(RichLineSpacing::Multiple(150)));
     assert!(p1.fmt.bold);
     assert!(p1.fmt.italic);
     assert_eq!(p1.fmt.color.as_deref(), Some("112233"));

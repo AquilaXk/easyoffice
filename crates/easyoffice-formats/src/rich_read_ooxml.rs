@@ -8,7 +8,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::decode_budget::DecodeBudget;
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
-use crate::rich_document::{toc_bookmark_number, RichColumns, MAX_PARA_SPACING_TWIPS};
+use crate::rich_document::{
+    toc_bookmark_number, RichColumns, RichLineSpacing, MAX_PARA_SPACING_TWIPS,
+};
 use crate::rich_notes::{RichNoteKind, RichRevision, RichRevisionKind};
 use crate::rich_page_frame::field_of_instruction;
 use crate::rich_read_images::{drawing_picture, DocxMedia, DocxRelationships, DrawingOutcome};
@@ -69,8 +71,6 @@ const UNSUPPORTED_OBJECT_ELEMENTS: [&str; 2] = ["w:pict", "w:object"];
 const DRAWING_ELEMENT: &str = "w:drawing";
 /// `w:spacing/@w:line` of single line spacing (240ths of a line).
 const DOCX_SINGLE_LINE_240THS: i64 = 240;
-const MAX_LINE_PERCENT: u16 = 1000;
-const MIN_FIXED_LINE_PERCENT: i128 = 50;
 const UNSUPPORTED_OBJECT_NOTE: &str = "그림·도형·OLE 개체는 가져오지 않았습니다.";
 
 /// The in-document link (`#_Toc12`) to a table-of-contents bookmark name.
@@ -78,7 +78,21 @@ fn toc_bookmark_link(name: &str) -> Option<String> {
     toc_bookmark_number(name).map(|_| format!("#{name}"))
 }
 
-/// `w:spacing` (auto, exact, or atLeast line spacing, 240ths of a line) and `w:ind` of a paragraph.
+/// `w:spacing/@w:line` by `w:lineRule`: `auto` is a multiple in 240ths of a line, `atLeast` and
+/// `exact` are twips. Values past the model's bounds are dropped (multiple) or clamped (twips).
+fn docx_line_spacing(rule: Option<&str>, line: i64) -> Option<RichLineSpacing> {
+    match rule {
+        None | Some("auto") => line
+            .checked_mul(100)
+            .and_then(|v| v.checked_add(DOCX_SINGLE_LINE_240THS / 2))
+            .and_then(|v| RichLineSpacing::multiple(v / DOCX_SINGLE_LINE_240THS)),
+        Some("atLeast") => RichLineSpacing::from_twips(RichLineSpacing::AtLeast, line),
+        Some("exact") => RichLineSpacing::from_twips(RichLineSpacing::Exact, line),
+        Some(_) => None,
+    }
+}
+
+/// `w:spacing` (auto, exact, or atLeast line spacing) and `w:ind` of a paragraph.
 fn apply_para_layout(top: &mut ParaState, name: &str, attrs: &Attrs<'_>) {
     let number = |key: &str| attr(attrs, key).and_then(|v| v.trim().parse::<i64>().ok());
     match name {
@@ -93,19 +107,9 @@ fn apply_para_layout(top: &mut ParaState, name: &str, attrs: &Attrs<'_>) {
                     .ok()
                     .map(|v| v.min(MAX_PARA_SPACING_TWIPS));
             }
-            let line = number("w:line").filter(|l| *l > 0);
-            top.line_percent = match (attr(attrs, "w:lineRule").as_deref(), line) {
-                (None | Some("auto"), Some(l)) => l
-                    .checked_mul(100)
-                    .and_then(|v| v.checked_add(DOCX_SINGLE_LINE_240THS / 2))
-                    .and_then(|v| u16::try_from(v / DOCX_SINGLE_LINE_240THS).ok())
-                    .filter(|p| (1..=MAX_LINE_PERCENT).contains(p)),
-                (Some("exact" | "atLeast"), Some(l)) => {
-                    let pct = (i128::from(l) * 100 + 120) / 240;
-                    Some(pct.clamp(MIN_FIXED_LINE_PERCENT, i128::from(MAX_LINE_PERCENT)) as u16)
-                }
-                _ => None,
-            };
+            top.line_spacing = number("w:line")
+                .filter(|l| *l > 0)
+                .and_then(|l| docx_line_spacing(attr(attrs, "w:lineRule").as_deref(), l));
         }
         "w:ind" => {
             top.left_indent = number("w:left")

@@ -6,7 +6,7 @@ mod image_fixture;
 mod pages_fixture;
 mod pages_picture_fixture;
 
-use easyoffice_formats::RichBlock;
+use easyoffice_formats::{RichBlock, RichLineSpacing};
 use pages_fixture::*;
 use pages_picture_fixture::*;
 
@@ -749,9 +749,9 @@ fn independent_character_and_paragraph_layouts_are_read_next_to_the_fixture_layo
         (
             p.first_line_indent_twips,
             p.left_indent_twips,
-            p.line_spacing_percent
+            p.line_spacing
         ),
-        (Some(360), Some(720), Some(150))
+        (Some(360), Some(720), Some(RichLineSpacing::Multiple(150)))
     );
 }
 

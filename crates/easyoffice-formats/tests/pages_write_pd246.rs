@@ -11,9 +11,10 @@ use easyoffice_formats::pages_proto::{Message, WireValue};
 use easyoffice_formats::{
     pages_write_loss, CellMerge, DecodedContent, DocumentFormat, EasyOfficeError, PagesWriteLoss,
     RichAlignment, RichBinding, RichBindingKind, RichBlock, RichColumns, RichDocument, RichField,
-    RichImage, RichListKind, RichListNumber, RichNumberEnclosure, RichNumberFormat, RichPageFrame,
-    RichPageMargins, RichPaper, RichParagraph, RichRun, RichScript, RichTable, TableCellLink,
-    UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy, MAX_IMAGES_PER_DOCUMENT,
+    RichImage, RichLineSpacing, RichListKind, RichListNumber, RichNumberEnclosure,
+    RichNumberFormat, RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun,
+    RichScript, RichTable, TableCellLink, UniversalFormatConverter, ZipArchiveCodec,
+    ZipSecurityPolicy, MAX_IMAGES_PER_DOCUMENT,
 };
 use image_fixture::{make_jpeg, make_png};
 use std::time::Instant;
@@ -257,7 +258,7 @@ fn bullet_and_multilevel_ordered_lists_and_links_and_extended_styles_roundtrip()
         alignment: Some(RichAlignment::Justify),
         left_indent_twips: Some(720),
         first_line_indent_twips: Some(-360),
-        line_spacing_percent: Some(150),
+        line_spacing: Some(RichLineSpacing::Multiple(150)),
         columns: Some(RichColumns {
             count: 2,
             equal: true,
@@ -335,7 +336,7 @@ fn bullet_and_multilevel_ordered_lists_and_links_and_extended_styles_roundtrip()
     assert_eq!(p3.alignment, Some(RichAlignment::Justify));
     assert_eq!(p3.left_indent_twips, Some(720));
     assert_eq!(p3.first_line_indent_twips, Some(-360));
-    assert_eq!(p3.line_spacing_percent, Some(150));
+    assert_eq!(p3.line_spacing, Some(RichLineSpacing::Multiple(150)));
     assert_eq!(
         p3.columns,
         Some(RichColumns {

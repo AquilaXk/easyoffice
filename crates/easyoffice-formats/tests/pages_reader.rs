@@ -8,7 +8,8 @@ use easyoffice_formats::pages_proto::{
 };
 use easyoffice_formats::{
     DecodedContent, DocumentFormat, EasyOfficeError, FormatDetector, RichAlignment, RichBlock,
-    RichListKind, RichScript, UniversalDocumentModel, UniversalFormatConverter, ZipArchiveCodec,
+    RichLineSpacing, RichListKind, RichScript, UniversalDocumentModel, UniversalFormatConverter,
+    ZipArchiveCodec,
 };
 use pages_fixture::*;
 
@@ -412,7 +413,7 @@ fn full_style_properties_and_title_extraction() {
     };
     assert_eq!(p0.first_line_indent_twips, Some(360));
     assert_eq!(p0.left_indent_twips, Some(720));
-    assert_eq!(p0.line_spacing_percent, Some(150));
+    assert_eq!(p0.line_spacing, Some(RichLineSpacing::Multiple(150)));
     // Run 0 inherits paragraph default char props (subscript + yellow highlight, no template font).
     assert_eq!(p0.runs[0].text, "Base ");
     assert_eq!(p0.runs[0].script, RichScript::Subscript);
@@ -429,7 +430,7 @@ fn full_style_properties_and_title_extraction() {
     };
     assert_eq!(p1.left_indent_twips, Some(480));
     assert_eq!(p1.first_line_indent_twips, Some(240));
-    assert_eq!(p1.line_spacing_percent, Some(200));
+    assert_eq!(p1.line_spacing, Some(RichLineSpacing::Multiple(200)));
 }
 
 fn bplist_single_dict(entries: &[(&str, Option<bool>)]) -> Vec<u8> {
