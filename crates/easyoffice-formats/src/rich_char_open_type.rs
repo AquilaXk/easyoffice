@@ -94,6 +94,18 @@ impl OpenType {
         *self == Self::default()
     }
 
+    /// The features of `self` added to `inherited`: a value is `self`'s when it names one, the style sets and the alternates add up.
+    pub(crate) fn or(self, inherited: Self) -> Self {
+        let pick = |own: u8, inherit: u8| if own == 0 { inherit } else { own };
+        Self {
+            ligatures: pick(self.ligatures, inherited.ligatures),
+            num_spacing: pick(self.num_spacing, inherited.num_spacing),
+            num_form: pick(self.num_form, inherited.num_form),
+            style_sets: self.style_sets | inherited.style_sets,
+            contextual_alts: self.contextual_alts || inherited.contextual_alts,
+        }
+    }
+
     /// The run's features as one integer (`MAX_PACKED_OPEN_TYPE` at most), the form the editor and the save JSON carry.
     pub fn pack(&self) -> u32 {
         u32::from(self.ligatures)

@@ -144,17 +144,9 @@ impl CharAdvanced {
             scale_percent: self.scale_percent.or(inherited.scale_percent),
             position_half_pt: self.position_half_pt.or(inherited.position_half_pt),
             kerning_half_pt: self.kerning_half_pt.or(inherited.kerning_half_pt),
-            open_type: if self.open_type.is_none() {
-                inherited.open_type
-            } else {
-                self.open_type
-            },
+            open_type: self.open_type.or(inherited.open_type),
             grid_snap_off: self.grid_snap_off || inherited.grid_snap_off,
-            fx: if self.fx.is_none() {
-                inherited.fx
-            } else {
-                self.fx
-            },
+            fx: self.fx.or(inherited.fx),
         }
     }
 
@@ -295,6 +287,53 @@ impl CharAdvanced {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_span_adds_its_effects_and_features_to_the_parents_instead_of_replacing_them() {
+        let parent = CharAdvanced {
+            fx: TextFx {
+                hidden: true,
+                emphasis: 2,
+                underline_color: Some(0xFF_0000),
+                ..TextFx::default()
+            },
+            open_type: OpenType {
+                ligatures: 1,
+                style_sets: 0b10,
+                ..OpenType::default()
+            },
+            ..CharAdvanced::default()
+        };
+        let span = CharAdvanced {
+            fx: TextFx {
+                small_caps: true,
+                underline_style: 2,
+                ..TextFx::default()
+            },
+            open_type: OpenType {
+                num_form: 1,
+                contextual_alts: true,
+                ..OpenType::default()
+            },
+            ..CharAdvanced::default()
+        };
+        let merged = span.or(parent);
+        assert!(merged.fx.small_caps && merged.fx.hidden, "both stay on");
+        assert_eq!((merged.fx.emphasis, merged.fx.underline_style), (2, 2));
+        assert_eq!(merged.fx.underline_color, Some(0xFF_0000));
+        assert_eq!(merged.open_type.ligatures, 1);
+        assert_eq!(merged.open_type.style_sets, 0b10);
+        assert_eq!(merged.open_type.num_form, 1);
+        assert!(merged.open_type.contextual_alts);
+        let own = CharAdvanced {
+            fx: TextFx {
+                emphasis: 3,
+                ..TextFx::default()
+            },
+            ..CharAdvanced::default()
+        };
+        assert_eq!(own.or(parent).fx.emphasis, 3, "a span's own value wins");
+    }
 
     #[test]
     fn bounds_clamp_and_drop_the_neutral_value() {

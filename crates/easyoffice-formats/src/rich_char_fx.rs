@@ -129,6 +129,28 @@ impl TextFx {
         *self == Self::default()
     }
 
+    /// The effects of `self` added to `inherited`: a flag is on when either has it, and a value (emphasis, underline style and
+    /// colour) is `self`'s when it names one.
+    pub(crate) fn or(self, inherited: Self) -> Self {
+        Self {
+            double_strike: self.double_strike || inherited.double_strike,
+            small_caps: self.small_caps || inherited.small_caps,
+            all_caps: self.all_caps || inherited.all_caps,
+            hidden: self.hidden || inherited.hidden,
+            emphasis: if self.emphasis == 0 {
+                inherited.emphasis
+            } else {
+                self.emphasis
+            },
+            underline_style: if self.underline_style == 0 {
+                inherited.underline_style
+            } else {
+                self.underline_style
+            },
+            underline_color: self.underline_color.or(inherited.underline_color),
+        }
+    }
+
     /// The flags, emphasis and underline style as one integer (`MAX_PACKED_FX` at most); the colour travels on its own.
     pub fn pack(&self) -> u32 {
         let flag = |on: bool, bit: u32| if on { bit } else { 0 };
