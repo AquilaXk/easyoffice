@@ -241,7 +241,7 @@ test("workflow and job-level env blocks do not reference step-only contexts (run
   }
 });
 
-test("the Node suites run as shards of the whole test glob and reach sonar as one report (PD-369)", () => {
+test("the Node suites run as shards of the whole test glob and reach sonar as one report (PD-370)", () => {
   const ci = readText(path.join(REPO, ".github/workflows/ci.yml"));
   const jobs = ci.slice(ci.indexOf("\njobs:\n") + 1).split(/\n(?= {2}[a-z][\w-]*:\s*(?:#.*)?\n)/).slice(1);
   const jobText = (name) => jobs.find((job) => job.startsWith(`  ${name}:`));
@@ -276,7 +276,7 @@ test("the Node suites run as shards of the whole test glob and reach sonar as on
   assert.match(sonar, /pattern:\s*js-coverage-lcov-\*\n\s+merge-multiple:\s*true/);
   assert.match(readText(path.join(REPO, "sonar-project.properties")), /^sonar\.javascript\.lcov\.reportPaths=coverage\/js\.lcov$/m);
 
-  // The limit stays at least 1.5 times the expected shard time (about 7 min, PD-369).
+  // The limit stays at least 1.5 times the expected shard time (about 8 min, PD-370).
   const limit = Number(nodeTests.match(/^\s{4}timeout-minutes:\s+(\d+)/m)[1]);
-  assert.ok(limit >= 1.5 * 7 && limit <= 30, `node-tests timeout ${limit}m`);
+  assert.ok(limit >= 1.5 * 8 && limit <= 30, `node-tests timeout ${limit}m`);
 });

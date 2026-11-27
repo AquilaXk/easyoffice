@@ -3,7 +3,7 @@ import test from "node:test";
 import { createWorkspaceHarness } from "./webui-dom-harness.mjs";
 import { matchesSelectorList } from "./webui-css-selector.mjs";
 
-// The harness keeps the matches of a selector until the tree changes (PD-369). A cached answer must always equal the
+// The harness keeps the matches of a selector until the tree changes (PD-370). A cached answer must always equal the
 // answer of a fresh walk, so these tests change the tree in every way the harness offers and compare both.
 
 const SELECTORS = [

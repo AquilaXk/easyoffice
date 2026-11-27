@@ -24,7 +24,7 @@ env:
 
 jobs:
   # Platform-independent hygiene gates run once on Ubuntu while Rust engine gates (`checks-rust`) and the
-  # sharded Node suites (`node-tests`) run in parallel, cutting wall-clock feedback time (PD-369).
+  # sharded Node suites (`node-tests`) run in parallel, cutting wall-clock feedback time (PD-370).
   checks:
     name: checks
     runs-on: ubuntu-latest
@@ -69,9 +69,9 @@ jobs:
   # Every scripts/test-*.mjs suite (guards, hwp-studio and the WebUI behavioral and security suites) runs
   # once, split over three runners: `--test-shard=i/3` takes every third file of the sorted list, so each
   # shard gets the same mix of heavy WebUI files. Each shard writes its own lcov report over the WebUI
-  # scripts, the editor overlay sources and the guard scripts; the `sonar` job merges the three (PD-369).
-  # The Node suites were 29+ min on one 4-vCPU runner and hit the old 30m limit twice in a row. A shard
-  # takes about 7 min, so 20m is nearly three times that.
+  # scripts, the editor overlay sources and the guard scripts; the `sonar` job merges the three (PD-370).
+  # The Node suites were 29+ min on one 4-vCPU runner and hit the old 30m limit twice in a row; the
+  # harness fix halved their CPU time. A shard takes about 8 min, so 20m is two and a half times that.
   node-tests:
     name: node-tests (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
