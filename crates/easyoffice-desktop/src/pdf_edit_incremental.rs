@@ -11,6 +11,9 @@
 //! page-extraction helpers for new objects while leaving `0..orig.len()` byte-identical.
 
 #[cfg(test)]
+#[path = "pdf_edit_incremental_appearance_tests.rs"]
+mod appearance_tests;
+#[cfg(test)]
 #[path = "pdf_edit_incremental_edge_tests.rs"]
 mod edge_tests;
 #[cfg(test)]

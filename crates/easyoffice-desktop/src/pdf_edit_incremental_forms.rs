@@ -158,6 +158,9 @@ pub(crate) fn apply_incremental_forms(
     let mut matched_applicant = false;
     let mut matched_dept = false;
     let mut wrote_custom_ap = false;
+    // An untouched text-like widget that has a value but no `/AP /N` is still drawn by the viewer
+    // because of `/NeedAppearances`; dropping the flag would blank it.
+    let mut viewer_draws_untouched = false;
     let mut locked_field_modified = false;
     let mut added_fields = Vec::new();
     let mut field_count = sigs.sig_field_count;
@@ -213,7 +216,9 @@ pub(crate) fn apply_incremental_forms(
                 used_names.insert(field.full_name.clone());
             }
 
+            let depends_on_viewer = depends_on_need_appearances(&field, &annot);
             if field.field_type != FieldType::Text {
+                viewer_draws_untouched |= depends_on_viewer;
                 continue;
             }
             if annot_obj_id.is_some_and(|id| sigs.sig_field_ids.contains(&id)) {
@@ -246,6 +251,7 @@ pub(crate) fn apply_incremental_forms(
             };
 
             let Some((val, kind)) = update_spec else {
+                viewer_draws_untouched |= depends_on_viewer;
                 continue;
             };
             if sigs.locked_all {
@@ -417,10 +423,26 @@ pub(crate) fn apply_incremental_forms(
 
     Ok(FormUpdateResult {
         wrote_any: wrote_custom_ap,
-        clear_need_appearances: wrote_custom_ap,
+        clear_need_appearances: wrote_custom_ap && !viewer_draws_untouched,
         added_fields,
         locked_field_modified,
     })
+}
+
+/// True for a text or choice widget that carries a value but has no normal appearance stream.
+fn depends_on_need_appearances(field: &InheritedField, widget: &Dict<'_>) -> bool {
+    if !matches!(field.field_type, FieldType::Text | FieldType::Choice) {
+        return false;
+    }
+    let has_value = match &field.value {
+        SavedValue::None => false,
+        SavedValue::Text(text) => !text.is_empty(),
+        SavedValue::Name(name) => !name.is_empty(),
+    };
+    has_value
+        && !widget
+            .get::<Dict<'_>>(b"AP")
+            .is_some_and(|ap| has_non_null(&ap, b"N"))
 }
 
 #[allow(clippy::too_many_arguments)]
