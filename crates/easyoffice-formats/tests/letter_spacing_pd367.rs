@@ -2,8 +2,9 @@
 //! format keeps it in, and hostile values stay inside the model's bounds.
 
 use easyoffice_formats::{
-    DecodedContent, DocumentFormat, RichBlock, RichDocument, RichParagraph, RichRun,
-    UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy, MAX_LETTER_SPACING_TWIPS,
+    DecodedContent, DocumentFormat, RichBlock, RichDocument, RichField, RichPageFrame,
+    RichParagraph, RichRun, UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy,
+    MAX_LETTER_SPACING_TWIPS,
 };
 
 fn run(text: &str, size: Option<u16>, spacing: Option<i16>) -> RichRun {
@@ -84,6 +85,53 @@ fn spacing_in_twips_roundtrips_in_docx_odt_and_rtf() {
                 "{fmt:?} {text}: {back:?}"
             );
         }
+    }
+}
+
+/// The spacing of the page number field in the footer, as the reader gives it back.
+fn footer_field_spacing(doc: &RichDocument) -> Option<Option<i16>> {
+    doc.page_frame
+        .footer
+        .iter()
+        .flat_map(|p| p.runs.iter())
+        .find(|r| r.field == Some(RichField::PageNumber))
+        .map(|r| r.letter_spacing_twips)
+}
+
+#[test]
+fn page_number_field_keeps_its_spacing() {
+    let field = RichRun {
+        size_half_pt: Some(24),
+        letter_spacing_twips: Some(60),
+        field: Some(RichField::PageNumber),
+        ..RichRun::default()
+    };
+    let doc = RichDocument {
+        title: "쪽 번호".to_string(),
+        blocks: vec![RichBlock::Paragraph(RichParagraph {
+            runs: vec![RichRun::plain("본문")],
+            ..RichParagraph::default()
+        })],
+        page_frame: RichPageFrame {
+            footer: vec![RichParagraph {
+                runs: vec![field],
+                ..RichParagraph::default()
+            }],
+            ..RichPageFrame::default()
+        },
+        ..RichDocument::default()
+    };
+    for (fmt, name) in [
+        (DocumentFormat::Docx, "f.docx"),
+        (DocumentFormat::Odt, "f.odt"),
+        (DocumentFormat::Hwpx, "f.hwpx"),
+    ] {
+        let bytes = UniversalFormatConverter::encode_rich(&doc, fmt, None).unwrap();
+        assert_eq!(
+            footer_field_spacing(&decode(&bytes, name)),
+            Some(Some(60)),
+            "{fmt:?}"
+        );
     }
 }
 

@@ -151,6 +151,7 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
                 color: fmt.color,
                 highlight: fmt.highlight,
                 script: fmt.script,
+                letter_spacing_twips: fmt.letter_spacing_twips,
                 field: r.field,
                 ..RichRun::default()
             });

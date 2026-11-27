@@ -6456,7 +6456,7 @@
   5. **화면·JSON**: 런은 `data-eo-spacing`(twips)와 `letter-spacing`을 가진다(`doc-runs.js`의 `spacing`). 엔진 JSON 키는 `letterSpacingTwips`이고 범위(±31,680 정수) 밖이나 정수가 아니면 저장을 거부한다. 페이지 앱 포맷 사이드바 `스타일 > 서체`의 `문자 간격` 칸은 글자 크기 대비 %이고(-50~500), 선택의 글자 크기(없으면 10pt)로 twips로 바꿔 적용한다. 0은 간격을 없앤다. 워드프로세서·한글 화면의 글꼴 대화상자에는 아직 항목이 없다(`TODO.md`).
 - **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스 크레이트 중 대신할 것이 없다. (2) 기존 `CharFmt`, `RichRun`, 포맷별 읽기·쓰기, `StrictJsonValue`, `doc-runs.js` 런 엔진을 그대로 썼다. (3) 이식한 코드는 없다. Pages 필드 번호만 공개 `.proto`로 확인했다(`THIRD_PARTY_NOTICES.md`).
 - **Why** 자간은 제목·표지에서 줄 길이를 맞추는 데 쓰여 열고 저장할 때 사라지면 레이아웃이 달라진다. 참조 앱과 표준 워드프로세서는 자간을 보존한다.
-- **Trade-offs** (1) HWPX·Pages는 크기 비례라 크기를 바꾸면 의미가 달라진다. (2) Pages 템플릿의 단락 간격이 읽혀 열어 본 문서의 문단이 이전보다 벌어져 보일 수 있다. 이전에는 파일에 있던 값을 버렸다. (3) 한글 5.0(HWP) 편집기는 자체 엔진이라 이 모델과 별개다.
+- **Trade-offs** (1) HWPX·Pages는 크기 비례라 크기를 바꾸면 의미가 달라진다. (2) Pages 템플릿의 단락 간격이 읽혀 열어 본 문서의 문단이 이전보다 벌어져 보일 수 있다. 이전에는 파일에 있던 값을 버렸다. (3) 한글 5.0(HWP) 편집기는 자체 엔진이라 이 모델과 별개다. (4) HWPX의 `hh:spacing`은 -50~50%라 글자 크기의 50%를 넘는 DOCX·ODT·RTF 자간을 HWPX로 저장하면 50%로 잘린다(12pt 글자에서 6pt를 넘는 값). 반대로 HWPX에서 읽은 값은 범위 안이다. (5) 포맷 사이드바의 `문자 간격` 칸은 -50~500% 밖의 값을 범위로 자르고 자른 값을 칸에 보여 준다. 숫자가 아닌 글자는 적용하지 않고 선택의 값으로 되돌린다.
 - **Alternatives rejected** (1) 모델을 크기 대비 비율로 두기: DOCX·ODT·RTF 왕복이 크기를 몰라 어긋난다. (2) 컴팩트 배치에 추정한 번호로 쓰기: 번호 미확인.
 - **Verified by** `crates/easyoffice-formats/tests/letter_spacing_pd367.rs`(포맷별 왕복, 규칙 낱말, 변조 값, Pages 단락 앞뒤 간격), `rich_char_spacing.rs` 단위 시험, `crates/easyoffice-app/src/convert_open/tests.rs`(JSON 키와 범위 거부), `scripts/test-webui-family-look-pd361.mjs`·`scripts/test-webui-doc-paragraphs.mjs`.
 - **Revisit when** 실제 Pages 문서로 `tracking`·단락 간격 단위를 확인할 때, 워드프로세서 글꼴 대화상자를 넣을 때.

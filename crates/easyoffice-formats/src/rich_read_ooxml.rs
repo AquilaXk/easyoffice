@@ -375,6 +375,7 @@ impl DocxWalker {
                 color: self.fmt.color.clone(),
                 highlight: self.fmt.highlight.clone(),
                 script: self.fmt.script,
+                letter_spacing_twips: self.fmt.letter_spacing_twips,
                 field: Some(field),
                 ..RichRun::default()
             });

@@ -106,19 +106,29 @@
     const DEFAULT_HALF_PT = 20;
     const sizeHalfPt = (state) => (Number.isInteger(state?.size) ? state.size : DEFAULT_HALF_PT);
 
-    function syncCharSpacing() {
+    function syncCharSpacing(force = false) {
       const el = byId("pages-insp-spacing");
-      if (!el || doc.activeElement === el) return;
+      if (!el || (!force && doc.activeElement === el)) return;
       const state = deps.getDocRuns?.()?.getState?.();
       const twips = Number.isInteger(state?.spacing) ? state.spacing : 0;
       el.value = String(Math.round((twips * 100) / (sizeHalfPt(state) * 10)));
     }
 
-    function applyCharSpacing(text) {
-      const percent = Number(text);
+    // A value outside the field's range (the `min` and `max` of the input) is cut to it and shown cut, as the official app
+    // does; text that is not a number changes nothing and the field goes back to the selection's value.
+    const CHAR_SPACING_PERCENT = [-50, 500];
+
+    function applyCharSpacing(el) {
       const runs = deps.getDocRuns?.();
-      if (!runs || !Number.isFinite(percent)) return;
-      const twips = Math.round((percent / 100) * sizeHalfPt(runs.getState?.()) * 10);
+      const percent = el.value.trim() === "" ? NaN : Number(el.value);
+      if (!runs || !Number.isFinite(percent)) {
+        syncCharSpacing(true);
+        return;
+      }
+      const [min, max] = CHAR_SPACING_PERCENT;
+      const clamped = Math.min(Math.max(Math.round(percent), min), max);
+      el.value = String(clamped);
+      const twips = Math.round((clamped / 100) * sizeHalfPt(runs.getState?.()) * 10);
       runs.applyPatch?.({ spacing: twips });
       syncInspectorValues();
     }
@@ -365,7 +375,7 @@
         const fallback = kind === "multiple" ? lineKinds().amountOf("multiple", deps.getDocRuns?.()?.lineSpecOf?.(null)?.value ?? 108) : LINE_KIND_START[kind];
         applyLineSpacing(kind, fallback);
       });
-      byId("pages-insp-spacing")?.addEventListener("change", (ev) => applyCharSpacing(ev.target.value));
+      byId("pages-insp-spacing")?.addEventListener("change", (ev) => applyCharSpacing(ev.target));
       byId("pages-insp-lineamount")?.addEventListener("change", (ev) => applyLineSpacing(byId("pages-insp-linekind").value, ev.target.value));
       for (const [inspId, srcId] of [
         ["pages-insp-style", "doc-style-select"],

@@ -32,7 +32,7 @@ fn size_twips(size_half_pt: Option<u16>) -> i64 {
 
 /// Letter spacing in per-mille of the font size (HWPX percent is a tenth of this), rounded.
 pub(crate) fn to_permille(twips: i16, size_half_pt: Option<u16>) -> i64 {
-    let size = size_twips(size_half_pt);
+    let size = size_twips(size_half_pt).max(1);
     let scaled = i64::from(twips) * 1000;
     (scaled + scaled.signum() * size / 2) / size
 }
@@ -54,6 +54,12 @@ mod tests {
         assert_eq!(letter_spacing(-40), Some(-40));
         assert_eq!(letter_spacing(i64::MAX), Some(MAX_LETTER_SPACING_TWIPS));
         assert_eq!(letter_spacing(i64::MIN), Some(-MAX_LETTER_SPACING_TWIPS));
+    }
+
+    #[test]
+    fn a_zero_size_does_not_divide_by_zero() {
+        assert_eq!(to_permille(60, Some(0)), 60_000);
+        assert_eq!(from_permille(60_000, Some(0)), None);
     }
 
     #[test]
