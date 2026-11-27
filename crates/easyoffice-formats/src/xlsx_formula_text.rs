@@ -192,6 +192,8 @@ const FUTURE: [&str; 168] = [
     "Z.TEST",
 ];
 
+use super::xlsx_single_operator::{single_calls, single_operators};
+
 use super::xlsx_eta_funcs::{
     eta_token_mask, has_ascii_prefix_ci, is_builtin_eta_function, next_significant,
     prev_significant, strip_file_prefixes,
@@ -310,15 +312,29 @@ fn join(tokens: &[Tok]) -> String {
     out
 }
 
-/// The formula text of the page (no leading `=`) as a file spells it.
+/// The longest formula, in characters, the spreadsheet format allows (PD-361). A longer text is a
+/// hostile or damaged file: its spelling is not converted, the text is kept as it is.
+const MAX_FORMULA_CHARS: usize = 8192;
+
+fn over_length_limit(text: &str) -> bool {
+    // A character is at least one byte, so a short text needs no count.
+    text.len() > MAX_FORMULA_CHARS && text.chars().count() > MAX_FORMULA_CHARS
+}
+
+/// The formula text of the page (no leading `=`) as a file spells it. A text over the length or
+/// nesting limit comes back unchanged.
 pub fn to_file_formula(text: &str) -> String {
-    if !text
-        .chars()
-        .any(|c| c.is_ascii_alphabetic() || matches!(c, '#' | '@'))
+    if over_length_limit(text)
+        || !text
+            .chars()
+            .any(|c| c.is_ascii_alphabetic() || matches!(c, '#' | '@'))
     {
         return text.to_string();
     }
-    let tokens = optional_parameters(single_calls(anchor_calls(tokenize(text))));
+    let Some(singles) = single_calls(anchor_calls(tokenize(text))) else {
+        return text.to_string();
+    };
+    let tokens = optional_parameters(singles);
     let variables = declared_variables(&tokens);
     let eta_mask = eta_token_mask(&tokens);
     let mut out = String::with_capacity(text.len() + 16);
@@ -371,11 +387,13 @@ fn contains_ascii_ci(haystack: &str, needle: &str) -> bool {
         .any(|w| w.eq_ignore_ascii_case(nb))
 }
 
-/// The formula text of a file (no leading `=`) as the page spells it.
+/// The formula text of a file (no leading `=`) as the page spells it. A text over the length or
+/// nesting limit comes back unchanged.
 pub fn from_file_formula(text: &str) -> String {
-    if !contains_ascii_ci(text, "_xl")
-        && !text.contains("ANCHORARRAY")
-        && !contains_ascii_ci(text, "SINGLE")
+    if over_length_limit(text)
+        || !contains_ascii_ci(text, "_xl")
+            && !text.contains("ANCHORARRAY")
+            && !contains_ascii_ci(text, "SINGLE")
     {
         return text.to_string();
     }
@@ -396,7 +414,10 @@ pub fn from_file_formula(text: &str) -> String {
         }
         tokens.push(Tok::Word(strip_file_prefixes(&word).to_string()));
     }
-    join(&single_operators(spill_operators(tokens)))
+    match single_operators(spill_operators(tokens)) {
+        Some(tokens) => join(&tokens),
+        None => text.to_string(),
+    }
 }
 
 /// `[x]` in an argument list as the word `_xlop.x`.
@@ -460,174 +481,6 @@ fn spill_operators(tokens: Vec<Tok>) -> Vec<Tok> {
                     out.extend(inner.iter().cloned());
                     out.push(Tok::Punct('#'));
                     i += close + 3;
-                    continue;
-                }
-            }
-        }
-        out.push(tokens[i].clone());
-        i += 1;
-    }
-    out
-}
-
-fn matching_delim(tokens: &[Tok], start: usize, open: char, close: char) -> Option<usize> {
-    let mut depth = 0usize;
-    for (offset, tok) in tokens[start..].iter().enumerate() {
-        match tok {
-            Tok::Punct(c) if *c == open => depth += 1,
-            Tok::Punct(c) if *c == close => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    return Some(start + offset + 1);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn single_operand_end(tokens: &[Tok], start: usize) -> Option<usize> {
-    let mut i = start;
-    while matches!(tokens.get(i), Some(Tok::Punct(c)) if c.is_whitespace()) {
-        i += 1;
-    }
-    let tok = tokens.get(i)?;
-    let mut end = match tok {
-        Tok::Punct('@' | '+' | '-') => return single_operand_end(tokens, i + 1),
-        Tok::Punct('(') => matching_delim(tokens, i, '(', ')')?,
-        Tok::Punct('{') => matching_delim(tokens, i, '{', '}')?,
-        Tok::Quoted(_) => i + 1,
-        Tok::Word(_) => {
-            let next = if tokens.get(i + 1) == Some(&Tok::Punct('(')) {
-                matching_delim(tokens, i + 1, '(', ')')?
-            } else {
-                i + 1
-            };
-            if matches!(tokens.get(next), Some(Tok::Quoted(q)) if q.starts_with('[')) {
-                next + 1
-            } else {
-                next
-            }
-        }
-        Tok::Punct(_) => return None,
-    };
-    while let Some(Tok::Punct(op)) = tokens.get(end) {
-        match op {
-            '!' | ':' => {
-                end = single_operand_end(tokens, end + 1)?;
-                break;
-            }
-            '%' => end += 1,
-            _ => break,
-        }
-    }
-    Some(end)
-}
-
-/// Unary `@<operand>` as `_xlfn.SINGLE(<operand>)`.
-fn single_calls(tokens: Vec<Tok>) -> Vec<Tok> {
-    let mut out = Vec::with_capacity(tokens.len());
-    let mut i = 0;
-    while i < tokens.len() {
-        if tokens[i] == Tok::Punct('@') {
-            let mut op_start = i + 1;
-            while matches!(tokens.get(op_start), Some(Tok::Punct(c)) if c.is_whitespace()) {
-                op_start += 1;
-            }
-            if let Some(end) = single_operand_end(&tokens, op_start) {
-                out.push(Tok::Word("_xlfn.SINGLE".to_string()));
-                out.push(Tok::Punct('('));
-                out.extend(single_calls(tokens[op_start..end].to_vec()));
-                out.push(Tok::Punct(')'));
-                i = end;
-                continue;
-            }
-        }
-        out.push(tokens[i].clone());
-        i += 1;
-    }
-    out
-}
-
-fn has_top_level_comma(tokens: &[Tok]) -> bool {
-    let mut depth = 0usize;
-    for tok in tokens {
-        match tok {
-            Tok::Punct('(' | '{') => depth += 1,
-            Tok::Punct(')' | '}') => depth = depth.saturating_sub(1),
-            Tok::Punct(',') if depth == 0 => return true,
-            _ => {}
-        }
-    }
-    false
-}
-
-fn is_outer_parenthesized(tokens: &[Tok]) -> bool {
-    let mut start = 0;
-    while matches!(tokens.get(start), Some(Tok::Punct(c)) if c.is_whitespace()) {
-        start += 1;
-    }
-    let mut end = tokens.len();
-    while end > start && matches!(tokens.get(end - 1), Some(Tok::Punct(c)) if c.is_whitespace()) {
-        end -= 1;
-    }
-    tokens.get(start) == Some(&Tok::Punct('('))
-        && matching_delim(tokens, start, '(', ')') == Some(end)
-}
-
-fn has_single_top_level_op(tokens: &[Tok]) -> bool {
-    let mut depth = 0usize;
-    for tok in tokens {
-        match tok {
-            Tok::Punct('(' | '{') => depth += 1,
-            Tok::Punct(')' | '}') => depth = depth.saturating_sub(1),
-            Tok::Punct(c)
-                if depth == 0
-                    && !c.is_whitespace()
-                    && !matches!(c, '!' | ':' | '#' | '%' | '@') =>
-            {
-                return true;
-            }
-            _ => {}
-        }
-    }
-    false
-}
-
-/// `SINGLE(<operand>)` as `@<operand>` (or `@(<operand>)` when top-level operators appear inside).
-fn single_operators(tokens: Vec<Tok>) -> Vec<Tok> {
-    let mut out = Vec::with_capacity(tokens.len());
-    let mut i = 0;
-    while i < tokens.len() {
-        let is_call = matches!(&tokens[i], Tok::Word(w) if w.eq_ignore_ascii_case("SINGLE"))
-            && tokens.get(i + 1) == Some(&Tok::Punct('('));
-        if is_call {
-            if let Some(end) = matching_delim(&tokens, i + 1, '(', ')') {
-                let raw_inner = &tokens[i + 2..end - 1];
-                let has_content = raw_inner
-                    .iter()
-                    .any(|t| !matches!(t, Tok::Punct(c) if c.is_whitespace()));
-                if has_content && !has_top_level_comma(raw_inner) {
-                    let inner = single_operators(raw_inner.to_vec());
-                    let lhs_of_colon = tokens.get(end) == Some(&Tok::Punct(':'));
-                    let inner_wrap =
-                        !is_outer_parenthesized(&inner) && has_single_top_level_op(&inner);
-                    if lhs_of_colon {
-                        out.push(Tok::Punct('('));
-                    }
-                    out.push(Tok::Punct('@'));
-                    if inner_wrap {
-                        out.push(Tok::Punct('('));
-                    }
-                    out.extend(inner);
-                    if inner_wrap {
-                        out.push(Tok::Punct(')'));
-                    }
-                    if lhs_of_colon {
-                        out.push(Tok::Punct(')'));
-                    }
-                    i = end;
                     continue;
                 }
             }

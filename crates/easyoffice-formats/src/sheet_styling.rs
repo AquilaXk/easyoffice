@@ -124,6 +124,8 @@ pub(crate) mod xlsx_protect;
 pub(crate) mod xlsx_sheet;
 #[path = "xlsx_sheet_writer.rs"]
 pub(crate) mod xlsx_sheet_writer;
+#[path = "xlsx_single_operator.rs"]
+pub(crate) mod xlsx_single_operator;
 #[path = "xlsx_slicers.rs"]
 pub(crate) mod xlsx_slicers;
 #[path = "xlsx_styles.rs"]
