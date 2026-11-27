@@ -14,7 +14,7 @@ const thumbs = (document) => document.querySelectorAll("#slide-thumb-list .slide
 const zoneText = (document, id) => document.getElementById(id).textContent.trim();
 
 function withReviewSteps(h) {
-  // A change that edits what is there waits for 바꾸기; new content only is typed into the document as a draft as soon as the answer is in (PD-385).
+  // A change that edits what is there waits for 바꾸기; new content only is typed into the document as a draft as soon as the answer is in (PD-386).
   h.begin = async () => {
     const accept = reviewButton(h.document, "accept");
     if (accept) h.userClick(accept);
@@ -63,7 +63,7 @@ const addElement = (element, extra = {}) => ({ op: "slide.add_element", element,
 test("a new slide: the pointer presses 새 슬라이드, a blank slide opens, the title is typed, and one undo removes it", async () => {
   const h = await slides(() => answer([{ op: "slide.add", title: "새로 만든 슬라이드 제목", bullets: ["첫째 줄", "둘째 줄"], layout: "twoColumn" }]));
   await h.send("슬라이드를 추가해 주세요");
-  assert.ok(layerOf(h.document) || thumbs(h.document).length >= 1, "new content is typed in as a draft without a preview (PD-385)");
+  assert.ok(layerOf(h.document) || thumbs(h.document).length >= 1, "new content is typed in as a draft without a preview (PD-386)");
   assert.equal(reviewButton(h.document, "accept"), undefined, "there is no 바꾸기 for new content");
   await h.begin();
   assert.ok(layerOf(h.document), "the pointer shows");

@@ -26,7 +26,7 @@ async function fakeProvider(page, answers) {
 
 /**
  * Opens the panel, picks a local provider (no key needed) and sends `prompt`; resolves when the answer's buttons are on screen:
- * 바꾸기 for an edit of what is there (previewed), 유지 for new content (already typed into the document as a draft, PD-385).
+ * 바꾸기 for an edit of what is there (previewed), 유지 for new content (already typed into the document as a draft, PD-386).
  */
 export async function askCopilot(page, prompt, answers) {
   if (answers) await fakeProvider(page, answers);
@@ -135,7 +135,7 @@ const PARAGRAPHS = ["첫째 문단입니다", "둘째 문단은 바뀔 범위의
 const paragraphTexts = (page) => page.$$eval("#doc-editor > p:not(.manuscript-notice):not(.eo-copilot-ghost)", (nodes) => nodes.map((p) => p.textContent));
 
 const buttonLabels = (page) => page.$$eval("#copilot-thread .eo-copilot-review-btn", (nodes) => nodes.map((b) => b.textContent.trim()));
-// The panel's button states are kept as screenshots in the capture directory (PD-385).
+// The panel's button states are kept as screenshots in the capture directory (PD-386).
 const shot = (page, name) => page.locator("#eo-copilot-shell").screenshot({ path: path.join(process.argv[2] || os.tmpdir(), `copilot-edit-${name}.png`) });
 const seedParagraphs = (page) => page.evaluate((texts) => {
   document.getElementById("doc-editor").innerHTML = texts.map((t) => `<p>${t}</p>`).join("");

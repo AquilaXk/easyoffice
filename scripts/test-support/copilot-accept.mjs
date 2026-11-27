@@ -1,4 +1,4 @@
-// Helpers for the copilot page tests (PD-268, PD-385): an edit answer shows what it would change and waits for 바꾸기, and the
+// Helpers for the copilot page tests (PD-268, PD-386): an edit answer shows what it would change and waits for 바꾸기, and the
 // pointer and typing run only when the user has not asked for reduced motion.
 import { flushAsyncTurns } from "../webui-dom-harness.mjs";
 

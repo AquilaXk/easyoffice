@@ -4,7 +4,7 @@ import { flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { reviewButton } from "./test-support/copilot-accept.mjs";
 import { open, answer } from "./test-support/copilot-open.mjs";
 
-// Review fixes of the copilot's document edits (PD-385): a span or a paragraph replacement keeps the table and the list it is in,
+// Review fixes of the copilot's document edits (PD-386): a span or a paragraph replacement keeps the table and the list it is in,
 // the text that was already in the document is never read again as tags or entities, and a freeze keeps its columns.
 
 const TABLE = "<table><tbody><tr><td>Q1</td><td>Q2</td></tr><tr><td>Q3</td><td>합계</td></tr></tbody></table>";

@@ -7,7 +7,7 @@ import { reviewButton } from "./test-support/copilot-accept.mjs";
 import { open, answer } from "./test-support/copilot-open.mjs";
 import { applyCopilotEdits, parseApplyCopilotEditsParams } from "../apps/hwp-studio/src/embed/copilot-bridge.ts";
 
-// PD-385: the copilot's edit way. An answer that edits what is there is previewed and ends in 바꾸기 / 아래에 삽입 / 버리기. An
+// PD-386: the copilot's edit way. An answer that edits what is there is previewed and ends in 바꾸기 / 아래에 삽입 / 버리기. An
 // answer that only adds new content goes into the document at once as a draft and ends in 유지 / 버리기.
 
 const UI = (name) => fileURLToPath(new URL("../crates/easyoffice-app/ui/" + name, import.meta.url));
