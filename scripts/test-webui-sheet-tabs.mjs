@@ -1498,7 +1498,7 @@ test("grouped Ctrl+drag copy, tab menu focus restore, rename guard/preserve, and
   assert.deepEqual(localStrip.getGroup(["S1", "Two", "S3"], "S1"), ["S1", "Two"], "renameInGroup preserves group before render reconciles");
 });
 
-// ---- moving the end sheet of a 3D span (PD-372) ----------------------------------------------------------------------
+// ---- moving the end sheet of a 3D span (PD-373) ----------------------------------------------------------------------
 
 // Sheet1..Sheet5 and Sum, whose A1 sums Sheet2:Sheet4, A2 Sheet2:Sheet3 and B1 reads Sheet2 alone.
 async function openSpanBook() {
@@ -1517,7 +1517,7 @@ async function openSpanBook() {
 
 const ORIGINAL_SPANS = ["=SUM(Sheet2:Sheet4!A1)", "=SUM(Sheet2:Sheet3!A1)", "=Sheet2!A1"];
 
-test("dragging an end sheet of a 3D span past its other end takes the neighbor inside the span, in one undo step (PD-372)", async () => {
+test("dragging an end sheet of a 3D span past its other end takes the neighbor inside the span, in one undo step (PD-373)", async () => {
   const { h, spans, moves } = await openSpanBook();
   h.tabs().forEach((t, i) => {
     t.getBoundingClientRect = () => ({ left: 10 + i * 80, top: 0, width: 80, height: 24 });
@@ -1538,7 +1538,7 @@ test("dragging an end sheet of a 3D span past its other end takes the neighbor i
   assert.deepEqual(await spans(), ["=SUM(Sheet3:Sheet4!A1)", "=SUM(Sheet3!A1)", "=Sheet2!A1"]);
 });
 
-test("the menu, the sheet menu key and the 이동/복사 list rewrite the span the same way (PD-372)", async () => {
+test("the menu, the sheet menu key and the 이동/복사 list rewrite the span the same way (PD-373)", async () => {
   // Menu 왼쪽으로 이동: Sheet3 before Sheet2 leaves Sheet2:Sheet3 as Sheet2.
   let { h, spans } = await openSpanBook();
   await h.tabMenu("Sheet3", "move-left");
@@ -1563,7 +1563,7 @@ test("the menu, the sheet menu key and the 이동/복사 list rewrite the span t
   assert.deepEqual(await spans(), ["=SUM(Sheet2:Sheet3!A1)", "=SUM(Sheet2:Sheet3!A1)", "=Sheet2!A1"]);
 });
 
-test("a group moved together sends every moved sheet and keeps a span whose ends both moved (PD-372)", async () => {
+test("a group moved together sends every moved sheet and keeps a span whose ends both moved (PD-373)", async () => {
   const { h, spans, moves } = await openSpanBook();
   h.userClick(h.tab("Sheet2"));
   await flushAsyncTurns(20);
@@ -1583,7 +1583,7 @@ test("a group moved together sends every moved sheet and keeps a span whose ends
   assert.deepEqual(await spans(), ORIGINAL_SPANS);
 });
 
-test("a move the engine refuses changes neither the order nor the formulas (PD-372)", async () => {
+test("a move the engine refuses changes neither the order nor the formulas (PD-373)", async () => {
   const { h, spans } = await openSpanBook();
   h.engine.state.refuse = "engine refused";
   await h.tabMenu("Sheet3", "move-left");

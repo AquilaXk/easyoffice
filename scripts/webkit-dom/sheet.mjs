@@ -365,7 +365,7 @@ export const sheetSteps = [
     else assert.equal(await tab(), "Sheet2", "Alt+Left is not a sheet key outside a Mac");
   }],
 
-  ["moving the end sheet of a 3D span past its other end through the tab menu rewrites the span with the real engine (PD-372)", async (page) => {
+  ["moving the end sheet of a 3D span past its other end through the tab menu rewrites the span with the real engine (PD-373)", async (page) => {
     const tabSel = (name) => `#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="${name}"]`;
     const order = () => page.$$eval("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]", (tabs) => tabs.map((t) => t.dataset.sheetTab));
     const show = async (name) => {

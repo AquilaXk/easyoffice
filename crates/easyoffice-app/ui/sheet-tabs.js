@@ -163,7 +163,7 @@
 
     // Puts the sheets of `next` in `order` (every sheet name, `moved` the ones the step moves). A 3D span whose end sheet
     // goes past its other end changes its text, so the engine, whose session still holds the order before, rewrites those
-    // formulas first (PD-372). False, with the reason in the status text, when it cannot.
+    // formulas first (PD-373). False, with the reason in the status text, when it cannot.
     async function reorder(next, order, moved) {
       const result = await rewriteRefs({ op: "move", sheets: moved, order }, next);
       if (!result.ok) return false;

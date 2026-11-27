@@ -1,5 +1,5 @@
 //! `evaluate_sheet` with `sessionAction` `sheetRefs`: the formulas a sheet rename, deletion or move
-//! rewrites (PD-209, PD-372).
+//! rewrites (PD-209, PD-373).
 //!
 //! Request: `{session, op: "rename"|"delete", sheet, newName, rules}` (`newName` for a rename) or
 //! `{session, op: "move", sheets, order, rules}` (`sheets` the moved sheets, `order` every sheet
