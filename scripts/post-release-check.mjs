@@ -2,7 +2,10 @@
 /**
  * Verifies a GitHub Release (draft or published) against EasyOffice's fixed release asset set,
  * `latest.json` updater manifest (signatures, URLs, version claims), `SHA256SUMS.txt` (including
- * cryptographic match with `latest.json`), and public `/releases/latest` pointer.
+ * cryptographic match with `latest.json`), and public `/releases/latest` pointer. It also downloads every
+ * `.sig` asset (a few hundred bytes each) to check the signatures in `latest.json` against them and the
+ * `.sig` digests against `SHA256SUMS.txt`, and hashes the two smallest packages (never over 64 MiB, the
+ * stream is cut at the size the release declares) to check them against `SHA256SUMS.txt`.
  *
  * Uses Node.js built-in modules only.
  */
@@ -15,6 +18,7 @@ import {
   MANIFEST_FILE,
   PLATFORMS,
   RELEASE_DOWNLOAD_BASE_URL,
+  SIGNATURE_SUFFIX,
   SUMS_FILE,
   releaseFileNames,
   signedVersion,
@@ -22,6 +26,11 @@ import {
 import { escapeWorkflowCommand } from "./workflow-command.mjs";
 
 export const MAX_PAYLOAD_BYTES = 2 * 1024 * 1024;
+/** A `.sig` file is a few hundred bytes of base64. */
+export const MAX_SIGNATURE_BYTES = 16 * 1024;
+/** Packages whose hash is checked against `SHA256SUMS.txt`: the smallest ones, none over this size. */
+export const SPOT_CHECK_COUNT = 2;
+export const MAX_SPOT_CHECK_BYTES = 64 * 1024 * 1024;
 const MAX_RELEASE_PAGES = 20;
 const HEX_SHA256_RE = /^[0-9a-f]{64}$/;
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -227,6 +236,70 @@ export function verifyReleaseMetadata({ release, expectedDraft, expectedVersion 
   return { expectedTag, expectedAssets, assetByName };
 }
 
+/** The signed packages of the release with the updater keys each one serves. */
+function signedAssets() {
+  return Object.values(PLATFORMS)
+    .flatMap((platform) => platform.assets)
+    .filter((asset) => asset.signed && Array.isArray(asset.updater))
+    .map((asset) => ({ name: asset.name, sigName: asset.name + SIGNATURE_SUFFIX, updater: asset.updater }));
+}
+
+export const signatureAssetNames = () => signedAssets().map((asset) => asset.sigName).sort(compareStrings);
+
+const sha256Hex = (text) => crypto.createHash("sha256").update(text, "utf8").digest("hex");
+
+/**
+ * `latest.json` must carry, for every updater key, the text of the `.sig` asset of its package (as
+ * `release-assets.mjs` writes it: the file without line breaks), and each `.sig` must be the file
+ * `SHA256SUMS.txt` lists. `signatureTexts` maps a `.sig` asset name to its downloaded text.
+ */
+export function verifyManifestSignatures({ manifest, signatureTexts, checksums }) {
+  for (const { name, sigName, updater } of signedAssets()) {
+    const text = signatureTexts.get(sigName);
+    if (typeof text !== "string" || text.length === 0) {
+      throw new Error(`${sigName} was not downloaded or is empty`);
+    }
+    const digest = sha256Hex(text);
+    if (digest !== checksums.get(sigName)) {
+      throw new Error(`${SUMS_FILE} digest for ${sigName} (${checksums.get(sigName)}) does not match downloaded ${sigName} (${digest})`);
+    }
+    const signature = text.replace(/[\r\n]/g, "");
+    for (const key of updater) {
+      if (manifest.platforms[key]?.signature !== signature) {
+        throw new Error(`${MANIFEST_FILE} platform '${key}' signature does not match ${sigName} of ${name}`);
+      }
+    }
+  }
+}
+
+/**
+ * The packages to download and hash: the smallest ones by their size in the release, at most `count`,
+ * none larger than `maxBytes` (a download is the cost of the check). Ties go by name, so every run
+ * picks the same files.
+ */
+export function selectSpotCheckAssets(assetByName, { count = SPOT_CHECK_COUNT, maxBytes = MAX_SPOT_CHECK_BYTES } = {}) {
+  const packages = Object.values(PLATFORMS).flatMap((platform) => platform.assets.map((asset) => asset.name));
+  return packages
+    .map((name) => assetByName.get(name))
+    .filter((asset) => asset && asset.size <= maxBytes)
+    .sort((a, b) => a.size - b.size || compareStrings(a.name, b.name))
+    .slice(0, count)
+    .map((asset) => asset.name);
+}
+
+/** `spotChecks` maps a package name to `{ sha256, bytes }` of what was downloaded. */
+export function verifySpotChecks({ assetByName, checksums, spotChecks }) {
+  for (const [name, { sha256, bytes }] of spotChecks) {
+    const declared = assetByName.get(name)?.size;
+    if (bytes !== declared) {
+      throw new Error(`downloaded '${name}' is ${bytes} bytes, the release declares ${declared}`);
+    }
+    if (sha256 !== checksums.get(name)) {
+      throw new Error(`${SUMS_FILE} digest for ${name} (${checksums.get(name)}) does not match downloaded ${name} (${sha256})`);
+    }
+  }
+}
+
 export function verifyReleaseRecord({
   release,
   manifestText,
@@ -234,8 +307,10 @@ export function verifyReleaseRecord({
   latestRelease,
   expectedDraft,
   expectedVersion,
+  signatureTexts,
+  spotChecks,
 }) {
-  const { expectedTag, expectedAssets } = verifyReleaseMetadata({
+  const { expectedTag, expectedAssets, assetByName } = verifyReleaseMetadata({
     release,
     expectedDraft,
     expectedVersion,
@@ -243,13 +318,15 @@ export function verifyReleaseRecord({
 
   const manifest = validateManifestPayload(manifestText, expectedVersion);
   const checksums = validateChecksumsPayload(sumsText);
-  const manifestDigest = crypto.createHash("sha256").update(manifestText, "utf8").digest("hex");
+  const manifestDigest = sha256Hex(manifestText);
   const expectedManifestDigest = checksums.get(MANIFEST_FILE);
   if (manifestDigest !== expectedManifestDigest) {
     throw new Error(
       `${SUMS_FILE} digest for ${MANIFEST_FILE} (${expectedManifestDigest}) does not match downloaded ${MANIFEST_FILE} (${manifestDigest})`,
     );
   }
+  if (signatureTexts !== undefined) verifyManifestSignatures({ manifest, signatureTexts, checksums });
+  if (spotChecks !== undefined) verifySpotChecks({ assetByName, checksums, spotChecks });
 
   if (!release.draft && !release.prerelease && latestRelease !== undefined) {
     if (!latestRelease || latestRelease.tag_name !== expectedTag) {
@@ -266,6 +343,8 @@ export function verifyReleaseRecord({
     assetCount: expectedAssets.length,
     manifestKeys: Object.keys(manifest.platforms).length,
     checksumCount: checksums.size,
+    signatureCount: signatureTexts?.size ?? 0,
+    spotChecked: spotChecks ? [...spotChecks.keys()].sort(compareStrings) : [],
   };
 }
 
@@ -436,7 +515,8 @@ function validateHttpsUrl(rawUrl, assetName, { isRedirect = false } = {}) {
   return { url: trimmed, origin: parsed.origin };
 }
 
-export async function fetchGitHubAssetText(asset, token, fetchImpl = fetch) {
+/** The response of an asset download after its redirects (the token stays on api.github.com), not yet read. */
+async function openGitHubAsset(asset, token, fetchImpl) {
   const assetName = asset?.name ?? "(unknown)";
   const initial = validateHttpsUrl(asset?.url, assetName, { isRedirect: false });
   let currentUrl = initial.url;
@@ -463,7 +543,46 @@ export async function fetchGitHubAssetText(asset, token, fetchImpl = fetch) {
     }
     throw new Error(message);
   }
-  return readResponseTextBounded(res, `asset '${assetName}'`);
+  return res;
+}
+
+export async function fetchGitHubAssetText(asset, token, fetchImpl = fetch, maxBytes = MAX_PAYLOAD_BYTES) {
+  const res = await openGitHubAsset(asset, token, fetchImpl);
+  return readResponseTextBounded(res, `asset '${asset?.name ?? "(unknown)"}'`, maxBytes);
+}
+
+/**
+ * SHA-256 and byte count of an asset, hashed while it streams in: nothing is kept, and the download
+ * stops with an error as soon as it is longer than `maxBytes` or than the size the release declares.
+ */
+export async function fetchGitHubAssetDigest(asset, token, fetchImpl = fetch, maxBytes = MAX_SPOT_CHECK_BYTES) {
+  const label = `asset '${asset?.name ?? "(unknown)"}'`;
+  const limit = Math.min(maxBytes, Number.isSafeInteger(asset?.size) ? asset.size : maxBytes);
+  const res = await openGitHubAsset(asset, token, fetchImpl);
+  const contentLength = res.headers?.get?.("content-length");
+  if (contentLength && /^\d+$/.test(contentLength) && Number(contentLength) > limit) {
+    await res.body?.cancel?.().catch(() => {});
+    throw new Error(`${label} is longer than ${limit} bytes`);
+  }
+  const hash = crypto.createHash("sha256");
+  let bytes = 0;
+  const reader = res.body?.getReader?.();
+  if (!reader) throw new Error(`${label} has no body to hash`);
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > limit) {
+        await reader.cancel().catch(() => {});
+        throw new Error(`${label} is longer than ${limit} bytes`);
+      }
+      hash.update(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return { sha256: hash.digest("hex"), bytes };
 }
 
 async function findReleaseByTag({ apiBase, tag, allowDraftFallback, token, fetchImpl }) {
@@ -524,10 +643,18 @@ export async function verifyReleaseOnGitHub({
       const manifestAsset = assetByName.get(MANIFEST_FILE);
       const sumsAsset = assetByName.get(SUMS_FILE);
 
-      const [manifestText, sumsText] = await Promise.all([
+      const signatureNames = signatureAssetNames();
+      const spotNames = selectSpotCheckAssets(assetByName);
+      const [manifestText, sumsText, signatureList, spotList] = await Promise.all([
         fetchGitHubAssetText(manifestAsset, token, fetchImpl),
         fetchGitHubAssetText(sumsAsset, token, fetchImpl),
+        Promise.all(
+          signatureNames.map((name) => fetchGitHubAssetText(assetByName.get(name), token, fetchImpl, MAX_SIGNATURE_BYTES)),
+        ),
+        Promise.all(spotNames.map((name) => fetchGitHubAssetDigest(assetByName.get(name), token, fetchImpl))),
       ]);
+      const signatureTexts = new Map(signatureNames.map((name, i) => [name, signatureList[i]]));
+      const spotChecks = new Map(spotNames.map((name, i) => [name, spotList[i]]));
 
       let latestRelease;
       if (!release.draft && !release.prerelease) {
@@ -541,6 +668,8 @@ export async function verifyReleaseOnGitHub({
         latestRelease,
         expectedDraft,
         expectedVersion,
+        signatureTexts,
+        spotChecks,
       });
 
       if (summaryPath) {
@@ -607,7 +736,7 @@ export async function runPostReleaseCheckCli(
     sleepImpl,
   });
   log(
-    `Verified release ${result.tag} (draft=${result.draft}): ${result.assetCount} assets, ${result.manifestKeys} updater keys, ${result.checksumCount} checksums.`,
+    `Verified release ${result.tag} (draft=${result.draft}): ${result.assetCount} assets, ${result.manifestKeys} updater keys, ${result.checksumCount} checksums, ${result.signatureCount} signatures matched, hashes of ${result.spotChecked.join(", ") || "no package"} matched.`,
   );
   return result;
 }

@@ -17,11 +17,14 @@ import {
   MAX_PAYLOAD_BYTES,
   expectedManifestUrls,
   expectedReleaseAssetNames,
+  fetchGitHubAssetDigest,
   fetchGitHubAssetText,
   formatAssetSummaryMarkdown,
   parseCliArgs,
   readResponseTextBounded,
   runPostReleaseCheckCli,
+  selectSpotCheckAssets,
+  signatureAssetNames,
   validateChecksumsPayload,
   validateManifestPayload,
   verifyReleaseOnGitHub,
@@ -78,6 +81,31 @@ function makeRelease({ tag = "v0.2.3", draft = false, prerelease = false, overri
     })),
   };
 }
+
+/**
+ * A release with every file it holds: `bodyOf(name)` is what the download of an asset answers, and `sums` is the
+ * `SHA256SUMS.txt` of exactly those bodies (a `.sig` carries the manifest signature and a line break).
+ */
+function makeServedRelease({ tag = "v0.2.3", draft = false, prerelease = false } = {}) {
+  const version = tag.slice(1);
+  const release = makeRelease({ tag, draft, prerelease });
+  const manifest = makeManifestText(version);
+  const sig = makeSig(version);
+  const bodies = new Map();
+  for (const asset of release.assets) {
+    if (asset.name === MANIFEST_FILE) bodies.set(asset.name, manifest);
+    else if (asset.name.endsWith(".sig")) bodies.set(asset.name, `${sig}\n`);
+    else if (asset.name !== SUMS_FILE) bodies.set(asset.name, Buffer.alloc(asset.size, 7));
+  }
+  const lines = releaseFileNames().map(
+    (name) => `${crypto.createHash("sha256").update(bodies.get(name)).digest("hex")}  ${name}`,
+  );
+  const sums = `${lines.join("\n")}\n`;
+  bodies.set(SUMS_FILE, sums);
+  return { release, manifest, sums, sig, bodies, bodyOf: (name) => bodies.get(name) };
+}
+
+const assetNameOf = (release, url) => release.assets[Number(url.split("/").pop()) - 1].name;
 
 test("valid published release passes manifest, checksum, asset, and latest pointer checks", () => {
   const release = makeRelease({ tag: "v0.2.3", draft: false });
@@ -338,9 +366,8 @@ test("verifyReleaseOnGitHub strips auth header across CDN redirect, retries lag,
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "post-release-test-"));
   const summaryFile = path.join(tmpDir, "summary.md");
   try {
-    const release = makeRelease({ tag: "v0.2.3", draft: false });
-    const manifest = makeManifestText("0.2.3");
-    const sums = makeChecksumsText(manifest);
+    const served = makeServedRelease({ tag: "v0.2.3", draft: false });
+    const { release } = served;
     const cdnAuthSeen = [];
     let latestCalls = 0;
 
@@ -364,8 +391,8 @@ test("verifyReleaseOnGitHub strips auth header across CDN redirect, retries lag,
       }
       if (url.startsWith("https://objects.githubusercontent.com/dl/")) {
         cdnAuthSeen.push(init.headers?.Authorization ?? null);
-        if (url.endsWith(`/${MANIFEST_FILE}`)) return new Response(manifest, { status: 200 });
-        if (url.endsWith(`/${SUMS_FILE}`)) return new Response(sums, { status: 200 });
+        const body = served.bodyOf(decodeURIComponent(url.split("/").pop()));
+        if (body !== undefined) return new Response(body, { status: 200 });
       }
       return new Response("unexpected url", { status: 404 });
     };
@@ -381,7 +408,10 @@ test("verifyReleaseOnGitHub strips auth header across CDN redirect, retries lag,
     });
     assert.equal(result.tag, "v0.2.3");
     assert.equal(latestCalls, 2);
-    assert.deepEqual(cdnAuthSeen, [null, null, null, null]);
+    assert.ok(cdnAuthSeen.length >= 2 + 7 + 2, `manifest, sums, 7 signatures and 2 packages were downloaded (${cdnAuthSeen.length})`);
+    assert.ok(cdnAuthSeen.every((auth) => auth === null), "no CDN request carries the token");
+    assert.equal(result.signatureCount, 7);
+    assert.equal(result.spotChecked.length, 2);
     const written = fs.readFileSync(summaryFile, "utf8");
     assert.match(written, /Release Asset Verification \(v0\.2\.3, public\)/);
     assert.match(formatAssetSummaryMarkdown(release), /EasyOffice-windows-x64-setup\.exe/);
@@ -391,9 +421,8 @@ test("verifyReleaseOnGitHub strips auth header across CDN redirect, retries lag,
 });
 
 test("verifyReleaseOnGitHub paginates /releases list when verifying a draft release", async () => {
-  const release = makeRelease({ tag: "v0.2.3", draft: true });
-  const manifest = makeManifestText("0.2.3");
-  const sums = makeChecksumsText(manifest);
+  const served = makeServedRelease({ tag: "v0.2.3", draft: true });
+  const { release } = served;
 
   const mockFetch = async (url) => {
     if (url.endsWith("/releases/tags/v0.2.3")) return new Response("Not Found", { status: 404 });
@@ -407,10 +436,7 @@ test("verifyReleaseOnGitHub paginates /releases list when verifying a draft rele
       return new Response(JSON.stringify([release]), { status: 200 });
     }
     if (url.includes("/releases/assets/")) {
-      const idx = Number(url.split("/").pop()) - 1;
-      const name = release.assets[idx].name;
-      if (name === MANIFEST_FILE) return new Response(manifest, { status: 200 });
-      if (name === SUMS_FILE) return new Response(sums, { status: 200 });
+      return new Response(served.bodyOf(assetNameOf(release, url)), { status: 200 });
     }
     return new Response("unexpected url", { status: 404 });
   };
@@ -648,10 +674,10 @@ test("parseCliArgs parses --draft, --expect-draft, and --expect-public into expe
 });
 
 test("CLI draft/public options propagate expectedDraft through runPostReleaseCheckCli and reject mismatches before /releases/latest", async () => {
-  const manifest = makeManifestText("0.2.3");
-  const sums = makeChecksumsText(manifest);
-  const draftRelease = makeRelease({ tag: "v0.2.3", draft: true });
-  const publicRelease = makeRelease({ tag: "v0.2.3", draft: false });
+  const servedDraft = makeServedRelease({ tag: "v0.2.3", draft: true });
+  const servedPublic = makeServedRelease({ tag: "v0.2.3", draft: false });
+  const draftRelease = servedDraft.release;
+  const publicRelease = servedPublic.release;
 
   for (const flagArgs of [["--draft", "false"], ["--expect-public"]]) {
     let listCalled = false;
@@ -735,10 +761,7 @@ test("CLI draft/public options propagate expectedDraft through runPostReleaseChe
         if (url.endsWith("/releases/tags/v0.2.3")) return new Response("Not Found", { status: 404 });
         if (url.endsWith("/releases?per_page=100")) return new Response(JSON.stringify([draftRelease]), { status: 200 });
         if (url.includes("/releases/assets/")) {
-          const idx = Number(url.split("/").pop()) - 1;
-          const name = draftRelease.assets[idx].name;
-          if (name === MANIFEST_FILE) return new Response(manifest, { status: 200 });
-          if (name === SUMS_FILE) return new Response(sums, { status: 200 });
+          return new Response(servedDraft.bodyOf(assetNameOf(draftRelease, url)), { status: 200 });
         }
         return new Response("unexpected", { status: 404 });
       },
@@ -758,10 +781,7 @@ test("CLI draft/public options propagate expectedDraft through runPostReleaseChe
         if (url.endsWith("/releases/tags/v0.2.3")) return new Response(JSON.stringify(publicRelease), { status: 200 });
         if (url.endsWith("/releases/latest")) return new Response(JSON.stringify(publicRelease), { status: 200 });
         if (url.includes("/releases/assets/")) {
-          const idx = Number(url.split("/").pop()) - 1;
-          const name = publicRelease.assets[idx].name;
-          if (name === MANIFEST_FILE) return new Response(manifest, { status: 200 });
-          if (name === SUMS_FILE) return new Response(sums, { status: 200 });
+          return new Response(servedPublic.bodyOf(assetNameOf(publicRelease, url)), { status: 200 });
         }
         return new Response("unexpected", { status: 404 });
       },
@@ -791,6 +811,145 @@ test("CLI draft/public options propagate expectedDraft through runPostReleaseChe
       }),
     /malformed asset entry/,
   );
+});
+
+/** Runs the whole check against `served`, whose bodies a test may have changed before. */
+function checkServed(served, token = "tok") {
+  const { release } = served;
+  return verifyReleaseOnGitHub({
+    repo: "AquilaXk/easyoffice",
+    tag: release.tag_name,
+    expectedDraft: release.draft,
+    token,
+    summaryPath: "",
+    retryDelayMs: 0,
+    fetchImpl: async (url) => {
+      if (url.endsWith(`/releases/tags/${release.tag_name}`)) return new Response(JSON.stringify(release), { status: 200 });
+      if (url.endsWith("/releases/latest")) return new Response(JSON.stringify(release), { status: 200 });
+      if (url.includes("/releases/assets/")) {
+        const body = served.bodyOf(assetNameOf(release, url));
+        return new Response(body, { status: 200, headers: { "content-length": String(Buffer.byteLength(body)) } });
+      }
+      return new Response("unexpected", { status: 404 });
+    },
+  });
+}
+
+/** The same served release with one file replaced, and the digest of that file in SHA256SUMS.txt kept or updated. */
+function withBody(served, name, body, { updateSums }) {
+  const bodies = new Map(served.bodies);
+  bodies.set(name, body);
+  if (updateSums) {
+    const digest = crypto.createHash("sha256").update(body).digest("hex");
+    const sums = served.sums
+      .split("\n")
+      .map((line) => (line.endsWith(`  ${name}`) ? `${digest}  ${name}` : line))
+      .join("\n");
+    bodies.set(SUMS_FILE, sums);
+  }
+  return { ...served, bodies, bodyOf: (n) => bodies.get(n) };
+}
+
+test("the release passes when every signature file matches latest.json and the two smallest packages match SHA256SUMS", async () => {
+  const served = makeServedRelease();
+  const { result } = await checkServed(served);
+  assert.equal(result.signatureCount, signatureAssetNames().length);
+  assert.deepEqual(result.spotChecked, selectSpotCheckAssets(new Map(served.release.assets.map((a) => [a.name, a]))).sort());
+});
+
+test("a .sig that differs from the signature in latest.json fails, even when SHA256SUMS lists that .sig", async () => {
+  const served = makeServedRelease();
+  const other = Buffer.from(makeSig("0.2.3").replace(/.$/, "A"), "utf8").toString("utf8");
+  const sigName = signatureAssetNames()[0];
+  const changed = withBody(served, sigName, `${other}\n`, { updateSums: true });
+  await assert.rejects(() => checkServed(changed), /signature does not match .*\.sig of /);
+});
+
+test("a .sig changed after SHA256SUMS was written fails on its digest", async () => {
+  const served = makeServedRelease();
+  const sigName = signatureAssetNames()[1];
+  const changed = withBody(served, sigName, `${served.sig}\n\n`, { updateSums: false });
+  await assert.rejects(() => checkServed(changed), new RegExp(`digest for ${sigName.replace(/\./g, "\\.")}`));
+});
+
+test("a missing or empty .sig body fails", async () => {
+  const served = makeServedRelease();
+  const sigName = signatureAssetNames()[2];
+  const changed = withBody(served, sigName, "", { updateSums: true });
+  await assert.rejects(() => checkServed(changed), /is empty|has invalid size|was not downloaded or is empty/);
+});
+
+test("a package whose bytes differ from its SHA256SUMS digest fails the spot check", async () => {
+  const served = makeServedRelease();
+  const names = selectSpotCheckAssets(new Map(served.release.assets.map((a) => [a.name, a])));
+  assert.equal(names.length, 2);
+  const size = served.release.assets.find((a) => a.name === names[1]).size;
+  const changed = withBody(served, names[1], Buffer.alloc(size, 9), { updateSums: false });
+  await assert.rejects(() => checkServed(changed), new RegExp(`digest for ${names[1].replace(/\./g, "\\.")}`));
+});
+
+test("a spot-checked package that is longer or shorter than the release declares fails without hashing the surplus", async () => {
+  const served = makeServedRelease();
+  const names = selectSpotCheckAssets(new Map(served.release.assets.map((a) => [a.name, a])));
+  const size = served.release.assets.find((a) => a.name === names[0]).size;
+  await assert.rejects(
+    () => checkServed(withBody(served, names[0], Buffer.alloc(size + 1, 7), { updateSums: true })),
+    /is longer than/,
+  );
+  await assert.rejects(
+    () => checkServed(withBody(served, names[0], Buffer.alloc(size - 1, 7), { updateSums: true })),
+    /is \d+ bytes, the release declares/,
+  );
+});
+
+test("the spot check takes the two smallest packages, in a stable order, and none over the size cap", () => {
+  const assets = new Map(
+    ["EasyOffice-linux-x64.deb", "EasyOffice-linux-x64.rpm", "EasyOffice-linux-x64.AppImage", "EasyOffice-windows-x64-setup.exe"].map((name, i) => [
+      name,
+      { name, size: [500, 500, 100, 900][i] },
+    ]),
+  );
+  assert.deepEqual(selectSpotCheckAssets(assets), ["EasyOffice-linux-x64.AppImage", "EasyOffice-linux-x64.deb"]);
+  assert.deepEqual(selectSpotCheckAssets(assets, { maxBytes: 400 }), ["EasyOffice-linux-x64.AppImage"]);
+  assert.deepEqual(selectSpotCheckAssets(assets, { count: 3 }).length, 3);
+  assert.deepEqual(selectSpotCheckAssets(new Map()), []);
+});
+
+test("fetchGitHubAssetDigest hashes the stream, stops at the size cap and refuses a declared length over it", async () => {
+  const body = Buffer.alloc(3000, 5);
+  const asset = { name: "EasyOffice-linux-x64.deb", size: 3000, url: "https://api.github.com/repos/AquilaXk/easyoffice/releases/assets/1" };
+  const ok = await fetchGitHubAssetDigest(asset, "tok", async () => new Response(body, { status: 200 }));
+  assert.deepEqual(ok, { sha256: crypto.createHash("sha256").update(body).digest("hex"), bytes: 3000 });
+
+  let pulled = 0;
+  const endless = new ReadableStream({
+    pull(controller) {
+      pulled += 1;
+      controller.enqueue(new Uint8Array(1024));
+    },
+  });
+  await assert.rejects(
+    () => fetchGitHubAssetDigest({ ...asset, size: 4096 }, "tok", async () => new Response(endless, { status: 200 })),
+    /is longer than 4096 bytes/,
+  );
+  assert.ok(pulled <= 8, `the download stopped early (${pulled} chunks)`);
+
+  await assert.rejects(
+    () =>
+      fetchGitHubAssetDigest(asset, "tok", async () => new Response("x", { status: 200, headers: { "content-length": "999999999" } })),
+    /is longer than 3000 bytes/,
+  );
+  await assert.rejects(
+    () => fetchGitHubAssetDigest({ ...asset, size: 10 }, "tok", async () => new Response(Buffer.alloc(11), { status: 200 })),
+    /is longer than 10 bytes/,
+  );
+});
+
+test("verifyReleaseRecord compares signatures and spot checks only for what it is given", () => {
+  const served = makeServedRelease();
+  const base = { release: served.release, manifestText: served.manifest, sumsText: served.sums, expectedDraft: false, expectedVersion: "0.2.3", latestRelease: { tag_name: "v0.2.3" } };
+  assert.equal(verifyReleaseRecord(base).signatureCount, 0);
+  assert.throws(() => verifyReleaseRecord({ ...base, signatureTexts: new Map() }), /was not downloaded or is empty/);
 });
 
 test("post-release-check CLI escapes %, CR, and LF in ::error:: output", () => {
