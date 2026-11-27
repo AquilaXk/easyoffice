@@ -32,10 +32,10 @@
 
 .menu-title {
   display: inline-block;
-  padding: 4px 14px;
+  padding: 0 var(--space-6);
   cursor: pointer;
   color: var(--color-text);
-  line-height: 20px;
+  line-height: calc(var(--control-height-sm) - 2 * var(--control-border-width));
   border: 1px solid transparent;
   box-sizing: border-box;
   white-space: nowrap;
@@ -71,7 +71,7 @@
   border: 1px solid var(--ui-border);
   box-shadow: var(--shadow-dropdown);
   z-index: 1000;
-  padding: 4px 0;
+  padding: var(--space-2) 0;
 }
 
 .menu-item.open > .menu-dropdown {
@@ -83,14 +83,14 @@
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 5px 16px 5px 32px;
+  padding: var(--menu-item-padding);
   cursor: pointer;
   font-size: var(--font-size-base);
   color: var(--color-text);
   background: transparent;
   text-align: left;
   white-space: nowrap;
-  line-height: 16px;
+  line-height: var(--menu-item-line-height);
   position: relative;
 }
 
@@ -157,13 +157,13 @@
 .md-hint {
   flex-shrink: 0;
   margin-left: auto;
-  padding-left: 28px;
+  padding-left: var(--space-12);
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
 }
 
 .md-hint {
-  padding-left: 8px;
+  padding-left: var(--space-4);
 }
 
 .md-item[aria-disabled="true"] .md-shortcut,
@@ -193,12 +193,12 @@
   position: relative;
   display: flex;
   align-items: center;
-  padding: 5px 16px 5px 32px;
+  padding: var(--menu-item-padding);
   cursor: pointer;
   font-size: var(--font-size-base);
   color: var(--color-text);
   white-space: nowrap;
-  line-height: 16px;
+  line-height: var(--menu-item-line-height);
 }
 
 .md-sub[hidden] {
@@ -215,7 +215,7 @@
 .md-arrow {
   flex-shrink: 0;
   margin-left: auto;
-  padding-left: 16px;
+  padding-left: var(--space-8);
   color: var(--color-text-secondary);
 }
 
@@ -238,7 +238,7 @@
   background: var(--color-surface);
   border: 1px solid var(--ui-border);
   box-shadow: var(--shadow-dropdown);
-  padding: 4px 0;
+  padding: var(--space-2) 0;
   z-index: 1001;
 }
 
@@ -262,7 +262,7 @@
   border: 1px solid var(--ui-border);
   box-shadow: var(--shadow-dropdown);
   z-index: 20000;
-  padding: 4px 0;
+  padding: var(--space-2) 0;
   font-size: var(--font-size-base);
   overflow-y: auto;
 }

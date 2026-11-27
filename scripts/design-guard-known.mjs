@@ -44,19 +44,6 @@ export const KNOWN_SIZE_VIOLATIONS = {
     ".dialog-footer",
     ".update-notice__button",
   ],
-  "menu-bar.css": [
-    ".menu-title",
-    ".menu-dropdown",
-    ".md-item",
-    ".md-icon",
-    ".md-shortcut, .md-hint",
-    ".md-hint",
-    ".md-sub",
-    ".md-arrow",
-    ".md-arrow .eo-icon",
-    ".md-sub-panel",
-    ".context-menu",
-  ],
 };
 
 /** CSS written inside scripts with a literal px in those properties, per script. None yet. */

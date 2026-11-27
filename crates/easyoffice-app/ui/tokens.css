@@ -202,6 +202,9 @@
   --list-row-padding-x: var(--space-4);
   /* 글꼴 대화상자(PD-376): 미리 보기는 글꼴 크기가 바뀌어도 높이가 같도록 고정 */
   --dialog-preview-height: 48px;
+  /* 메뉴 항목(PD-384): 줄 16px + 위아래 4px = 24px(--control-height-sm), 글자는 아이콘 칸(32px) 뒤에서 시작 */
+  --menu-item-line-height: 16px;
+  --menu-item-padding: var(--space-2) var(--space-8) var(--space-2) calc(var(--space-12) + var(--space-4));
 
   /* 터치 타겟 (모바일) */
   --touch-target-min: 44px;

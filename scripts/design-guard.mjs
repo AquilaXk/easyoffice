@@ -117,6 +117,9 @@ export const DRAWN_SIZES = new Map([
   [".slide-presenter-notes-input", ["min-height"]],
   // styles.css (PD-384): the separator line between toolbar groups.
   [".tb-sep", ["height"]],
+  // menu-bar.css (PD-384): the icon box and the sub-menu arrow of a menu item.
+  [".md-icon", ["height"]],
+  [".md-arrow .eo-icon", ["height"]],
 ]);
 
 /**
