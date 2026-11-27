@@ -114,6 +114,38 @@ fn bplist_root_dict(entries: &[(&str, bool)]) -> Vec<u8> {
 }
 
 #[test]
+fn an_encrypted_ooxml_object_inside_a_doc_does_not_make_the_doc_encrypted() {
+    // PD-361: only the root storage decides; a nested storage is an embedded object.
+    let doc_with_object = Ole2ContainerCodec::pack(&[
+        ("WordDocument".to_string(), vec![0; 64]),
+        (
+            "ObjectPool/_1234567/EncryptionInfo".to_string(),
+            vec![0, 4, 0, 4, 0, 0, 0, 0],
+        ),
+        (
+            "ObjectPool/_1234567/EncryptedPackage".to_string(),
+            vec![0xDE, 0xAD, 0xBE, 0xEF],
+        ),
+    ])
+    .unwrap();
+    assert_eq!(
+        FormatDetector::detect(&doc_with_object, None),
+        Ok(DocumentFormat::Doc)
+    );
+    // the root storage still decides
+    let mixed = Ole2ContainerCodec::pack(&[
+        ("ObjectPool/_1/EncryptionInfo".to_string(), vec![0; 8]),
+        ("EncryptionInfo".to_string(), vec![0, 4, 0, 4, 0, 0, 0, 0]),
+        ("EncryptedPackage".to_string(), vec![1, 2, 3, 4]),
+    ])
+    .unwrap();
+    assert!(matches!(
+        FormatDetector::detect(&mixed, None),
+        Err(EasyOfficeError::EncryptedDocumentUnsupported(_))
+    ));
+}
+
+#[test]
 fn offcrypto_ooxml_containers_are_reported_as_encrypted_and_plain_doc_keeps_signature_mismatch() {
     let offcrypto = offcrypto_ole2_bytes();
     for (ext, expected) in [
