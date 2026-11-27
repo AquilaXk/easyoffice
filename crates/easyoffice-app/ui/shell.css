@@ -176,7 +176,9 @@
 /* Font dialog of the word processor (doc-font-dialog.js): the tab bodies keep one height so the dialog does not jump between 글꼴 and 고급. */
 #doc-font-dialog { width: min(420px, calc(100vw - 32px)); }
 #doc-font-dialog .dialog-label { min-width: 96px; }
-#doc-font-dialog .dialog-body[data-font-pane] { min-height: 150px; }
+#doc-font-dialog .dialog-body[data-font-pane] { min-height: 196px; }
+#doc-font-dialog #doc-font-sample-text { display: inline-block; transform-origin: left center; }
+#doc-font-dialog #doc-font-kerning { margin: 0; accent-color: var(--color-primary); }
 #doc-font-dialog .doc-font-preview-body { padding-top: 0; }
 #doc-font-dialog #doc-font-sample { overflow: hidden; width: 100%; box-sizing: border-box; }
 #doc-font-dialog .dialog-status-row:has(> :empty) { display: none; }

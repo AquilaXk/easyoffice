@@ -12,13 +12,18 @@
   const RUN_CLASS = "eo-run";
   const BOOL_PROPS = ["bold", "italic", "underline", "strike", "superscript", "subscript"];
   const BOOL_PROP_SET = new Set(BOOL_PROPS);
-  const VALUE_PROPS = ["size", "font", "face", "color", "highlight", "spacing"];
+  const VALUE_PROPS = ["size", "font", "face", "color", "highlight", "spacing", "scale", "position", "kerning"];
   const PROPS = [...VALUE_PROPS, ...BOOL_PROPS];
   // Letter spacing (`spacing`): twips added after each character, either way up to 1,584 pt (PD-367).
   const MAX_SPACING_TWIPS = 31680;
+  // Advanced settings of the font dialog (PD-372): `scale` is the glyph width in percent (1-600, never 100), `position` the
+  // raise (positive) or lowering in half-points (either way up to 1,584 pt, never 0) and `kerning` the smallest kerned size in
+  // half-points (1-3,276 = 1,638 pt).
+  const ADVANCED_RANGE = { scale: [1, 600], position: [-3168, 3168], kerning: [1, 3276] };
   const TWIPS_PER_PX = 15;
   const DATA_KEY = {
     size: "eoSize", font: "eoFont", face: "eoFace", color: "eoColor", highlight: "eoHighlight", spacing: "eoSpacing",
+    scale: "eoScale", position: "eoPosition", kerning: "eoKerning",
     bold: "eoBold", italic: "eoItalic", underline: "eoUnderline", strike: "eoStrike",
     superscript: "eoSuperscript", subscript: "eoSubscript",
   };
@@ -69,6 +74,15 @@
     return Math.max(MIN_HALF_PT, Math.min(MAX_HALF_PT, Math.round(n * 2)));
   }
 
+  // An advanced setting inside its range as an integer, `null` for the neutral value (scale 100, position 0, kerning 0), or
+  // `undefined` for anything else (not an integer, out of range).
+  function advancedValue(prop, value) {
+    const n = typeof value === "number" || typeof value === "string" ? Number(value) : Number.NaN;
+    if (n === 0 || (prop === "scale" && n === 100)) return null;
+    const [min, max] = ADVANCED_RANGE[prop];
+    return Number.isInteger(n) && n >= min && n <= max ? n : undefined;
+  }
+
   // Returns the normalized value of one property, `null` to clear it, or `undefined` if invalid.
   function normalizeProp(prop, value) {
     if (value === null || value === false || value === "") return null;
@@ -82,6 +96,7 @@
       if (n === 0) return null;
       return Number.isInteger(n) && Math.abs(n) <= MAX_SPACING_TWIPS ? n : undefined;
     }
+    if (ADVANCED_RANGE[prop]) return advancedValue(prop, value);
     if (prop === "font") return normalizeFont(value) ?? undefined;
     if (prop === "face") return FACE_RE.test(String(value)) ? String(value) : undefined;
     if (prop === "color" || prop === "highlight") return normalizeColor(value) ?? undefined;
@@ -118,6 +133,10 @@
     if (Number.isInteger(size) && size >= MIN_HALF_PT && size <= MAX_HALF_PT) fmt.size = size;
     const spacing = Number(el.dataset[DATA_KEY.spacing]);
     if (Number.isInteger(spacing) && spacing !== 0 && Math.abs(spacing) <= MAX_SPACING_TWIPS) fmt.spacing = spacing;
+    Object.keys(ADVANCED_RANGE).forEach((p) => {
+      const value = advancedValue(p, el.dataset[DATA_KEY[p]]);
+      if (value) fmt[p] = value;
+    });
     const font = el.dataset[DATA_KEY.font];
     if (font && FONT_RE.test(font)) fmt.font = font;
     const face = el.dataset[DATA_KEY.face];
@@ -183,6 +202,17 @@
     return twips ? String(Math.round((twips / TWIPS_PER_PX) * 1000) / 1000) + "px" : "";
   }
 
+  // Screen approximation of the advanced settings (PD-372). A script keeps `vertical-align`; otherwise the raise or lowering
+  // is a length. The width scale is `font-stretch` (limited to 50-200 %, and only fonts with width variants change), and a
+  // kerning threshold turns kerning on (the size threshold has no CSS counterpart).
+  function advancedCss(fmt) {
+    return {
+      verticalAlign: fmt.superscript ? "super" : fmt.subscript ? "sub" : fmt.position ? halfPtToCss(fmt.position) : "",
+      fontStretch: fmt.scale ? `${Math.min(200, Math.max(50, fmt.scale))}%` : "",
+      fontKerning: fmt.kerning ? "normal" : "",
+    };
+  }
+
   // CSSOM property values mirroring a (validated) format; empty string = property not set.
   function styleFor(fmt) {
     const deco = [fmt.underline ? "underline" : "", fmt.strike ? "line-through" : ""].filter(Boolean).join(" ");
@@ -195,7 +225,7 @@
       fontWeight: fmt.bold ? "bold" : "",
       fontStyle: fmt.italic ? "italic" : "",
       textDecoration: deco,
-      verticalAlign: fmt.superscript ? "super" : fmt.subscript ? "sub" : "",
+      ...advancedCss(fmt),
     };
   }
 
@@ -229,14 +259,17 @@
     else if (fmt.underline) st.textDecoration = "underline";
     else if (fmt.strike) st.textDecoration = "line-through";
     else st.textDecoration = "";
-    st.verticalAlign = fmt.superscript ? "super" : fmt.subscript ? "sub" : "";
+    const advanced = advancedCss(fmt);
+    st.verticalAlign = advanced.verticalAlign;
+    st.fontStretch = advanced.fontStretch;
+    st.fontKerning = advanced.fontKerning;
   }
 
   // Format of a structured-payload / decoded model run ({sizeHalfPt, font, color, highlight,
   // bold, italic, underline, strike, script}); invalid values are dropped.
   function fromModelRun(run) {
     const patch = normalizePatch({
-      size: run?.sizeHalfPt, spacing: run?.letterSpacingTwips, font: run?.font, face: run?.fontFace, color: run?.color, highlight: run?.highlight,
+      size: run?.sizeHalfPt, spacing: run?.letterSpacingTwips, scale: run?.scalePercent, position: run?.positionHalfPt, kerning: run?.kerningHalfPt, font: run?.font, face: run?.fontFace, color: run?.color, highlight: run?.highlight,
       bold: run?.bold === true ? true : undefined, italic: run?.italic === true ? true : undefined,
       underline: run?.underline === true ? true : undefined, strike: run?.strike === true ? true : undefined,
       superscript: run?.superscript === true || run?.script === "superscript" ? true : undefined,
@@ -541,6 +574,9 @@
       runFlags(a) === runFlags(b) &&
       (a.size || "") === (b.size || "") &&
       (a.spacing || 0) === (b.spacing || 0) &&
+      (a.scale || 0) === (b.scale || 0) &&
+      (a.position || 0) === (b.position || 0) &&
+      (a.kerning || 0) === (b.kerning || 0) &&
       (a.font || "") === (b.font || "") &&
       (a.face || "") === (b.face || "") &&
       (a.color || "") === (b.color || "") &&

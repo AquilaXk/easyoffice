@@ -1645,6 +1645,9 @@
         </div>
         <div class="dialog-body" id="doc-font-pane-advanced" role="tabpanel" aria-labelledby="doc-font-tab-advanced" data-font-pane="advanced" hidden>
           <div class="dialog-section-title">문자 간격</div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-font-scale">배율(C)</label><input id="doc-font-scale" class="dialog-input" type="number" min="1" max="600" step="1" list="doc-font-scale-presets" /><span class="dialog-unit">%</span>
+            <datalist id="doc-font-scale-presets"><option value="200"></option><option value="150"></option><option value="100"></option><option value="90"></option><option value="80"></option><option value="66"></option><option value="50"></option><option value="33"></option><option value="10"></option></datalist>
+          </div>
           <div class="dialog-row"><label class="dialog-label" for="doc-font-spacing-kind">간격(S)</label>
             <select id="doc-font-spacing-kind" class="sb-combo dialog-select">
               <option value="normal">표준</option>
@@ -1653,6 +1656,15 @@
             </select>
           </div>
           <div class="dialog-row"><label class="dialog-label" for="doc-font-spacing-value">값(B)</label><input id="doc-font-spacing-value" class="dialog-input" type="number" min="0.1" max="1584" step="0.1" /><span class="dialog-unit">pt</span></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-font-position-kind">위치(P)</label>
+            <select id="doc-font-position-kind" class="sb-combo dialog-select">
+              <option value="normal">표준</option>
+              <option value="raised">올림</option>
+              <option value="lowered">내림</option>
+            </select>
+          </div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-font-position-value">값(Y)</label><input id="doc-font-position-value" class="dialog-input" type="number" min="0.5" max="1584" step="0.5" /><span class="dialog-unit">pt</span></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-font-kerning">글꼴 커닝(K)</label><input id="doc-font-kerning" type="checkbox" /><input id="doc-font-kerning-value" class="dialog-input" type="number" min="1" max="1638" step="0.5" aria-label="커닝을 적용할 글자 크기" /><span class="dialog-unit">포인트 이상(O)</span></div>
         </div>
         <div class="dialog-body doc-font-preview-body">
           <div class="dialog-row"><span class="dialog-label">미리 보기</span><output id="doc-font-sample" class="sheet-color-sample"><span id="doc-font-sample-text">가나다 AaBb</span></output></div>

@@ -124,6 +124,9 @@
           run.script ||
           run.sizeHalfPt !== undefined ||
           run.letterSpacingTwips !== undefined ||
+          run.scalePercent !== undefined ||
+          run.positionHalfPt !== undefined ||
+          run.kerningHalfPt !== undefined ||
           run.font !== undefined ||
           run.fontFace !== undefined ||
           run.color !== undefined ||
