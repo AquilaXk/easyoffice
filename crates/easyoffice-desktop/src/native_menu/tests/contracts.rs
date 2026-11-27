@@ -53,9 +53,9 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
     assert_eq!(
         align,
         [
-            "왼쪽 맞춤",
+            "텍스트 왼쪽 맞춤",
             "가운데 맞춤",
-            "오른쪽 맞춤",
+            "텍스트 오른쪽 맞춤",
             s,
             "위쪽 맞춤",
             "가운데 맞춤",

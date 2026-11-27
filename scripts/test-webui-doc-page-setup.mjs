@@ -213,15 +213,16 @@ test("the binding is a gutter and a kind: it travels in data-eo-page, takes room
   assert.deepEqual([decoded.gutter, decoded.binding], [283, 2]);
 });
 
-test("the dialog has the 제본 cards and field: 맞쪽 and a gutter are applied as one undo step", async () => {
+test("the Word dialog has 여러 페이지 and 제본용 여백: 여백 미러 and a gutter are applied as one undo step", async () => {
   const h = await openDoc("w-ps-binding-dialog");
   h.userClick(studioItem(h.document, "layout-paper"));
   await flushAsyncTurns();
-  assert.equal(h.field("single").checked, true);
+  assert.equal(h.field("multi").value, "0");
+  assert.equal(h.field("gutter-pos").value, "0");
   assert.equal(h.field("gutter").value, "0.0");
-  h.field("single").checked = false;
-  h.field("duplex").checked = true;
-  h.fire(h.field("duplex"));
+  assert.equal(h.field("left-label").textContent, "왼쪽");
+  h.type("multi", 1);
+  assert.deepEqual([h.field("left-label").textContent, h.field("right-label").textContent, h.field("gutter-pos").disabled], ["안쪽", "바깥쪽", true]);
   h.type("gutter", 10);
   h.document.getElementById("btn-doc-ps-apply").click();
   await flushAsyncTurns(4);

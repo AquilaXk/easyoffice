@@ -270,9 +270,9 @@
               <div class="md-sub" data-kinds="SHEET" role="menuitem" aria-haspopup="menu" tabindex="-1">
                 <span class="md-label">맞춤</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
                 <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="맞춤">
-                  <button type="button" class="md-item" role="menuitemcheckbox" aria-checked="false" data-sheet-look="align-left" tabindex="-1"><span class="md-label">왼쪽 맞춤</span></button>
+                  <button type="button" class="md-item" role="menuitemcheckbox" aria-checked="false" data-sheet-look="align-left" tabindex="-1"><span class="md-label">텍스트 왼쪽 맞춤</span></button>
                   <button type="button" class="md-item" role="menuitemcheckbox" aria-checked="false" data-sheet-look="align-center" tabindex="-1"><span class="md-label">가운데 맞춤</span></button>
-                  <button type="button" class="md-item" role="menuitemcheckbox" aria-checked="false" data-sheet-look="align-right" tabindex="-1"><span class="md-label">오른쪽 맞춤</span></button>
+                  <button type="button" class="md-item" role="menuitemcheckbox" aria-checked="false" data-sheet-look="align-right" tabindex="-1"><span class="md-label">텍스트 오른쪽 맞춤</span></button>
                   <div class="md-sep"></div>
                   <button type="button" class="md-item" role="menuitemcheckbox" aria-checked="false" data-sheet-look="valign-top" tabindex="-1"><span class="md-label">위쪽 맞춤</span></button>
                   <button type="button" class="md-item" role="menuitemcheckbox" aria-checked="false" data-sheet-look="valign-middle" tabindex="-1"><span class="md-label">가운데 맞춤</span></button>
@@ -689,9 +689,9 @@
         </div>
         <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
         <div class="tb-group" data-kinds="SHEET">
-          <button type="button" class="tb-btn" data-sheet-look="align-left" title="왼쪽 맞춤" aria-label="왼쪽 맞춤" aria-pressed="false"><span class="tb-sprite icon-align-left"></span><span class="tb-label">왼쪽<br/>맞춤</span></button>
+          <button type="button" class="tb-btn" data-sheet-look="align-left" title="텍스트 왼쪽 맞춤" aria-label="텍스트 왼쪽 맞춤" aria-pressed="false"><span class="tb-sprite icon-align-left"></span><span class="tb-label">왼쪽<br/>맞춤</span></button>
           <button type="button" class="tb-btn" data-sheet-look="align-center" title="가운데 맞춤" aria-label="가운데 맞춤" aria-pressed="false"><span class="tb-sprite icon-align-center"></span><span class="tb-label">가운데<br/>맞춤</span></button>
-          <button type="button" class="tb-btn" data-sheet-look="align-right" title="오른쪽 맞춤" aria-label="오른쪽 맞춤" aria-pressed="false"><span class="tb-sprite icon-align-right"></span><span class="tb-label">오른쪽<br/>맞춤</span></button>
+          <button type="button" class="tb-btn" data-sheet-look="align-right" title="텍스트 오른쪽 맞춤" aria-label="텍스트 오른쪽 맞춤" aria-pressed="false"><span class="tb-sprite icon-align-right"></span><span class="tb-label">오른쪽<br/>맞춤</span></button>
           <button type="button" class="tb-btn" data-sheet-look="valign-top" title="위쪽 맞춤" aria-label="위쪽 맞춤" aria-pressed="false"><span class="tb-sprite icon-valign-top"></span><span class="tb-label">위쪽<br/>맞춤</span></button>
           <button type="button" class="tb-btn" data-sheet-look="valign-middle" title="가운데 맞춤" aria-label="가운데 맞춤" aria-pressed="false"><span class="tb-sprite icon-valign-middle"></span><span class="tb-label">가운데<br/>맞춤</span></button>
           <button type="button" class="tb-btn" data-sheet-look="valign-bottom" title="아래쪽 맞춤" aria-label="아래쪽 맞춤" aria-pressed="false"><span class="tb-sprite icon-valign-bottom"></span><span class="tb-label">아래쪽<br/>맞춤</span></button>
@@ -1620,11 +1620,11 @@
         <div class="dialog-title"><span id="doc-page-setup-title">용지 설정</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
         <div class="dialog-body">
           <div class="dialog-section">
-            <div class="dialog-section-title">용지 종류</div>
+            <div id="doc-ps-paper-title" class="dialog-section-title">용지 종류</div>
             <div class="dialog-row"><select id="doc-ps-paper" class="sb-combo dialog-select" aria-label="용지 종류"><option value="A4">A4</option><option value="A3">A3</option><option value="B4">B4</option><option value="B5">B5</option><option value="Letter">Letter</option><option value="Legal">Legal</option><option value="custom">사용자 정의</option></select></div>
             <div class="dialog-row">
-              <label class="dialog-label" for="doc-ps-width">폭</label><input id="doc-ps-width" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
-              <label class="dialog-label" for="doc-ps-height">길이</label><input id="doc-ps-height" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
+              <label id="doc-ps-width-label" class="dialog-label" for="doc-ps-width">폭</label><input id="doc-ps-width" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
+              <label id="doc-ps-height-label" class="dialog-label" for="doc-ps-height">길이</label><input id="doc-ps-height" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
             </div>
           </div>
           <div class="page-setup-sections">
@@ -1635,26 +1635,31 @@
                 <label class="icon-radio-card"><input class="icon-radio-input" type="radio" name="doc-ps-orient" value="landscape" id="doc-ps-landscape" /><span class="icon-radio-icon"><svg xmlns="http://www.w3.org/2000/svg" class="orient-icon orient-icon-landscape" width="40" height="28" viewBox="0 0 40 28" aria-hidden="true" focusable="false"><rect x="1" y="1" width="38" height="26" rx="2" fill="var(--ui-surface)" stroke="var(--accent-subtle)" stroke-width="1.5" /><line x1="7" y1="7" x2="33" y2="7" stroke="var(--ui-border-strong)" stroke-width="1.2" /><line x1="7" y1="11" x2="33" y2="11" stroke="var(--ui-border-strong)" stroke-width="1.2" /><line x1="7" y1="15" x2="29" y2="15" stroke="var(--ui-border-strong)" stroke-width="1.2" /><line x1="7" y1="19" x2="23" y2="19" stroke="var(--ui-border-light)" stroke-width="1.1" /></svg></span><span class="icon-radio-text">가로</span></label>
               </div>
             </div>
-          <div class="dialog-section">
-            <div id="doc-ps-binding-title" class="dialog-section-title">제본선 위치</div>
-            <div class="dialog-icon-radio-group">
-              <label class="icon-radio-card"><input class="icon-radio-input" type="radio" name="doc-ps-binding" value="0" id="doc-ps-single" /><span class="icon-radio-icon"><svg width="24" height="32" viewBox="0 0 24 32" aria-hidden="true" focusable="false"><rect x="1" y="1" width="22" height="30" rx="1.5" fill="var(--ui-surface)" stroke="var(--accent-subtle)" stroke-width="1.2" /><line x1="5" y1="7" x2="19" y2="7" stroke="var(--ui-border-strong)" stroke-width="1" /><line x1="5" y1="10" x2="19" y2="10" stroke="var(--ui-border-strong)" stroke-width="1" /><line x1="5" y1="13" x2="15" y2="13" stroke="var(--ui-border-strong)" stroke-width="1" /></svg></span><span id="doc-ps-single-label" class="icon-radio-text">왼쪽</span></label>
-              <label class="icon-radio-card"><input class="icon-radio-input" type="radio" name="doc-ps-binding" value="1" id="doc-ps-duplex" /><span class="icon-radio-icon"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><rect x="1" y="1" width="13" height="30" rx="1.5" fill="var(--ui-surface)" stroke="var(--accent-subtle)" stroke-width="1.2" /><rect x="18" y="1" width="13" height="30" rx="1.5" fill="var(--ui-surface)" stroke="var(--accent-subtle)" stroke-width="1.2" /><line x1="14" y1="4" x2="14" y2="28" stroke="var(--accent-strong)" stroke-width="1.5" stroke-dasharray="2,2" /></svg></span><span id="doc-ps-facing-label" class="icon-radio-text">마주보는 페이지</span></label>
-              <label class="icon-radio-card"><input class="icon-radio-input" type="radio" name="doc-ps-binding" value="2" id="doc-ps-top-binding" /><span class="icon-radio-icon"><svg width="24" height="32" viewBox="0 0 24 32" aria-hidden="true" focusable="false"><rect x="1" y="1" width="22" height="13" rx="1.5" fill="var(--ui-surface)" stroke="var(--accent-subtle)" stroke-width="1.2" /><rect x="1" y="18" width="22" height="13" rx="1.5" fill="var(--ui-surface)" stroke="var(--accent-subtle)" stroke-width="1.2" /><line x1="4" y1="15" x2="20" y2="15" stroke="var(--accent-strong)" stroke-width="1.5" stroke-dasharray="2,2" /></svg></span><span id="doc-ps-top-label" class="icon-radio-text">위쪽</span></label>
+          <div id="doc-ps-binding-section" class="dialog-section">
+            <div id="doc-ps-binding-title" class="dialog-section-title">제본</div>
+            <div id="doc-ps-binding-cards" class="dialog-icon-radio-group">
+              <label class="icon-radio-card"><input class="icon-radio-input" type="radio" name="doc-ps-binding" value="0" id="doc-ps-single" /><span class="icon-radio-icon"><svg width="24" height="32" viewBox="0 0 24 32" aria-hidden="true" focusable="false"><rect x="1" y="1" width="22" height="30" rx="1.5" fill="var(--ui-surface)" stroke="var(--accent-subtle)" stroke-width="1.2" /><line x1="5" y1="7" x2="19" y2="7" stroke="var(--ui-border-strong)" stroke-width="1" /><line x1="5" y1="10" x2="19" y2="10" stroke="var(--ui-border-strong)" stroke-width="1" /><line x1="5" y1="13" x2="15" y2="13" stroke="var(--ui-border-strong)" stroke-width="1" /></svg></span><span id="doc-ps-single-label" class="icon-radio-text">한쪽</span></label>
+              <label class="icon-radio-card"><input class="icon-radio-input" type="radio" name="doc-ps-binding" value="1" id="doc-ps-duplex" /><span class="icon-radio-icon"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><rect x="1" y="1" width="13" height="30" rx="1.5" fill="var(--ui-surface)" stroke="var(--accent-subtle)" stroke-width="1.2" /><rect x="18" y="1" width="13" height="30" rx="1.5" fill="var(--ui-surface)" stroke="var(--accent-subtle)" stroke-width="1.2" /><line x1="14" y1="4" x2="14" y2="28" stroke="var(--accent-strong)" stroke-width="1.5" stroke-dasharray="2,2" /></svg></span><span id="doc-ps-facing-label" class="icon-radio-text">맞쪽</span></label>
+              <label class="icon-radio-card"><input class="icon-radio-input" type="radio" name="doc-ps-binding" value="2" id="doc-ps-top-binding" /><span class="icon-radio-icon"><svg width="24" height="32" viewBox="0 0 24 32" aria-hidden="true" focusable="false"><rect x="1" y="1" width="22" height="13" rx="1.5" fill="var(--ui-surface)" stroke="var(--accent-subtle)" stroke-width="1.2" /><rect x="1" y="18" width="22" height="13" rx="1.5" fill="var(--ui-surface)" stroke="var(--accent-subtle)" stroke-width="1.2" /><line x1="4" y1="15" x2="20" y2="15" stroke="var(--accent-strong)" stroke-width="1.5" stroke-dasharray="2,2" /></svg></span><span id="doc-ps-top-label" class="icon-radio-text">위로</span></label>
+            </div>
+            <div id="doc-ps-binding-word" hidden>
+              <div class="dialog-row"><label class="dialog-label" for="doc-ps-multi">여러 페이지</label><select id="doc-ps-multi" class="sb-combo dialog-select"><option value="0">기본</option><option value="1">여백 미러</option></select></div>
+              <div class="dialog-row"><label class="dialog-label" for="doc-ps-gutter-pos">제본용 여백 위치</label><select id="doc-ps-gutter-pos" class="sb-combo dialog-select"><option value="0">왼쪽</option><option value="2">위쪽</option></select></div>
             </div>
           </div>
           </div>
           <div class="dialog-section">
-            <div class="dialog-section-title">용지 여백</div>
+            <div id="doc-ps-margin-title" class="dialog-section-title">용지 여백</div>
             <div class="margin-grid">
               <label id="doc-ps-margin-top-label" class="dialog-label" for="doc-ps-top">위쪽</label><input id="doc-ps-top" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
               <label id="doc-ps-margin-bottom-label" class="dialog-label" for="doc-ps-bottom">아래쪽</label><input id="doc-ps-bottom" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
-              <label class="dialog-label" for="doc-ps-left">왼쪽</label><input id="doc-ps-left" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
-              <label class="dialog-label" for="doc-ps-right">오른쪽</label><input id="doc-ps-right" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
+              <label id="doc-ps-left-label" class="dialog-label" for="doc-ps-left">왼쪽</label><input id="doc-ps-left" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
+              <label id="doc-ps-right-label" class="dialog-label" for="doc-ps-right">오른쪽</label><input id="doc-ps-right" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
               <label id="doc-ps-header-label" class="dialog-label" for="doc-ps-header">머리글</label><input id="doc-ps-header" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
               <label id="doc-ps-footer-label" class="dialog-label" for="doc-ps-footer">바닥글</label><input id="doc-ps-footer" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
-              <label id="doc-ps-gutter-label" class="dialog-label" for="doc-ps-gutter">제본선</label><input id="doc-ps-gutter" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
+              <label id="doc-ps-gutter-label" class="dialog-label" for="doc-ps-gutter">제본</label><input id="doc-ps-gutter" class="dialog-input" type="number" step="0.1" min="0" /><span id="doc-ps-gutter-unit" class="dialog-unit">mm</span>
             </div>
+            <div id="doc-ps-facing-row" class="dialog-row" hidden><label class="dialog-checkbox"><input id="doc-ps-facing" type="checkbox" /> 페이지 마주보기</label></div>
           </div>
           <div class="dialog-status-row"><span id="doc-ps-status" class="dialog-status" role="status" aria-live="polite"></span></div>
         </div>

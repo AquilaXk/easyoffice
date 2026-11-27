@@ -5,8 +5,9 @@
   // editor's edit-paper dialog (`rhwp-studio/src/ui/page-setup-dialog.ts`, MIT, Copyright (c) 2025-2026 Edward Kim,
   // see THIRD_PARTY_NOTICES.md): the paper list, the width and length in mm, the orientation cards, and the margins
   // top, bottom, left, right, header and footer, with the same refusal of a setup that leaves no body
-  // (`core/page-body-limits.ts`: 10 mm). Differences: no binding or scope (the engine's page model has neither), the
-  // refusal goes to the status line, and the dialog is a `<dialog>` of this shell.
+  // (`core/page-body-limits.ts`: 10 mm). Differences: no scope (the engine's page model has none), the binding is
+  // shown the way each product words it (see `syncDialogLabels`), the refusal goes to the status line, and the dialog
+  // is a `<dialog>` of this shell.
   //
   // The setup lives on the editor as `data-eo-page` ("width,height,left,right,top,bottom,header,footer" in twips, the
   // engine's `RichPaper` and `RichPageMargins`: top and bottom are the distances from the page edge to the body,
@@ -33,6 +34,7 @@
   // 2 위로, the engine's `RichBindingKind`). A page bound at the top takes its gutter from the height, the others from the width.
   const BINDING_KEYS = ["gutter", "binding"];
   const BINDING_KINDS = ["single", "duplex", "top"];
+  const DUPLEX_BINDING = 1;
   const TOP_BINDING = 2;
   // The new-document margins of a page without a setup (`RichPageMargins::DOC_DEFAULT` / `HWP_DEFAULT`).
   const DEFAULT_SIDE = { top: 1701, bottom: 1440, left: 1440, right: 1440, header: 851, footer: 992 };
@@ -243,9 +245,20 @@
       return setup;
     }
 
+    const isPages = () => !isHwp() && byId("doc-editor")?.dataset?.eoDocFlavor === "pages";
+
+    // The binding kind the dialog shows. Each product has its own controls over the engine's one `RichBindingKind`: the
+    // reference editor's 한쪽·맞쪽·위로 cards (HWP), 여러 페이지 (기본 · 여백 미러) with 제본용 여백 위치 (왼쪽 · 위쪽) (Word) and
+    // the 페이지 마주보기 check box (Pages, which has no gutter and no top binding).
+    function bindingNow() {
+      if (isHwp()) return BINDING_IDS.findIndex((id) => kit.checked(id));
+      if (isPages()) return kit.checked("doc-ps-facing") ? DUPLEX_BINDING : 0;
+      return kit.val("doc-ps-multi") === String(DUPLEX_BINDING) ? DUPLEX_BINDING : Number(kit.val("doc-ps-gutter-pos")) || 0;
+    }
+
     function readFields() {
       const fields = Object.fromEntries(Object.entries(FIELD_IDS).map(([key, id]) => [key, Number.parseFloat(kit.val(id)) || 0]));
-      fields.binding = BINDING_IDS.findIndex((id) => kit.checked(id));
+      fields.binding = bindingNow();
       return fields;
     }
 
@@ -256,8 +269,19 @@
     const landscape = () => kit.checked("doc-ps-landscape");
     const BINDING_IDS = ["doc-ps-single", "doc-ps-duplex", "doc-ps-top-binding"];
 
+    const setTxt = (id, text) => {
+      const el = byId(id);
+      if (el) el.textContent = text;
+    };
+
+    // Facing pages (맞쪽, 여백 미러, 페이지 마주보기) name the side margins 안쪽 and 바깥쪽; Word keeps its position box off then.
     function markBinding() {
       for (const id of BINDING_IDS) byId(id)?.closest(".icon-radio-card")?.classList.toggle("selected", kit.checked(id));
+      const facing = !isHwp() && bindingNow() === DUPLEX_BINDING;
+      setTxt("doc-ps-left-label", facing ? "안쪽" : "왼쪽");
+      setTxt("doc-ps-right-label", facing ? "바깥쪽" : "오른쪽");
+      const position = byId("doc-ps-gutter-pos");
+      if (position) position.disabled = facing;
     }
 
     function markOrientation() {
@@ -300,25 +324,43 @@
       writeFields(toFields(setup, activeMod()));
       kit.setChecked(setup.width > setup.height ? "doc-ps-landscape" : "doc-ps-portrait", true);
       markOrientation();
-      kit.setChecked(BINDING_IDS[setup.binding ?? 0], true);
+      // Pages has no top binding: what the dialog cannot show reads as 한쪽.
+      const kind = isPages() && setup.binding === TOP_BINDING ? 0 : (setup.binding ?? 0);
+      kit.setChecked(BINDING_IDS[kind], true);
+      kit.setSelect("doc-ps-multi", kind === DUPLEX_BINDING ? "1" : "0");
+      kit.setSelect("doc-ps-gutter-pos", kind === TOP_BINDING ? "2" : "0");
+      kit.setChecked("doc-ps-facing", kind === DUPLEX_BINDING);
       markBinding();
       syncPaper();
     }
 
+    // The dialog of each product: the items and words of its own page setup (the engine model is shared).
+    //  - HWP (편집 용지, as the reference editor): 용지 종류, 폭·길이, 용지 방향, 제본 (한쪽 · 맞쪽 · 위로), 용지 여백, 제본.
+    //  - Word (용지 설정): 용지 크기, 너비·높이, 용지 방향, 여러 페이지 (기본 · 여백 미러), 제본용 여백 위치, 여백, 제본용 여백.
+    //  - Pages (페이지 설정): 용지 크기, 용지 방향, 문서 여백 (상단 · 하단 · 왼쪽 · 오른쪽), 페이지 마주보기. No gutter, no top binding.
     function syncDialogLabels() {
       const hwp = isHwp();
-      const pages = !hwp && byId("doc-editor")?.dataset?.eoDocFlavor === "pages";
-      const setTxt = (id, text) => { const el = byId(id); if (el) el.textContent = text; };
+      const pages = isPages();
+      const show = (id, on) => {
+        const el = byId(id);
+        if (el) el.hidden = !on;
+      };
       setTxt("doc-page-setup-title", hwp ? "편집 용지" : pages ? "페이지 설정" : "용지 설정");
+      setTxt("doc-ps-paper-title", hwp ? "용지 종류" : "용지 크기");
+      setTxt("doc-ps-width-label", hwp ? "폭" : "너비");
+      setTxt("doc-ps-height-label", hwp ? "길이" : "높이");
+      setTxt("doc-ps-margin-title", hwp ? "용지 여백" : pages ? "문서 여백" : "여백");
       setTxt("doc-ps-margin-top-label", pages ? "상단" : "위쪽");
       setTxt("doc-ps-margin-bottom-label", pages ? "하단" : "아래쪽");
       setTxt("doc-ps-header-label", hwp || pages ? "머리말" : "머리글");
       setTxt("doc-ps-footer-label", hwp || pages ? "꼬리말" : "바닥글");
-      setTxt("doc-ps-binding-title", hwp ? "제본" : pages ? "페이지 보기" : "제본선 위치");
-      setTxt("doc-ps-single-label", hwp || pages ? "한쪽" : "왼쪽");
-      setTxt("doc-ps-facing-label", hwp ? "맞쪽" : pages ? "페이지 마주보기" : "마주보는 페이지");
-      setTxt("doc-ps-top-label", hwp || pages ? "위로" : "위쪽");
-      setTxt("doc-ps-gutter-label", hwp || pages ? "제본" : "제본선");
+      setTxt("doc-ps-gutter-label", hwp ? "제본" : "제본용 여백");
+      show("doc-ps-binding-section", !pages);
+      show("doc-ps-binding-title", hwp);
+      show("doc-ps-binding-cards", hwp);
+      show("doc-ps-binding-word", !hwp && !pages);
+      for (const id of ["doc-ps-gutter-label", "doc-ps-gutter", "doc-ps-gutter-unit"]) show(id, !pages);
+      show("doc-ps-facing-row", pages);
     }
 
     function open() {
@@ -347,6 +389,8 @@
       const mod = activeMod();
       const pages = mod !== "HWP" && editor.dataset?.eoDocFlavor === "pages";
       const setup = fromFields(readFields(), original, mod);
+      // Pages keeps no gutter (`TP.SettingsArchive` holds only the facing-pages flag), so the hidden field cannot carry one.
+      if (pages) setup.gutter = 0;
       // A listed paper keeps its exact size, not the one its rounded millimetres give.
       const preset = PRESETS.find(([name]) => name === kit.val("doc-ps-paper"));
       if (preset) {
@@ -408,7 +452,7 @@
       byId("btn-doc-ps-apply")?.addEventListener("click", apply);
       byId("doc-ps-paper")?.addEventListener("change", onPaperChange);
       for (const id of ["doc-ps-portrait", "doc-ps-landscape"]) byId(id)?.addEventListener("change", onOrientChange);
-      for (const id of BINDING_IDS) byId(id)?.addEventListener("change", markBinding);
+      for (const id of [...BINDING_IDS, "doc-ps-multi", "doc-ps-gutter-pos", "doc-ps-facing"]) byId(id)?.addEventListener("change", markBinding);
       // A field cannot go below zero or past the engine's bound (the reference clamps the minimum on `change`).
       const max = round1(MAX_TWIPS / TWIPS_PER_MM);
       for (const id of Object.values(FIELD_IDS)) {

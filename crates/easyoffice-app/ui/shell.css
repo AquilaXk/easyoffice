@@ -479,6 +479,9 @@
 .page-setup-sections { display: flex; gap: 10px; }
 .page-setup-sections > .dialog-section { flex: 1; margin-bottom: 0; }
 .margin-grid { display: grid; grid-template-columns: 40px 72px auto 40px 72px auto; gap: 6px 6px; align-items: center; }
+/* Each product shows its own page setup items (`doc-page-setup.js` `syncDialogLabels`); `hidden` wins over the row and grid display rules. */
+#doc-page-setup-dialog [hidden] { display: none !important; }
+#doc-ps-gutter-label { grid-column: 1 / span 2; white-space: nowrap; }
 .dialog-icon-radio-group { display: flex; gap: 6px; flex-wrap: wrap; }
 .icon-radio-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 8px; border: 1.5px solid var(--ui-border-subtle); border-radius: 3px; cursor: pointer; background: var(--color-surface); min-width: 52px; }
 .icon-radio-card:hover { border-color: var(--accent-hover); background: var(--color-accent-bg-light); }

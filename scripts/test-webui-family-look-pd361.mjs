@@ -413,7 +413,8 @@ test("Official Korean terminology separation holds across DOC, PAGES, SHEET, SLI
   await flushAsyncTurns(4);
   assert.equal(doc.getElementById("doc-ps-margin-top-label").textContent, "상단");
   assert.equal(doc.getElementById("doc-ps-margin-bottom-label").textContent, "하단");
-  assert.equal(doc.getElementById("doc-ps-facing-label").textContent, "페이지 마주보기");
+  assert.equal(doc.getElementById("doc-ps-facing-row").hidden, false);
+  assert.match(doc.getElementById("doc-ps-facing-row").textContent, /페이지 마주보기/);
   doc.getElementById("doc-page-setup-dialog").close();
 
   // HWP
@@ -454,4 +455,81 @@ test("Official Korean terminology separation holds across DOC, PAGES, SHEET, SLI
   switchModule(doc, "DOC");
   await flushAsyncTurns(6);
   assert.deepEqual([...doc.querySelectorAll('#menu-bar [data-menu="format"] > .menu-dropdown > .md-sub')].filter((el) => !el.hidden), []);
+});
+
+// The page setup dialog shows the items of the product it belongs to: HWP the reference editor's 편집 용지 (제본: 한쪽·맞쪽·위로),
+// Word 용지 설정 (여러 페이지, 제본용 여백 위치), Pages 페이지 설정 (문서 여백, 페이지 마주보기; no gutter and no top binding).
+test("The page setup dialog shows each product's own items and words", async () => {
+  const h = await createWorkspaceHarness({
+    search: "?module=DOC&win=w-ps-products",
+    testIpc: async (cmd, raw) => {
+      if (cmd !== "convert_document_format") return null;
+      const req = JSON.parse(raw || "{}");
+      if (req.action === "decode" && String(req.fileName || "").endsWith(".pages")) {
+        return { status: "OK", module: "DOC", format: "pages", kind: "blocks", itemCount: 1, title: "ps.pages", blocks: [{ type: "paragraph", runs: [{ text: "본문" }] }] };
+      }
+      return null;
+    },
+  });
+  await flushAsyncTurns(10);
+  const doc = h.document;
+  const byId = (id) => doc.getElementById(id);
+  const text = (id) => byId(id).textContent.trim();
+  const shown = (id) => !byId(id).hidden;
+  const openDialog = async () => {
+    h.userClick(studioItem(doc, "layout-paper"));
+    await flushAsyncTurns(4);
+  };
+  const closeDialog = () => byId("doc-page-setup-dialog").close();
+  const sidePair = () => [text("doc-ps-left-label"), text("doc-ps-right-label")];
+  const change = (id, value) => {
+    const el = byId(id);
+    if (typeof value === "boolean") el.checked = value;
+    else el.value = String(value);
+    el.dispatchEvent({ type: "change", target: el, bubbles: true });
+  };
+
+  // Word
+  await openDialog();
+  assert.equal(text("doc-page-setup-title"), "용지 설정");
+  assert.deepEqual(["doc-ps-paper-title", "doc-ps-width-label", "doc-ps-height-label", "doc-ps-margin-title", "doc-ps-gutter-label"].map(text), ["용지 크기", "너비", "높이", "여백", "제본용 여백"]);
+  assert.deepEqual(["doc-ps-binding-word", "doc-ps-gutter", "doc-ps-binding-cards", "doc-ps-binding-title", "doc-ps-facing-row"].map(shown), [true, true, false, false, false]);
+  assert.deepEqual([...byId("doc-ps-multi").querySelectorAll("option")].map((o) => o.textContent), ["기본", "여백 미러"]);
+  assert.deepEqual([...byId("doc-ps-gutter-pos").querySelectorAll("option")].map((o) => o.textContent), ["왼쪽", "위쪽"]);
+  assert.deepEqual(sidePair(), ["왼쪽", "오른쪽"]);
+  change("doc-ps-multi", 1);
+  assert.deepEqual(sidePair(), ["안쪽", "바깥쪽"]);
+  assert.equal(byId("doc-ps-gutter-pos").disabled, true);
+  closeDialog();
+
+  // Pages
+  await pickFile(doc, makeFixtureFile("ps.pages", "pages-bytes"));
+  await flushAsyncTurns(16);
+  await openDialog();
+  assert.equal(text("doc-page-setup-title"), "페이지 설정");
+  assert.deepEqual(["doc-ps-paper-title", "doc-ps-margin-title", "doc-ps-margin-top-label", "doc-ps-margin-bottom-label"].map(text), ["용지 크기", "문서 여백", "상단", "하단"]);
+  assert.deepEqual(["doc-ps-binding-section", "doc-ps-gutter", "doc-ps-gutter-label", "doc-ps-facing-row"].map(shown), [false, false, false, true]);
+  assert.deepEqual(sidePair(), ["왼쪽", "오른쪽"]);
+  change("doc-ps-facing", true);
+  assert.deepEqual(sidePair(), ["안쪽", "바깥쪽"]);
+  byId("btn-doc-ps-apply").click();
+  await flushAsyncTurns(4);
+  const setup = h.host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.parse(byId("doc-editor").dataset.eoPage);
+  assert.deepEqual([setup.binding, setup.gutter], [1, 0], "facing pages is the duplex binding with no gutter");
+  await openDialog();
+  assert.equal(byId("doc-ps-facing").checked, true);
+  assert.deepEqual(sidePair(), ["안쪽", "바깥쪽"]);
+  closeDialog();
+
+  // HWP
+  switchModule(doc, "HWP");
+  await flushAsyncTurns(8);
+  await openDialog();
+  assert.equal(text("doc-page-setup-title"), "편집 용지");
+  assert.deepEqual(["doc-ps-paper-title", "doc-ps-width-label", "doc-ps-height-label", "doc-ps-margin-title", "doc-ps-gutter-label", "doc-ps-binding-title"].map(text), ["용지 종류", "폭", "길이", "용지 여백", "제본", "제본"]);
+  assert.deepEqual(["doc-ps-single-label", "doc-ps-facing-label", "doc-ps-top-label"].map(text), ["한쪽", "맞쪽", "위로"]);
+  assert.deepEqual(["doc-ps-binding-cards", "doc-ps-binding-title", "doc-ps-gutter"].map(shown), [true, true, true]);
+  assert.deepEqual(["doc-ps-binding-word", "doc-ps-facing-row"].map(shown), [false, false]);
+  assert.deepEqual(sidePair(), ["왼쪽", "오른쪽"]);
+  closeDialog();
 });

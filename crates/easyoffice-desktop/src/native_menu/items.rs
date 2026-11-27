@@ -392,7 +392,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     item(
         "format:align-left",
-        "왼쪽 맞춤",
+        "텍스트 왼쪽 맞춤",
         None,
         "sheet-look:align-left",
     ),
@@ -404,7 +404,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     item(
         "format:align-right",
-        "오른쪽 맞춤",
+        "텍스트 오른쪽 맞춤",
         None,
         "sheet-look:align-right",
     ),
