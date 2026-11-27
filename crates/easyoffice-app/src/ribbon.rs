@@ -448,7 +448,7 @@ impl RibbonCommandRouter {
                         ("layout-margins", "여백", "Alt+Cmd+G"),
                     ],
                     "formulasAndData" => [
-                        ("data-autosum", "자동 합계 (SUM)", "Shift+Cmd+T"),
+                        ("data-autosum", "자동 합계", "Shift+Cmd+T"),
                         ("data-fn-browser", "함수 마법사", "Shift+F3"),
                         ("data-sort", "오름차순·내림차순 정렬", "Ctrl+Alt+S"),
                         ("data-validation", "데이터 유효성 검사", "Alt+Cmd+V"),
@@ -494,7 +494,7 @@ impl RibbonCommandRouter {
                     "view" => [
                         ("view-split", "창 나누기", "Ctrl+Cmd+2"),
                         ("view-ribbon", "리본 접기·펼치기", "Alt+Cmd+R"),
-                        ("view-theme", "라이트·다크 테마 전환", "Ctrl+Alt+D"),
+                        ("view-theme", "밝게/어둡게 전환", "Ctrl+Alt+D"),
                         (
                             "view-zoom",
                             if module == OfficeModuleKind::Hwp {

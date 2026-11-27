@@ -774,7 +774,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     item(
         "table:autosum",
-        "자동 합계 (SUM)",
+        "자동 합계",
         None,
         "studio-cmd:data-autosum",
     ),
@@ -827,10 +827,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:tab-insert", "시트 삽입", "tab-insert"),
     sa!("sheet:tab-delete", "시트 삭제", "tab-delete"),
     sa!("sheet:tab-rename", "시트 이름 바꾸기", "tab-rename"),
-    sa!("sheet:tab-copy", "시트 복사", "tab-copy"),
     sa!("sheet:tab-move-copy", "시트 이동/복사…", "tab-move-copy"),
-    sa!("sheet:tab-left", "시트 왼쪽으로 이동", "tab-left"),
-    sa!("sheet:tab-right", "시트 오른쪽으로 이동", "tab-right"),
     sa!("sheet:tab-hide", "시트 숨기기", "tab-hide"),
     sa!("sheet:tab-unhide", "시트 숨기기 취소…", "tab-unhide"),
     sa!("sheet:link-remove", "하이퍼링크 제거", "link-remove"),
@@ -872,7 +869,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:unhide", "숨기기 취소", "unhide"),
     sa!("sheet:merge", "셀 병합", "merge"),
     sa!("sheet:unmerge", "병합 해제", "unmerge"),
-    sa!("sheet:sort", "정렬…", "sort-dialog"),
+    sa!("sheet:sort", "사용자 지정 정렬…", "sort-dialog"),
     item(
         "sheet:filter",
         "필터",

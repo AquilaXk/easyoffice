@@ -296,7 +296,7 @@ test("the tab menu has 탭 색 with a palette, and a tab that has a colour shows
   const menu = document.getElementById("sheet-tab-menu");
   assert.equal(menu.hidden, false);
   const labels = [...menu.children].filter((el) => !el.matches("input")).map((el) => el.className.includes("md-sep") ? "-" : el.querySelector(".md-label").textContent);
-  assert.deepEqual(labels, ["시트 삽입", "삭제", "이름 바꾸기", "복사", "이동/복사…", "탭 색", "-", "왼쪽으로 이동", "오른쪽으로 이동", "-", "숨기기", "숨기기 취소…", "-", "모든 시트 선택", "시트 그룹 해제"]);
+  assert.deepEqual(labels, ["시트 삽입", "삭제", "이름 바꾸기", "이동/복사…", "탭 색", "-", "숨기기", "숨기기 취소…", "-", "모든 시트 선택", "시트 그룹 해제"]);
   const panel = document.getElementById("sheet-tab-color-panel");
   assert.equal(panel.querySelectorAll(".sb-hl-palette-row").length, 7, "the gray row and the six colour rows of the style bar");
   assert.deepEqual([...panel.querySelectorAll(".sb-hl-palette-actions button")].map((b) => b.textContent), ["색 없음", "다른 색…"]);

@@ -540,7 +540,7 @@
       const slide = deck[showIdx];
       const next = deck[showIdx + 1];
       byId("slide-show-counter").textContent = showIdx + 1 + " / " + deck.length;
-      byId("slide-show-notes").textContent = String(slide?.notes || "").trim() || "(발표자 노트 없음)";
+      byId("slide-show-notes").textContent = String(slide?.notes || "").trim() || "(노트 없음)";
       byId("slide-show-next").textContent = next ? slideLabel(next) : "(마지막 슬라이드)";
       byId("slide-show-timer").textContent = formatElapsed(elapsedSeconds);
     }

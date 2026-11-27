@@ -92,8 +92,6 @@
         moveCopy: open && at >= 0,
         // The colour of a tab is off under a protected structure and if any target sheet is protected (PD-229, PD-346).
         tabColor: open && at >= 0 && targets.every((name) => !protect?.isOn(name)),
-        moveLeft: open && at >= 0 && shown.indexOf(targets[0]) > 0,
-        moveRight: open && at >= 0 && shown.indexOf(targets[targets.length - 1]) < shown.length - 1,
         hide: open && at >= 0 && shown.length > targets.length,
         unhide: open && hiddenSheets().length > 0,
         selectAll: open && shown.length > 1 && group.length < shown.length,
@@ -416,29 +414,6 @@
       return name;
     }
 
-    // The copy goes right after its source and becomes the active sheet.
-    function copy(sheet) {
-      if (structureBlocked()) return Promise.resolve(false);
-      const targets = targetsFor(sheet);
-      if (targets.length === 0 || !can(sheet).copy) {
-        say("시트는 " + names.MAX_SHEETS + "개까지");
-        return Promise.resolve(false);
-      }
-      return change(async (next) => {
-        const copies = [];
-        let insertAt = next.sheetOrder.indexOf(targets[targets.length - 1]) + 1;
-        for (const s of targets) {
-          const name = await cloneInto(next, s);
-          if (name === null) return false;
-          place(next, name, insertAt);
-          insertAt += 1;
-          copies.push(name);
-        }
-        activate(next, copies[0]);
-        return "시트 복사: " + copies.map(names.labelOf).join(", ");
-      });
-    }
-
     // 이동/복사: `sheet` (or its active group), or a copy of it, goes before `before` (null for the end).
     function moveOrCopy(sheet, before, makeCopy) {
       if (structureBlocked()) return Promise.resolve(false);
@@ -505,42 +480,6 @@
         order.splice(order.indexOf(dest) + after, 0, sheet);
         if (!(await reorder(next, order, [sheet]))) return false;
         return "시트 이동: " + names.labelOf(sheet);
-      });
-    }
-
-    function move(sheet, delta) {
-      const targets = targetsFor(sheet);
-      if (targets.length <= 1) {
-        const at = shownSheets().indexOf(sheet);
-        return at < 0 ? Promise.resolve(false) : moveTo(sheet, at + delta);
-      }
-      if (structureBlocked()) return Promise.resolve(false);
-      if (delta !== -1 && delta !== 1) return Promise.resolve(false);
-      const shown = shownSheets();
-      const canMove = delta < 0 ? shown.indexOf(targets[0]) > 0 : shown.indexOf(targets[targets.length - 1]) < shown.length - 1;
-      if (!canMove) return Promise.resolve(false);
-      return change(async (next) => {
-        const curShown = shownIn(next);
-        const targetSet = new Set(targets);
-        const moved = curShown.slice();
-        if (delta < 0) {
-          for (let i = 1; i < moved.length; i += 1) {
-            if (targetSet.has(moved[i]) && !targetSet.has(moved[i - 1])) {
-              [moved[i - 1], moved[i]] = [moved[i], moved[i - 1]];
-            }
-          }
-        } else {
-          for (let i = moved.length - 2; i >= 0; i -= 1) {
-            if (targetSet.has(moved[i]) && !targetSet.has(moved[i + 1])) {
-              [moved[i], moved[i + 1]] = [moved[i + 1], moved[i]];
-            }
-          }
-        }
-        if (moved.every((n, i) => n === curShown[i])) return false;
-        let idx = 0;
-        const order = next.sheetOrder.map((n) => (hiddenIn(next, n) ? n : moved[idx++]));
-        if (!(await reorder(next, order, targets))) return false;
-        return "시트 이동: " + targets.map(names.labelOf).join(", ");
       });
     }
 
@@ -652,15 +591,12 @@
         }
         return Promise.resolve(ui.startRename(active));
       },
-      "tab-copy": () => copy(getActiveSheetName()),
       "tab-move-copy": () => movePlace(getActiveSheetName()),
-      "tab-left": () => move(getActiveSheetName(), -1),
-      "tab-right": () => move(getActiveSheetName(), 1),
       "tab-hide": () => hide(getActiveSheetName()),
       "tab-unhide": () => unhide(),
     };
 
-    return { can, insert, remove, rename, checkRename, setTabColor, copy, moveOrCopy, movePlace, move, moveTo, hide, unhide, selectAll, ungroup, actions, shownSheets, hiddenSheets };
+    return { can, insert, remove, rename, checkRename, setTabColor, moveOrCopy, movePlace, moveTo, hide, unhide, selectAll, ungroup, actions, shownSheets, hiddenSheets };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_TABS__ = createSheetTabs;

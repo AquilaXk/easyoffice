@@ -25,10 +25,10 @@ const open = async () => {
   return harness;
 };
 
-test("the table holds the 11 number-format items, the 56 sheet action items and 선택하여 붙여넣기", () => {
+test("the table holds the 11 number-format items, the 53 sheet action items and 선택하여 붙여넣기", () => {
   const items = sheetItems();
   assert.equal(items.filter((i) => i.name === "sheet-numfmt").length, 11);
-  assert.equal(items.filter((i) => i.name === "sheet-act").length, 56);
+  assert.equal(items.filter((i) => i.name === "sheet-act").length, 53);
   assert.equal(items.filter((i) => i.name === "sheet-cf").length, 68, "the 조건부 서식 menu: 13 rules and their 기타 규칙, 44 gallery items, new, 4 clear rules and manage rules");
   assert.deepEqual(items.filter((i) => i.name === "sheet-paste").map((i) => [i.id, i.label, i.argument]), [["edit:paste-special", "선택하여 붙여넣기…", "special"]]);
 });

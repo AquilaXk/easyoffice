@@ -163,6 +163,17 @@ async function open() {
     await flushAsyncTurns(30);
     return item;
   };
+  // The 이동/복사 dialog of `name`: the sheet (or a copy of it) goes before the tab `before` (null for 끝으로 이동).
+  const movePlace = async (name, before, copy = false) => {
+    await tabMenu(name, "move-copy");
+    await confirmPlace(harness, before, copy);
+  };
+  // A copy right after its source / the sheet one tab to the left or right, by way of the dialog.
+  const copyAfter = (name) => movePlace(name, names()[names().indexOf(name) + 1] ?? null, true);
+  const moveBy = (name, delta) => {
+    const list = names();
+    return movePlace(name, list[list.indexOf(name) + (delta < 0 ? -1 : 2)] ?? null);
+  };
   const add = async () => {
     userClick(document.getElementById("btn-add-sheet-tab"));
     await flushAsyncTurns(30);
@@ -182,7 +193,7 @@ async function open() {
     return converts.at(-1).sheets.map((sheet) => ({ ...sheet, cells: Object.fromEntries(sheet.cells.map((c) => [c.ref, c.raw])) }));
   };
   const book = async () => Object.fromEntries((await saved()).map((sheet) => [sheet.name, sheet]));
-  return { ...harness, engine, converts, tabs, names, labels, active, tab, status, menu, tabMenu, add, history, openBook, saved, book };
+  return { ...harness, engine, converts, tabs, names, labels, active, tab, status, menu, tabMenu, movePlace, copyAfter, moveBy, add, history, openBook, saved, book };
 }
 
 test("a new sheet is named after the numbers in use and goes after the last tab", async () => {
@@ -232,8 +243,9 @@ test("a sheet is not inserted past the number a save takes", async () => {
   await h.add();
   assert.equal(h.tabs().length, 256);
   assert.match(h.status(), /시트는 256개까지/);
-  const copy = await h.tabMenu("S1", "copy");
-  assert.equal(copy.getAttribute("aria-disabled"), "true");
+  await h.copyAfter("S1");
+  assert.equal(h.tabs().length, 256);
+  assert.match(h.status(), /시트는 256개까지/);
   const insert = await h.tabMenu("S1", "insert");
   assert.equal(insert.getAttribute("aria-disabled"), "true");
 });
@@ -292,6 +304,21 @@ test("the last shown sheet cannot be deleted or hidden", async () => {
 
 function userClickMenuAct(h, act) {
   h.userClick(h.document.querySelector(`.md-item[data-sheet-act="${act}"]`));
+}
+
+// Picks the tab `before` (null for 끝으로 이동) in the open 이동/복사 dialog, sets 복사본 만들기 and confirms.
+async function confirmPlace(h, before, copy = false) {
+  h.userClick([...h.document.querySelectorAll("#sheet-tab-move-list li")].find((r) => r.dataset.sheet === (before ?? "")));
+  h.document.getElementById("sheet-tab-move-copy").checked = copy;
+  h.userClick(h.document.getElementById("btn-sheet-tab-move-ok"));
+  await flushAsyncTurns(40);
+}
+
+// The sheet menu's 이동/복사 on the active sheet.
+async function menuPlace(h, before, copy = false) {
+  userClickMenuAct(h, "tab-move-copy");
+  await flushAsyncTurns(30);
+  await confirmPlace(h, before, copy);
 }
 
 test("renaming types the name in the tab, rewrites the formulas that name it and follows every store", async () => {
@@ -444,7 +471,7 @@ test("a copy goes right after its source, keeps formulas as written and takes th
     { name: "Sheet1", cells: { A1: "7", B1: "=A1+Sheet2!A1+Sheet1!A1" }, tabColor: "3366cc", merges: ["A3:B4"] },
     { name: "Sheet2", cells: { A1: "5" } },
   ]);
-  await h.tabMenu("Sheet1", "copy");
+  await h.copyAfter("Sheet1");
   assert.deepEqual(h.names(), ["Sheet1", "시트 1 (2)", "Sheet2"]);
   assert.equal(h.active(), "시트 1 (2)");
   const book = await h.book();
@@ -452,7 +479,7 @@ test("a copy goes right after its source, keeps formulas as written and takes th
   assert.deepEqual(book.Sheet1.cells, { A1: "7", B1: "=A1+Sheet2!A1+Sheet1!A1" });
   assert.equal(book["시트 1 (2)"].tabColor, "3366cc");
   assert.deepEqual(book["시트 1 (2)"].merges, ["A3:B4"]);
-  await h.tabMenu("Sheet1", "copy");
+  await h.copyAfter("Sheet1");
   assert.deepEqual(h.names(), ["Sheet1", "시트 1 (3)", "시트 1 (2)", "Sheet2"]);
   await h.history("studio-undo");
   await h.history("studio-undo");
@@ -470,7 +497,7 @@ test("a copy takes the tables of its source under names of their own and a save 
   let book = await h.book();
   assert.deepEqual(book.Sheet1.tables.map((t) => t.name), ["Sales"]);
   assert.deepEqual(book.Sheet2.tables.map((t) => t.name), ["Other"]);
-  await h.tabMenu("Sheet1", "copy");
+  await h.copyAfter("Sheet1");
   book = await h.book();
   assert.deepEqual(book["시트 1 (2)"].tables.map((t) => [t.name, t.range]), [["Sales_2", "A1:B4"]]);
   assert.deepEqual(book.Sheet1.tables.map((t) => t.name), ["Sales"], "the source keeps its name");
@@ -490,32 +517,31 @@ test("a copy of a long name is cut to fit the name length", async () => {
   const h = await open();
   const long = "가".repeat(31);
   await h.openBook([{ name: long, cells: { A1: "x" } }, { name: "다른", cells: {} }]);
-  await h.tabMenu(long, "copy");
+  await h.copyAfter(long);
   const copyName = h.names()[1];
   assert.equal(h.names()[0], long);
   assert.ok(copyName.length <= 31 && copyName.endsWith(" (2)"), copyName);
   assert.equal(copyName, "가".repeat(27) + " (2)");
-  await h.tabMenu(long, "copy");
+  await h.copyAfter(long);
   assert.equal(h.names()[1], "가".repeat(27) + " (3)");
 });
 
-test("moving a tab left or right swaps it with the shown tab next to it; the ends cannot move further", async () => {
+test("the 이동/복사 dialog moves a tab one place left or right; the tab menu has no item of its own for it", async () => {
   const h = await open();
   await h.add();
   await h.add();
-  assert.equal((await h.tabMenu("Sheet1", "move-left")).getAttribute("aria-disabled"), "true");
-  assert.equal((await h.tabMenu("Sheet3", "move-right")).getAttribute("aria-disabled"), "true");
-  await h.tabMenu("Sheet1", "move-right");
+  for (const act of ["copy", "move-left", "move-right"]) assert.equal(h.menu().querySelector(`[data-tab-act="${act}"]`), null, act);
+  await h.moveBy("Sheet1", 1);
   assert.deepEqual(h.names(), ["Sheet2", "Sheet1", "Sheet3"]);
-  assert.equal(h.active(), "Sheet3", "moving does not change the active sheet");
-  await h.tabMenu("Sheet3", "move-left");
+  assert.equal(h.active(), "Sheet1", "the moved sheet becomes the active one, as 이동/복사 does");
+  await h.moveBy("Sheet3", -1);
   assert.deepEqual(h.names(), ["Sheet2", "Sheet3", "Sheet1"]);
   await h.history("studio-undo");
   assert.deepEqual(h.names(), ["Sheet2", "Sheet1", "Sheet3"]);
   await h.history("studio-undo");
   assert.deepEqual(h.names(), ["Sheet1", "Sheet2", "Sheet3"]);
   // A name that looks like a number keeps its place (an object's keys would sort it first).
-  await h.tabMenu("Sheet3", "move-left");
+  await h.moveBy("Sheet3", -1);
   const t = h.tab("Sheet1");
   t.dispatchEvent({ type: "dblclick", target: t });
   const input = h.document.querySelector("#sheet-tab-bar .sheet-tab-edit");
@@ -609,13 +635,13 @@ test("hiding the active sheet shows its neighbour, hidden sheets are skipped by 
   const h = await open();
   await h.openBook(["하나", "둘", "셋", "넷"].map((name) => ({ name, cells: {} })));
   await h.tabMenu("넷", "hide");
-  await h.tabMenu("하나", "move-right");
+  await h.moveBy("하나", 1);
   assert.deepEqual(h.names(), ["둘", "하나", "셋"]);
   await h.tabMenu("둘", "hide");
   assert.deepEqual(h.names(), ["하나", "셋"]);
   assert.equal(h.active(), "하나");
   // Moving 셋 left passes the hidden 둘 and lands before 하나.
-  await h.tabMenu("셋", "move-left");
+  await h.moveBy("셋", -1);
   assert.deepEqual(h.names(), ["셋", "하나"]);
   assert.deepEqual((await h.saved()).map((s) => s.name), ["둘", "셋", "하나", "넷"], "the hidden sheets stay where they were");
   await h.tabMenu("하나", "unhide");
@@ -656,12 +682,12 @@ test("the sheet menu runs the same commands on the active sheet", async () => {
   userClickMenuAct(h, "tab-insert");
   await flushAsyncTurns(30);
   assert.deepEqual(h.names(), ["Sheet2", "Sheet1"], "inserted before the active sheet");
-  userClickMenuAct(h, "tab-copy");
-  await flushAsyncTurns(30);
-  assert.deepEqual(h.names(), ["Sheet2", "Sheet1", "시트 1 (2)"].length === 3 ? h.names() : []);
+  // 이동/복사 of the active sheet: a copy to the end, then the copy to the front.
+  await menuPlace(h, null, true);
   assert.equal(h.tabs().length, 3);
-  userClickMenuAct(h, "tab-left");
-  await flushAsyncTurns(30);
+  const copied = h.active();
+  await menuPlace(h, h.names()[0]);
+  assert.equal(h.names()[0], copied, "the copy went before the first tab");
   userClickMenuAct(h, "tab-hide");
   await flushAsyncTurns(30);
   assert.equal(h.tabs().length, 2);
@@ -676,7 +702,7 @@ test("the menu is greyed per tab and its keys skip what cannot run", async () =>
   const t = h.tab("Sheet1");
   t.dispatchEvent({ type: "contextmenu", target: t, clientX: 40, clientY: 700 });
   const off = [...h.menu().querySelectorAll(".md-item")].filter((el) => el.getAttribute("aria-disabled") === "true").map((el) => el.dataset.tabAct);
-  assert.deepEqual(off, ["move-left", "unhide", "ungroup"]);
+  assert.deepEqual(off, ["unhide", "ungroup"]);
   const focused = () => h.document.activeElement.dataset.tabAct;
   assert.equal(focused(), "insert");
   const press = (key) => h.menu().dispatchEvent({ type: "keydown", key, target: h.document.activeElement });
@@ -685,9 +711,7 @@ test("the menu is greyed per tab and its keys skip what cannot run", async () =>
   press("ArrowUp");
   assert.equal(focused(), "hide", "unhide is greyed and skipped");
   press("ArrowUp");
-  assert.equal(focused(), "move-right");
-  press("ArrowUp");
-  assert.equal(h.document.activeElement.dataset.tabSub, "color", "move-left is skipped");
+  assert.equal(h.document.activeElement.dataset.tabSub, "color");
   press("ArrowUp");
   assert.equal(focused(), "move-copy");
   press("Escape");
@@ -906,7 +930,7 @@ test("a copy brings the names scoped to its source and refers to itself, and the
     { name: "Global", refersTo: "Sheet1!$A$1" },
     { name: "Other", scope: "Sheet2", refersTo: "Sheet2!$A$1" },
   ], true);
-  await h.tabMenu("Sheet1", "copy");
+  await h.copyAfter("Sheet1");
   const copy = h.active();
   assert.equal(copy, "시트 1 (2)");
   const all = namesApi.getAll();
@@ -978,7 +1002,7 @@ test("a copy of a sheet takes its names with their references moved by the sheet
   const many = Array.from({ length: namesApi.MAX_NAMES - 1 }, (_, i) => ({ name: "N" + i, refersTo: "Sheet2!$A$1" }));
   namesApi.replaceAll([...many, { name: "Own", scope: "시트1", refersTo: "시트1!$A$1" }], true);
   assert.equal(namesApi.copiedFor(namesApi.getAll(), "시트1", "시트1 (2)"), null, "the list would pass its limit");
-  await h.tabMenu("시트1", "copy");
+  await h.copyAfter("시트1");
   assert.deepEqual(h.names(), ["시트1", "Sheet2"], "no copy was made");
   assert.match(h.status(), /이름 정의가 한도를 넘어/);
 });
@@ -1130,7 +1154,7 @@ test("copying a sheet rewrites structured references on the copy to the copied t
     { name: "LocalTotal", scope: "Sheet1", refersTo: "=SUM(표1[단가])" },
     { name: "GlobalTotal", refersTo: "=SUM(표1[단가])" },
   ]);
-  await h.tabMenu("Sheet1", "copy");
+  await h.copyAfter("Sheet1");
   const book = await h.book();
   assert.equal(book["시트 1 (2)"].tables[0].name, "표1_2");
   assert.equal(book["시트 1 (2)"].cells.D1, "=SUM(표1_2[단가])+COUNTA(표1_2)");
@@ -1294,7 +1318,7 @@ test("tab menu 모든 시트 선택 and 시트 그룹 해제, grouped 색/이동
   assert.equal(layout.tabColorOf("S2"), null);
 
   // Move group [S1, S2] right past S3, then undo.
-  await h.tabMenu("S2", "move-right");
+  await h.moveBy("S2", 1);
   assert.deepEqual(h.names(), ["S3", "S1", "S2"]);
   assert.deepEqual(selected(), ["S1", "S2"], "group survives moving");
   await h.history("studio-undo");
@@ -1336,7 +1360,7 @@ test("tab menu 모든 시트 선택 and 시트 그룹 해제, grouped 색/이동
   shiftS2Copy.dispatchEvent({ type: "mouseup", target: shiftS2Copy, button: 0, bubbles: true, cancelable: true, shiftKey: true });
   shiftS2Copy.dispatchEvent({ type: "click", target: shiftS2Copy, button: 0, bubbles: true, cancelable: true, shiftKey: true });
   await flushAsyncTurns(20);
-  await h.tabMenu("S2", "copy");
+  await h.copyAfter("S2");
   assert.deepEqual(h.names(), ["S1", "S2", "S1 (2)", "S2 (2)", "S3"]);
   await h.history("studio-undo");
   assert.deepEqual(h.names(), ["S1", "S2", "S3"]);
@@ -1539,26 +1563,21 @@ test("dragging an end sheet of a 3D span past its other end takes the neighbor i
 });
 
 test("the menu, the sheet menu key and the 이동/복사 list rewrite the span the same way (PD-373)", async () => {
-  // Menu 왼쪽으로 이동: Sheet3 before Sheet2 leaves Sheet2:Sheet3 as Sheet2.
+  // Sheet3 before Sheet2 leaves Sheet2:Sheet3 as Sheet2.
   let { h, spans } = await openSpanBook();
-  await h.tabMenu("Sheet3", "move-left");
+  await h.moveBy("Sheet3", -1);
   assert.deepEqual(h.names(), ["Sheet1", "Sheet3", "Sheet2", "Sheet4", "Sheet5", "Sum"]);
   assert.deepEqual(await spans(), ["=SUM(Sheet2:Sheet4!A1)", "=SUM(Sheet2!A1)", "=Sheet2!A1"]);
   // The sheet menu's command on the active sheet: Sheet2 after Sheet3 (a move that keeps Sheet2:Sheet4 in order).
   ({ h, spans } = await openSpanBook());
   h.userClick(h.tab("Sheet2"));
   await flushAsyncTurns(20);
-  userClickMenuAct(h, "tab-right");
-  await flushAsyncTurns(40);
+  await menuPlace(h, "Sheet4");
   assert.deepEqual(h.names(), ["Sheet1", "Sheet3", "Sheet2", "Sheet4", "Sheet5", "Sum"]);
   assert.deepEqual(await spans(), ["=SUM(Sheet2:Sheet4!A1)", "=SUM(Sheet3!A1)", "=Sheet2!A1"]);
   // 이동/복사: Sheet4 before Sheet2.
   ({ h, spans } = await openSpanBook());
-  await h.tabMenu("Sheet4", "move-copy");
-  const row = [...h.document.querySelectorAll("#sheet-tab-move-list li")].find((r) => r.textContent === "시트 2");
-  h.userClick(row);
-  h.userClick(h.document.getElementById("btn-sheet-tab-move-ok"));
-  await flushAsyncTurns(40);
+  await h.movePlace("Sheet4", "Sheet2");
   assert.deepEqual(h.names(), ["Sheet1", "Sheet4", "Sheet2", "Sheet3", "Sheet5", "Sum"]);
   assert.deepEqual(await spans(), ["=SUM(Sheet2:Sheet3!A1)", "=SUM(Sheet2:Sheet3!A1)", "=Sheet2!A1"]);
 });
@@ -1573,8 +1592,7 @@ test("a group moved together sends every moved sheet and keeps a span whose ends
   third.dispatchEvent({ type: "mouseup", target: third, ...base });
   third.dispatchEvent({ type: "click", target: third, ...base });
   await flushAsyncTurns(20);
-  userClickMenuAct(h, "tab-right");
-  await flushAsyncTurns(40);
+  await menuPlace(h, "Sheet5");
   assert.deepEqual(h.names(), ["Sheet1", "Sheet4", "Sheet2", "Sheet3", "Sheet5", "Sum"]);
   assert.deepEqual(moves().map((r) => r.sheets), [["Sheet2", "Sheet3"]]);
   // Sheet2:Sheet4 lost Sheet3 (it moved too) and so holds Sheet4 only; Sheet2:Sheet3 moved as a whole.
@@ -1586,10 +1604,10 @@ test("a group moved together sends every moved sheet and keeps a span whose ends
 test("a move the engine refuses changes neither the order nor the formulas (PD-373)", async () => {
   const { h, spans } = await openSpanBook();
   h.engine.state.refuse = "engine refused";
-  await h.tabMenu("Sheet3", "move-left");
+  await h.moveBy("Sheet3", -1);
   assert.deepEqual(h.names(), ["Sheet1", "Sheet2", "Sheet3", "Sheet4", "Sheet5", "Sum"]);
   assert.deepEqual(await spans(), ORIGINAL_SPANS);
   h.engine.state.refuse = "";
-  await h.tabMenu("Sheet3", "move-left");
+  await h.moveBy("Sheet3", -1);
   assert.deepEqual(h.names(), ["Sheet1", "Sheet3", "Sheet2", "Sheet4", "Sheet5", "Sum"]);
 });

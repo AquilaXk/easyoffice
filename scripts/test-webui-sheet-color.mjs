@@ -350,7 +350,11 @@ test("a sheet copy takes the colors of its source", async () => {
   await click(h, $(h, "btn-sheet-fill"));
   const tab = h.document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="표"]');
   tab.dispatchEvent({ type: "contextmenu", target: tab, clientX: 40, clientY: 700 });
-  h.userClick(h.document.querySelector('#sheet-tab-menu [data-tab-act="copy"]'));
+  h.userClick(h.document.querySelector('#sheet-tab-menu [data-tab-act="move-copy"]'));
+  await flushAsyncTurns(30);
+  h.userClick([...h.document.querySelectorAll("#sheet-tab-move-list li")].find((r) => r.dataset.sheet === ""));
+  h.document.getElementById("sheet-tab-move-copy").checked = true;
+  h.userClick(h.document.getElementById("btn-sheet-tab-move-ok"));
   await flushAsyncTurns(30);
   assert.notEqual(h.document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab, "표", "the copy is the active sheet");
   assert.equal(fillOf(h, "A1"), "#ffff00");

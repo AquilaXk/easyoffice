@@ -110,6 +110,14 @@ async function open() {
     userClick(studioItem(document, name));
     await flushAsyncTurns(20);
   };
+  // 이동/복사 of the active sheet: it (or a copy) goes before the tab `before` (null for 끝으로 이동).
+  const placeSheet = async (before, copy) => {
+    await act("tab-move-copy");
+    userClick([...document.querySelectorAll("#sheet-tab-move-list li")].find((r) => r.dataset.sheet === (before ?? "")));
+    document.getElementById("sheet-tab-move-copy").checked = copy;
+    userClick(document.getElementById("btn-sheet-tab-move-ok"));
+    await flushAsyncTurns(20);
+  };
   const typeInto = async (ref, text) => {
     const td = cell(ref);
     td.focus();
@@ -138,7 +146,7 @@ async function open() {
       order: host.__EASYOFFICE_SHEET_TAB_STRIP__.getOrder(),
     });
   const sizes = () => host.__EASYOFFICE_WORKSPACE_HISTORY__.sizes();
-  return { ...harness, engine, cell, act, history, typeInto, press, view, sizes, layout: host.__EASYOFFICE_SHEET_LAYOUT__, names: host.__EASYOFFICE_SHEET_NAMES__ };
+  return { ...harness, engine, cell, act, placeSheet, history, typeInto, press, view, sizes, layout: host.__EASYOFFICE_SHEET_LAYOUT__, names: host.__EASYOFFICE_SHEET_NAMES__ };
 }
 
 // Runs `edit`, then undoes and redoes it: the page shows the state before after the undo and the state after after the redo.
@@ -238,8 +246,9 @@ test("sheet steps go back and forth: insert, copy, rename, move, hide and delete
   const tab = (name) => t.document.querySelector(`.sheet-tab-btn[data-sheet-tab="${name}"]`);
   assert.ok(tab("Sheet1") && tab("Sheet2"));
   await roundTrip(t, () => t.act("tab-insert"));
-  await roundTrip(t, () => t.act("tab-copy"));
-  await roundTrip(t, () => t.act("tab-right"));
+  await roundTrip(t, () => t.placeSheet(null, true));
+  const first = () => t.document.querySelector(".sheet-tab-btn[data-sheet-tab]").dataset.sheetTab;
+  await roundTrip(t, () => t.placeSheet(first(), false));
   await roundTrip(t, () => t.act("tab-hide"));
 });
 

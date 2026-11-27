@@ -268,7 +268,7 @@ test("the same column twice is refused and a range of one row has nothing to sor
 
 test("the menu, the native bar and the page agree on the 정렬 item", () => {
   const html = fs.readFileSync(UI("index.html"), "utf8");
-  assert.match(html, /data-sheet-act="sort-dialog"[^>]*><span class="md-label">정렬…<\/span>/);
+  assert.match(html, /data-sheet-act="sort-dialog"[^>]*><span class="md-label">사용자 지정 정렬…<\/span>/);
   const chrome = fs.readFileSync(UI("shell-chrome.js"), "utf8");
   assert.match(chrome, /"sheet:sort": "sheet-act:sort-dialog"/);
   assert.equal(core.FAILURES.merge, "병합된 셀이 있어 정렬할 수 없음");

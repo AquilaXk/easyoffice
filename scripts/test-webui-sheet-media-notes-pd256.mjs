@@ -613,7 +613,11 @@ test("PD-256: office-print(.eo-print-image)·시트 복사·save-payload Base64 
   await flushAsyncTurns(4);
 
   // 시트 복사 시 images와 notes 복제 검증
-  userClick(document.querySelector('#menu-bar [data-sheet-act="tab-copy"]'));
+  userClick(document.querySelector('#menu-bar [data-sheet-act="tab-move-copy"]'));
+  await flushAsyncTurns(14);
+  userClick([...document.querySelectorAll("#sheet-tab-move-list li")].find((r) => r.dataset.sheet === ""));
+  document.getElementById("sheet-tab-move-copy").checked = true;
+  userClick(document.getElementById("btn-sheet-tab-move-ok"));
   await flushAsyncTurns(14);
   assert.equal(layoutApi.imagesOf("시트 1 (2)").length, 1, "시트 복사본에 그림 복제");
   assert.equal(layoutApi.notesOf("시트 1 (2)").length, 2, "시트 복사본에 메모 복제");

@@ -253,7 +253,7 @@ test("a workbook whose structure is protected refuses sheet commands and its pas
   assert.equal(book.structure, true);
   assert.equal(isDigest(book.pwd), true);
   assert.equal(t.document.querySelector('[data-sheet-act="workbook-protect"] .md-label').textContent, "통합 문서 보호 해제");
-  const tabs = ["tab-insert", "tab-delete", "tab-copy", "tab-hide"];
+  const tabs = ["tab-insert", "tab-delete", "tab-move-copy", "tab-hide"];
   for (const name of tabs) {
     await t.act(name);
     assert.equal(t.status(), "통합 문서 보호", name);
@@ -990,7 +990,7 @@ test("checklist: row and column insert, delete, hide and group follow their own 
 test("checklist: with the structure protected every sheet tab command is refused or greyed out, by menu, tab menu and keyboard", async () => {
   const t = await open();
   t.guard.setWorkbook({ structure: true, windows: false });
-  for (const act of ["tab-insert", "tab-delete", "tab-rename", "tab-copy", "tab-left", "tab-right", "tab-hide", "tab-unhide", "tab-add"]) {
+  for (const act of ["tab-insert", "tab-delete", "tab-rename", "tab-move-copy", "tab-hide", "tab-unhide", "tab-add"]) {
     const before = JSON.stringify([...t.document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]")].map((b) => b.dataset.sheetTab));
     await t.act(act);
     assert.equal(JSON.stringify([...t.document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]")].map((b) => b.dataset.sheetTab)), before, act);

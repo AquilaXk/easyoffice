@@ -3,7 +3,7 @@
 
   // The right-click menu of a sheet tab (PD-208, PD-209): the commands of `sheet-tabs.js` on the
   // tab that was pressed. Shift+F10 and the menu key open it at the focused tab. A
-  // command that cannot run now (the last shown sheet cannot go, the first one cannot move left) is
+  // command that cannot run now (the last shown sheet cannot go) is
   // greyed out and skipped by the arrow keys.
 
   const MENU_MARGIN = 2;
@@ -23,10 +23,7 @@
       insert: (tabs, sheet) => tabs.insert(sheet),
       delete: (tabs, sheet) => tabs.remove(sheet),
       rename: (tabs, sheet) => ui.startRename(sheet),
-      copy: (tabs, sheet) => tabs.copy(sheet),
       "move-copy": (tabs, sheet) => tabs.movePlace(sheet),
-      "move-left": (tabs, sheet) => tabs.move(sheet, -1),
-      "move-right": (tabs, sheet) => tabs.move(sheet, 1),
       hide: (tabs, sheet) => tabs.hide(sheet),
       unhide: (tabs) => tabs.unhide(),
       "select-all": (tabs, sheet) => tabs.selectAll(sheet),
@@ -38,10 +35,7 @@
       insert: "insert",
       delete: "delete",
       rename: "rename",
-      copy: "copy",
       "move-copy": "moveCopy",
-      "move-left": "moveLeft",
-      "move-right": "moveRight",
       hide: "hide",
       unhide: "unhide",
       "select-all": "selectAll",

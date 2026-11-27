@@ -76,7 +76,7 @@
       { suffix: "layout-margins", title: "여백", shortcut: "⌥⌘G" },
     ],
     formulasAndData: [
-      { suffix: "data-autosum", title: "자동 합계 (SUM)", shortcut: "⇧⌘T" },
+      { suffix: "data-autosum", title: "자동 합계", shortcut: "⇧⌘T" },
       { suffix: "data-fn-browser", title: "함수 마법사", shortcut: "⇧F3" },
       { suffix: "data-sort", title: "오름차순·내림차순 정렬", shortcut: "⌃⌥S" },
       { suffix: "data-validation", title: "데이터 유효성 검사", shortcut: "⌥⌘V" },
@@ -90,7 +90,7 @@
     view: [
       { suffix: "view-split", title: "창 나누기", shortcut: "⌃⌘2" },
       { suffix: "view-ribbon", title: "리본 접기·펼치기", shortcut: "⌥⌘R" },
-      { suffix: "view-theme", title: "라이트·다크 테마 전환", shortcut: "⌃⌥D" },
+      { suffix: "view-theme", title: "밝게/어둡게 전환", shortcut: "⌃⌥D" },
       { suffix: "view-zoom", title: "100%", shortcut: "⌘0" },
     ],
   };

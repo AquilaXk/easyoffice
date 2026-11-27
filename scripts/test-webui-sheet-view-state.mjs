@@ -196,7 +196,11 @@ test("a renamed sheet keeps its view and a copy starts from its source's", async
   const store = h.host.__EASYOFFICE_SHEET_VIEW_STATE__;
   const t = h.tab("A");
   t.dispatchEvent({ type: "contextmenu", target: t, clientX: 40, clientY: 700 });
-  h.userClick(h.document.querySelector('#sheet-tab-menu [data-tab-act="copy"]'));
+  h.userClick(h.document.querySelector('#sheet-tab-menu [data-tab-act="move-copy"]'));
+  await flushAsyncTurns(40);
+  h.userClick([...h.document.querySelectorAll("#sheet-tab-move-list li")].find((r) => r.dataset.sheet === ""));
+  h.document.getElementById("sheet-tab-move-copy").checked = true;
+  h.userClick(h.document.getElementById("btn-sheet-tab-move-ok"));
   await flushAsyncTurns(40);
   assert.equal(h.active(), "A (2)");
   assert.equal(h.zoomLabel(), "150%", "the copy is shown as its source was left");

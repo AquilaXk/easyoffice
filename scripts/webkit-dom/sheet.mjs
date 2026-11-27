@@ -393,13 +393,21 @@ export const sheetSteps = [
       await page.click(td("A2"));
       await page.keyboard.press("Control+z");
     };
+    // 이동/복사 puts `name` before the tab `before` ("" for the end), then the formula sheet is shown again.
+    const placeBefore = async (name, before) => {
+      await tabMenu(name, "move-copy");
+      await page.click(`#sheet-tab-move-list li[data-sheet="${before}"]`);
+      await page.click("#btn-sheet-tab-move-ok");
+      await page.waitForFunction((n) => document.querySelector("#sheet-tab-bar .sheet-tab-btn.active")?.dataset.sheetTab === n, name);
+      await show("Sheet1");
+    };
     // Sheet2 after Sheet3 keeps the ends in order: the text stays and the span holds Sheet2 and Sheet4 (2 + 4).
-    await tabMenu("Sheet2", "move-right");
+    await placeBefore("Sheet2", "Sheet4");
     await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A1"]')?.textContent === "6");
     assert.deepEqual(await order(), ["Sheet1", "Sheet3", "Sheet2", "Sheet4"]);
     assert.equal(await formula(), "=SUM(Sheet2:Sheet4!A1)");
     // Sheet2 after Sheet4 reverses the ends of a span that held nothing between them: Sheet4 alone.
-    await tabMenu("Sheet2", "move-right");
+    await placeBefore("Sheet2", "");
     await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A1"]')?.dataset.formula === "=SUM(Sheet4!A1)");
     await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A1"]')?.textContent === "4");
     // One undo per move gives the order, the text and the shown sum of the span back.

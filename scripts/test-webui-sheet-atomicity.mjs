@@ -376,7 +376,7 @@ function createRibbonBackendMock() {
       return {
         commands: [
           { id: "sheet-home-bold", title: "굵게", shortcut: "Ctrl+B" },
-          { id: "sheet-data-autosum", title: "자동 합계 (SUM)", shortcut: "Alt+=" },
+          { id: "sheet-data-autosum", title: "자동 합계", shortcut: "Alt+=" },
           { id: "sheet-data-validation", title: "데이터 유효성 검사", shortcut: "Alt+V" },
           { id: "sheet-review-verify", title: "문서 구조 보안 검사", shortcut: "Ctrl+Shift+V" },
           { id: "sheet-review-stats", title: "문서 통계·글자 수", shortcut: "Ctrl+Shift+I" },
