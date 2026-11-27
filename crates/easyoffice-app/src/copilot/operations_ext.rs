@@ -469,10 +469,16 @@ pub(super) fn validate_extended_sheet_op(
             ) {
                 return None;
             }
+            let freeze_cols = opt_usize(obj, "freezeCols");
+            if freeze_cols.is_some_and(|cols| cols > 64) {
+                return None;
+            }
+            // 틀 고정에 행도 열도 주지 않으면 첫 행을 고정한다(0행 0열은 해제와 같아진다).
+            let default_index = usize::from(action == "freeze" && freeze_cols.is_none());
             let index = opt_usize(obj, "index")
                 .or_else(|| opt_usize(obj, "at"))
                 .or_else(|| opt_usize(obj, "freezeRows"))
-                .unwrap_or(0);
+                .unwrap_or(default_index);
             if index > 10_000 {
                 return None;
             }
@@ -485,6 +491,7 @@ pub(super) fn validate_extended_sheet_op(
                 action: action.to_string(),
                 index,
                 count,
+                freeze_cols,
             })
         }
         "sheet.note" => {
@@ -835,6 +842,50 @@ mod tests {
         let items =
             StrictJsonValue::parse(&format!(r#"[{{"name":"read_doc_blocks",{args}}}]"#)).unwrap();
         validate_tool_calls(&doc_request_with_unread_blocks(), items.as_array().unwrap())
+    }
+
+    fn structure_json(raw: &str) -> String {
+        let value = StrictJsonValue::parse(raw).unwrap();
+        let op = validate_extended_sheet_op("sheet.structure", value.as_object().unwrap(), "Sheet1")
+            .expect("a valid sheet.structure");
+        let mut out = String::new();
+        super::super::op_serialize::write_operation_json(&mut out, &op);
+        out
+    }
+
+    #[test]
+    fn a_freeze_keeps_its_columns_and_a_bare_freeze_is_not_an_unfreeze() {
+        assert_eq!(
+            structure_json(r#"{"action":"freeze","freezeRows":2,"freezeCols":1}"#),
+            r#"{"kind":"sheet.structure","sheet":"Sheet1","action":"freeze","index":2,"count":1,"freezeCols":1}"#
+        );
+        assert_eq!(
+            structure_json(r#"{"action":"freeze","freezeCols":3}"#),
+            r#"{"kind":"sheet.structure","sheet":"Sheet1","action":"freeze","index":0,"count":1,"freezeCols":3}"#,
+            "columns only: no rows are frozen and the columns still are"
+        );
+        assert_eq!(
+            structure_json(r#"{"action":"freeze"}"#),
+            r#"{"kind":"sheet.structure","sheet":"Sheet1","action":"freeze","index":1,"count":1}"#,
+            "no rows and no columns freezes the first row"
+        );
+        assert_eq!(
+            structure_json(r#"{"action":"unfreeze"}"#),
+            r#"{"kind":"sheet.structure","sheet":"Sheet1","action":"unfreeze","index":0,"count":1}"#
+        );
+        assert_eq!(
+            structure_json(r#"{"action":"insert_rows","at":2,"count":3}"#),
+            r#"{"kind":"sheet.structure","sheet":"Sheet1","action":"insert_rows","index":2,"count":3}"#
+        );
+    }
+
+    #[test]
+    fn a_freeze_over_the_column_limit_is_refused() {
+        let value = StrictJsonValue::parse(r#"{"action":"freeze","freezeCols":65}"#).unwrap();
+        assert!(
+            validate_extended_sheet_op("sheet.structure", value.as_object().unwrap(), "Sheet1")
+                .is_none()
+        );
     }
 
     #[test]

@@ -159,6 +159,8 @@ pub enum CopilotOperation {
         action: String,
         index: usize,
         count: usize,
+        /// 틀 고정의 열 수(`freezeCols`). 행 수는 `index`(`freezeRows`)다.
+        freeze_cols: Option<usize>,
     },
     SheetNote {
         sheet: String,

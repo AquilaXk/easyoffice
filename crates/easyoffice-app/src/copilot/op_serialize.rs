@@ -295,12 +295,17 @@ pub fn write_operation_json(out: &mut String, op: &CopilotOperation) {
             action,
             index,
             count,
+            freeze_cols,
         } => {
             out.push_str("{\"kind\":\"sheet.structure\",\"sheet\":");
             push_json_str(out, sheet);
             out.push_str(",\"action\":");
             push_json_str(out, action);
-            let _ = write!(out, ",\"index\":{index},\"count\":{count}}}");
+            let _ = write!(out, ",\"index\":{index},\"count\":{count}");
+            if let Some(cols) = freeze_cols {
+                let _ = write!(out, ",\"freezeCols\":{cols}");
+            }
+            out.push('}');
         }
         CopilotOperation::SheetNote { sheet, coord, text } => {
             out.push_str("{\"kind\":\"sheet.note\",\"sheet\":");

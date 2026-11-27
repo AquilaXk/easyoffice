@@ -407,7 +407,7 @@ pub fn write_sheet_context_with_budget(
     }
 
     let derived_range = if min_r <= max_r && min_c <= max_c {
-        format!("{}{min_r}:{}{max_c}", col_name(min_c), col_name(max_c))
+        format!("{}{min_r}:{}{max_r}", col_name(min_c), col_name(max_c))
     } else {
         "-".to_string()
     };
@@ -893,4 +893,33 @@ pub fn write_slide_context_with_budget(
         .ok_or_else(selection_too_large)?;
     push_omitted(out, slides.len().saturating_sub(tail), "슬라이드");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::context::SheetCellInput;
+    use super::*;
+
+    fn used_range_line(coords: &[&str]) -> String {
+        let sheet = SheetContext {
+            cells: coords
+                .iter()
+                .map(|coord| SheetCellInput {
+                    coord: (*coord).to_string(),
+                    raw: "1".to_string(),
+                    value: "1".to_string(),
+                })
+                .collect(),
+            ..SheetContext::default()
+        };
+        let mut out = String::new();
+        write_sheet_context(&mut out, &sheet, &SelectionContext::default());
+        out
+    }
+
+    #[test]
+    fn a_derived_used_range_ends_at_the_last_row_not_the_last_column() {
+        assert!(used_range_line(&["B2", "D5"]).contains("사용범위: B2:D5 "));
+        assert!(used_range_line(&["A1", "A9"]).contains("사용범위: A1:A9 "));
+    }
 }
