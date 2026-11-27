@@ -6504,3 +6504,18 @@
 - **Trade-offs** (1) 공식 호스트 목록 외 프록시 제공자에는 캐시·사용량 확장 필드를 넣지 않아 호환성 400 오류를 피한다. (2) 경량 보조 모델 자동 선택은 실제 조회한 모델 목록(`discoveredModels`) 안에서만 매핑해 미등록 모델 오호출을 막는다.
 - **Verified by** `crates/easyoffice-app/tests/copilot_commercial_opt_pd369.rs`, `scripts/test-webui-copilot-commercial-opt.mjs` 및 전체 11종 CI 게이트(`check-repo-hygiene.mjs`, `check-commit-messages.mjs`, `verify-licenses.mjs`, `check-hwp-studio-bundle.mjs`, `node --test scripts/test-*.mjs`, `cargo fmt --all -- --check`, `cargo clippy` workspace+desktop, `cargo test` workspace+desktop, `cargo run -p easyoffice-app -- --self-test`).
 - **Revisit when** 실시간 과금 계산 UI가 모델별 입력·출력·캐시 단가표를 필요로 할 때.
+
+## PD-370 — Node 시험의 CI 30분 초과 수정: 하니스 DOM 질의 비용 절감과 3샤드 병렬 (2026-11-27)
+
+- **Status** Implemented (QA 요청 2026-11-27). 브랜치 `ci/node-test-time`.
+- **Context** `checks` 잡의 "Run Node test suites with coverage" 단계가 `fc4c19fd`와 `ae9bcb1f`에서 연달아 30분 한도에 취소됐다. 같은 단계가 이전에는 약 18분이었다. 취소 시점에도 시험은 하나씩 통과하고 있었다(멈춤 아님).
+- **Decision (`PD-370`)**
+  1. **원인(측정, `docs/performance.md` 9절)**: 시험별 시간 합 5,311초를 벽시계 1,786초로 나누면 2.97이라 동시 3개 파일로 CPU가 꽉 찬 상태다. 시간의 99% 이상이 WebUI 하니스를 쓰는 `test-webui-*`에 퍼져 있고(상위 20개 파일이 43%), CPU 프로파일에서 그 85~90%가 하니스 DOM의 선택자 질의였다. `setTimeout` 대기·하니스 재적재·픽스처 반복 생성은 주된 원인이 아니다.
+  2. **하니스 DOM(`scripts/webui-dom-harness.mjs`, `scripts/webui-css-selector.mjs`)**: `querySelector`는 첫 일치에서 멈춘다. 선택자 목록은 질의마다 한 번만 찾고 클래스 토큰 집합은 같은 문자열끼리 공유한다. 질의 결과는 루트·선택자별로 기억한다. 기억한 결과는 문서 안 요소의 부모가 바뀌거나 그 선택자가 읽는 속성 값이 바뀔 때만 버린다. 일치 규칙은 그대로이고 시험 파일의 단언은 바꾸지 않았다.
+  3. **CI 구조(`.github/workflows/ci.yml`)**: Node 시험을 `checks`에서 빼 `node-tests` 잡 3개로 나눈다(`--test-shard=i/3`, `fail-fast: false`, 샤드마다 `js-coverage-lcov-i` 아티팩트). `checks`는 위생 가드·커밋 메시지 검사·핀 검증만 남는다. `sonar`는 `needs: [checks, checks-rust, node-tests]`이고 세 보고서를 `scripts/merge-lcov.mjs`로 `coverage/js.lcov` 하나로 합친다. 줄 적중은 합산한다. 분기는 같은 줄의 블록을 줄 안 순서로 짝지어 합산한다. 함수 줄(`FN`·`FNDA`)은 뺀다.
+  4. **한도**: `node-tests` 20분(샤드 예상 약 8분의 2.5배), `checks` 30분에서 15분(예상 약 3분)으로 줄였다. 예상은 모두 `[추정]`이다.
+- **실측** 로컬 Node 22, 커버리지·동시성 3, 전체 시험: 8분 47초(사용자 CPU 1,549초)에서 4분 06초(757초)로 약 2.1배 빨라졌다. CI 단일 잡 약 31분이 약 15분으로, 3샤드에서는 샤드당 약 8분으로 본다 `[추정]`. 로컬 샤드 시간은 76·109·64초였다. 병합 보고서는 단일 실행 보고서와 소스 파일 252개·줄 수 97,730이 같다. 적중 줄은 -0.1%, 분기는 +1.9%, 적중 분기는 -0.6%다.
+- **Why** 연속 두 번 막힌 비결정적 실패는 바로 고친다는 규칙에 따라 30분 한도를 올리는 대신 시험이 쓰는 CPU를 절반으로 줄였다. 러너 속도가 1.7배 흔들려도 한도 안에 들도록 병렬로도 나눴다.
+- **Trade-offs** (1) 질의 결과 기억은 하니스 DOM의 변경 경로(속성 `Map`, 부모 대입)에 걸려 있어 새 변경 경로를 하니스에 더하면 무효화도 함께 넣어야 한다. 이를 `scripts/test-webui-dom-query-cache.mjs`가 변경 종류별·난수 변경으로 잡는다. (2) 샤드 병합 보고서의 분기·적중 수는 단일 실행과 2% 안에서 다르고 함수 통계가 없다. 정적 분석은 줄 적중과 분기만 읽는다. (3) 러너를 3대 쓰므로 CI 분이 늘지만 벽시계 피드백은 짧아진다.
+- **Verified by** `scripts/test-webui-dom-query-cache.mjs`, `scripts/test-merge-lcov.mjs`, `scripts/test-workflow-refs.mjs`, 전체 `node --test`(0 실패), `actionlint`, `check-repo-hygiene.mjs`.
+- **Revisit when** 샤드 시간 편차(로컬 64~109초)가 커져 가장 무거운 샤드가 한도의 절반을 넘을 때(샤드를 4개로 늘리거나 파일 시간 기반 배분), 또는 분기 병합 오차가 정적 분석 결과에 영향을 줄 때.

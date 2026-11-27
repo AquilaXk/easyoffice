@@ -63,7 +63,7 @@ EasyOffice/
     ├── release.yml                                # GitHub Release 노트 자동 분류 설정
     ├── actions/                                   # 공용 복합 액션 (assert-sha, setup-node-ci, setup-rust, prepare-desktop-build, install-linux-deps, cache-tauri-tools)
     └── workflows/
-        ├── ci.yml                                 # 병렬 checks/checks-rust + sonar + webkit-dom(WebKit 캐시) + verify(macOS)/verify-linux/verify-windows (PR 읽기 전용 캐시)
+        ├── ci.yml                                 # 병렬 checks/node-tests(3샤드)/checks-rust + sonar + webkit-dom(WebKit 캐시) + verify(macOS)/verify-linux/verify-windows (PR 읽기 전용 캐시)
         ├── release.yml                            # assert-sha·아키텍처별 macOS(.dmg)/Windows(NSIS)/Linux(.AppImage/.deb/.rpm) 서명 릴리스 + post-release-check + release-timings
         ├── latest-guard.yml                       # /releases/latest 포인터와 최고 안정 태그·자산·매니페스트 일치 검사
         └── dependency-audit.yml                   # npm audit(high 이상 게이트) 및 Cargo.lock/Quick Look lockfile 취약점 감사
