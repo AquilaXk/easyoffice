@@ -384,7 +384,9 @@
       });
     }
 
-    function executeSheetWrite(op, map, sheetName, locations) {
+    // `formulaRefs` collects the cells that got a formula: in manual calculation mode the formulas that are new are
+    // calculated at once, as for a formula typed, pasted or filled.
+    function executeSheetWrite(op, map, sheetName, locations, formulaRefs) {
       const cells = Array.isArray(op.cells) ? op.cells : [];
       if (cells.length === 0 || cells.length > MAX_WRITE_CELLS) {
         throw new Error("시트 쓰기 셀 개수가 허용 범위를 벗어났습니다.");
@@ -415,6 +417,7 @@
           if (t) nextEntry.t = t;
         }
         map[ref] = nextEntry;
+        if (isFormula) formulaRefs?.add(ref);
         applyCellStyleFields(map, ref, item);
         if (parts.row > (sheetRowCounts[sheetName] || 12)) sheetRowCounts[sheetName] = parts.row;
         minR = Math.min(minR, parts.row);
@@ -474,14 +477,14 @@
       locations.push({ module: "SHEET", label, sheet: sheetName, range: created.dataRange });
     }
 
-    async function flushSheetEvaluationAndFormats(sheetName) {
+    async function flushSheetEvaluationAndFormats(sheetName, formulaRefs = []) {
       const sc = getSheetController();
       if (!sc) return;
       if (sheetName && sheetName !== getActiveSheetName() && sheetDataStore[sheetName]) {
         await sc.switchSheetTab?.(sheetName);
       }
       sc.restoreDomSheetCells(sheetName);
-      await sc.recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
+      await sc.recalculateActiveSheetFormulas({ updateFocusedDisplay: true, editedRefs: formulaRefs });
       const map = sheetDataStore[sheetName] || {};
       const byCode = new Map();
       for (const ref of Object.keys(map)) {
@@ -751,6 +754,7 @@
       const startEpoch = getHistoryMutationEpoch?.();
       const derivedLocations = [];
       let touchedSheet = null;
+      const writtenFormulas = new Map();
       let touchedDoc = false;
       let focusSlideIdx = null;
       let touchedBaseOrBoard = false;
@@ -773,7 +777,10 @@
                 sheetDataStore[sheetName] = Object.create(null);
               }
               touchedSheet = op.destSheet ? String(op.destSheet) : sheetName;
-              if (kind === "sheet.write") executeSheetWrite(op, sheetDataStore[sheetName], sheetName, derivedLocations);
+              if (kind === "sheet.write") {
+                if (!writtenFormulas.has(sheetName)) writtenFormulas.set(sheetName, new Set());
+                executeSheetWrite(op, sheetDataStore[sheetName], sheetName, derivedLocations, writtenFormulas.get(sheetName));
+              }
               else if (kind === "sheet.format") executeSheetFormat(op, sheetDataStore[sheetName], sheetName, derivedLocations);
               else if (kind === "sheet.chart") executeSheetChart(op, sheetName, derivedLocations);
               else sheetOps.executeExtendedSheetOp(kind, op, { sheetName, sheetDataStore, sheetRowCounts, locations: derivedLocations });
@@ -787,7 +794,7 @@
           }
         }
 
-        if (touchedSheet) await flushSheetEvaluationAndFormats(touchedSheet);
+        if (touchedSheet) await flushSheetEvaluationAndFormats(touchedSheet, [...(writtenFormulas.get(touchedSheet) || [])]);
         if (touchedDoc) {
           host.__EASYOFFICE_DOC_NOTES_API__?.syncAll?.();
           const panels = getWorkspacePanels();
