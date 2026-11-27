@@ -180,7 +180,7 @@ test("기본값으로 설정 asks once and makes the font and size the document'
 test("the items the engine does not keep yet are visible and off", async () => {
   const h = await createRunHarness([p("가나다")]);
   await openDialog(h, "font");
-  for (const id of ["doc-font-latin", "btn-doc-font-effects"]) {
+  for (const id of ["btn-doc-font-effects"]) {
     assert.equal(byId(h, id).disabled, true, id);
   }
 });

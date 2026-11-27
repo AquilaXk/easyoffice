@@ -34,7 +34,7 @@ test("고급 tab lists 배율, 위치 (표준·올림·내림) and 글꼴 커닝
   const h = await createRunHarness([p("가나다")]);
   await openDialog(h, h.blocks[0]);
   assert.equal(byId(h, "doc-font-scale").value, "100%", "text without a scale shows 100 % with the unit in the field");
-  assert.deepEqual([...byId(h, "doc-font-position-kind").querySelectorAll("option")].map((o) => o.textContent), ["표준", "올림", "내림"]);
+  assert.deepEqual([...byId(h, "doc-font-position-kind").querySelectorAll("option")].map((o) => o.textContent), ["표준", "글자 위치 올림", "글자 위치 내림"]);
   assert.equal(byId(h, "doc-font-position-value").disabled, true, "표준 takes no value");
   assert.equal(byId(h, "doc-font-kerning").checked, false);
   assert.equal(byId(h, "doc-font-kerning-value").disabled, true, "kerning off takes no size");

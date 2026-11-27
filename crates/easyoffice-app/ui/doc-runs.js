@@ -12,7 +12,7 @@
   const RUN_CLASS = "eo-run";
   const BOOL_PROPS = ["bold", "italic", "underline", "strike", "superscript", "subscript"];
   const BOOL_PROP_SET = new Set(BOOL_PROPS);
-  const VALUE_PROPS = ["size", "font", "face", "color", "highlight", "spacing", "scale", "position", "kerning", "opentype", "nogrid", "textfx", "ucolor"];
+  const VALUE_PROPS = ["size", "font", "eastfont", "face", "color", "highlight", "spacing", "scale", "position", "kerning", "opentype", "nogrid", "textfx", "ucolor"];
   const PROPS = [...VALUE_PROPS, ...BOOL_PROPS];
   // Letter spacing (`spacing`): twips added after each character, either way up to 1,584 pt (PD-367).
   const MAX_SPACING_TWIPS = 31680;
@@ -26,7 +26,7 @@
   const ADVANCED_RANGE = { scale: [1, 600], position: [-3168, 3168], kerning: [1, 3276], opentype: [1, 2 ** 29 - 1], nogrid: [1, 1], textfx: [1, 2 ** 12 - 1] };
   const TWIPS_PER_PX = 15;
   const DATA_KEY = {
-    size: "eoSize", font: "eoFont", face: "eoFace", color: "eoColor", highlight: "eoHighlight", spacing: "eoSpacing",
+    size: "eoSize", font: "eoFont", eastfont: "eoEastfont", face: "eoFace", color: "eoColor", highlight: "eoHighlight", spacing: "eoSpacing",
     scale: "eoScale", position: "eoPosition", kerning: "eoKerning", opentype: "eoOpentype", nogrid: "eoNogrid", textfx: "eoTextfx", ucolor: "eoUcolor",
     bold: "eoBold", italic: "eoItalic", underline: "eoUnderline", strike: "eoStrike",
     superscript: "eoSuperscript", subscript: "eoSubscript",
@@ -103,7 +103,7 @@
       return Number.isInteger(n) && Math.abs(n) <= MAX_SPACING_TWIPS ? n : undefined;
     }
     if (ADVANCED_RANGE[prop]) return advancedValue(prop, value);
-    if (prop === "font") return normalizeFont(value) ?? undefined;
+    if (prop === "font" || prop === "eastfont") return normalizeFont(value) ?? undefined;
     if (prop === "face") return FACE_RE.test(String(value)) ? String(value) : undefined;
     if (prop === "color" || prop === "highlight" || prop === "ucolor") return normalizeColor(value) ?? undefined;
     return undefined;
@@ -119,6 +119,8 @@
       out[prop] = v;
       any = true;
     });
+    // A font named without the East Asian one is for both (the style bar's font list, a pasted font); the 글꼴 dialog names both.
+    if (Object.hasOwn(out, "font") && !Object.hasOwn(out, "eastfont")) out.eastfont = null;
     if (out.superscript === true && !Object.hasOwn(out, "subscript")) out.subscript = null;
     if (out.subscript === true && !Object.hasOwn(out, "superscript")) out.superscript = null;
     return any ? out : null;
@@ -145,6 +147,8 @@
     });
     const font = el.dataset[DATA_KEY.font];
     if (font && FONT_RE.test(font)) fmt.font = font;
+    const eastFont = el.dataset[DATA_KEY.eastfont];
+    if (eastFont && FONT_RE.test(eastFont)) fmt.eastfont = eastFont;
     const face = el.dataset[DATA_KEY.face];
     if (face && FACE_RE.test(face)) fmt.face = face;
     ["color", "highlight", "ucolor"].forEach((p) => {
@@ -201,7 +205,7 @@
 
   // The face (PostScript name) first, so a machine that matches fonts by it draws the variant; the font name after it.
   function familyToCss(fmt) {
-    return [fmt.face, fmt.font].filter(Boolean).map((name) => '"' + name + '"').join(", ");
+    return [fmt.face, fmt.font, fmt.eastfont].filter(Boolean).map((name) => '"' + name + '"').join(", ");
   }
 
   function spacingToCss(twips) {
@@ -284,7 +288,7 @@
   // bold, italic, underline, strike, script}); invalid values are dropped.
   function fromModelRun(run) {
     const patch = normalizePatch({
-      size: run?.sizeHalfPt, spacing: run?.letterSpacingTwips, scale: run?.scalePercent, position: run?.positionHalfPt, kerning: run?.kerningHalfPt, opentype: run?.openType, nogrid: run?.snapToGrid === false ? 1 : undefined, textfx: run?.textFx, ucolor: run?.underlineColor, font: run?.font, face: run?.fontFace, color: run?.color, highlight: run?.highlight,
+      size: run?.sizeHalfPt, spacing: run?.letterSpacingTwips, scale: run?.scalePercent, position: run?.positionHalfPt, kerning: run?.kerningHalfPt, opentype: run?.openType, nogrid: run?.snapToGrid === false ? 1 : undefined, textfx: run?.textFx, ucolor: run?.underlineColor, font: run?.font, eastfont: run?.fontEastAsia, face: run?.fontFace, color: run?.color, highlight: run?.highlight,
       bold: run?.bold === true ? true : undefined, italic: run?.italic === true ? true : undefined,
       underline: run?.underline === true ? true : undefined, strike: run?.strike === true ? true : undefined,
       superscript: run?.superscript === true || run?.script === "superscript" ? true : undefined,
@@ -597,6 +601,7 @@
       (a.textfx || 0) === (b.textfx || 0) &&
       (a.ucolor || "") === (b.ucolor || "") &&
       (a.font || "") === (b.font || "") &&
+      (a.eastfont || "") === (b.eastfont || "") &&
       (a.face || "") === (b.face || "") &&
       (a.color || "") === (b.color || "") &&
       (a.highlight || "") === (b.highlight || "")

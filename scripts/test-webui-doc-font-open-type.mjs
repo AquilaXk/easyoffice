@@ -37,7 +37,7 @@ test("the OpenType group lists the official choices", async () => {
   assert.deepEqual(texts("doc-font-num-form"), ["기본", "기준선 맞춤", "기존 스타일 맞춤"]);
   assert.deepEqual(texts("doc-font-style-set"), ["기본", ...Array.from({ length: 20 }, (_, i) => String(i + 1))]);
   const labels = [...h.document.querySelectorAll("#doc-font-pane-advanced label")].map((l) => l.textContent.trim());
-  for (const label of ["합자(L):", "숫자 간격(M):", "숫자 형식(F):", "스타일 세트(T):", "상황별 대체 사용(A)", "문서 눈금이 지정되어 있으면 줄 눈금에 맞춤(W)"]) {
+  for (const label of ["합자(L):", "숫자 간격(M):", "숫자 양식(F):", "스타일 모음(T):", "상황별 대체 사용(A)", "문서 눈금이 지정되어 있으면 줄 눈금에 맞춤(W)"]) {
     assert.ok(labels.includes(label), `${label} in ${labels}`);
   }
   assert.equal(byId(h, "doc-font-grid").checked, true, "a run snaps to the grid unless it says otherwise");

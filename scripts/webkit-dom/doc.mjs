@@ -211,6 +211,8 @@ export const docSteps = [
     await page.check("#doc-font-dstrike");
     await page.check("#doc-font-allcaps");
     await page.selectOption("#doc-font-emphasis", "3");
+    await page.selectOption("#doc-font-latin", "Pretendard");
+    await page.selectOption("#doc-font-family", "바탕");
     await page.click("#btn-doc-font-apply");
     await page.waitForSelector(`${EDITOR} .eo-run`);
     const style = await page.$eval(`${EDITOR} .eo-run`, (el) => {
@@ -233,5 +235,7 @@ export const docSteps = [
     assert.equal(hit.underlineColor, "0000FF");
     assert.equal(hit.color, "FF0000");
     assert.equal(hit.sizeHalfPt, 24);
+    assert.deepEqual([hit.font, hit.fontEastAsia], ["Pretendard", "바탕"], "영어 글꼴 and 한글 글꼴 are two run values");
+    assert.equal(await page.$eval(`${EDITOR} .eo-run`, (el) => el.style.fontFamily.replaceAll('"', "")), "Pretendard, 바탕", "Latin first, then East Asian");
   }],
 ];

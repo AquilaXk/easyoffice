@@ -120,6 +120,10 @@ test("changing the font of a run that has a variant drops the variant (PD-368)",
   family.appendChild(option);
   family.value = "Arial";
   fire(family);
+  const latin = byId(h, "doc-font-latin");
+  latin.appendChild(option.cloneNode(true));
+  latin.value = "Arial";
+  fire(latin);
   h.userClick(byId(h, "btn-doc-font-apply"));
   assert.equal(run().dataset.eoFont, "Arial");
   assert.equal(run().dataset.eoFace, undefined, "the old face is gone");

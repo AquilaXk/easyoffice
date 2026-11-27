@@ -25,15 +25,15 @@
 
   // Sets the default font and size of the document in `root` (a missing `font` or `sizeHalfPt` keeps the current one): the
   // defaults the save sends, and the font and size an unstyled paragraph draws with.
-  function setDefaults(root, { font, sizeHalfPt }) {
+  function setDefaults(root, { font, eastFont, sizeHalfPt }) {
     const pack = host.__EASYOFFICE_SAVE_PAYLOAD__;
     const next = { ...currentDefaults(root) };
-    if (font) Object.assign(next, { font, eastAsianFont: font });
+    if (font) Object.assign(next, { font, eastAsianFont: eastFont || font });
     if (Number.isInteger(sizeHalfPt)) next.sizeHalfPoints = sizeHalfPt;
     const packed = pack?.packDocDefaults?.(next);
     if (!packed) return false;
     root.dataset.eoDefaults = packed;
-    root.style.fontFamily = `"${next.font}"`;
+    root.style.fontFamily = [next.font, next.eastAsianFont].filter((f, i, all) => f && all.indexOf(f) === i).map((f) => `"${f}"`).join(", ");
     root.style.fontSize = `${next.sizeHalfPoints / 2}pt`;
     const EventCtor = host.Event;
     if (typeof EventCtor === "function") root.dispatchEvent(new EventCtor("eo-doc-mutated", { bubbles: true }));

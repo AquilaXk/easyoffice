@@ -184,18 +184,43 @@
 .tool-dialog .dialog-group { border: 1px solid var(--color-border); border-radius: var(--radius-sm); margin: 0 0 6px; padding: 6px 8px 8px; min-width: 0; }
 .tool-dialog .dialog-group legend { font-size: var(--font-size-sm); font-weight: bold; color: var(--color-text); padding: 0 4px; }
 /* Label, field, label, field: the rows of a group line up in four columns (Word's 간격 [표준] 값 [ ] pairs). */
-.tool-dialog .dialog-grid { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px 8px; }
+/* A fixed four-column grid: the label, its combo (150px), the value label right after it and the value field (96px). */
+.tool-dialog .dialog-grid { display: grid; grid-template-columns: auto 150px auto 96px; justify-content: start; align-items: center; gap: 6px 8px; }
 .tool-dialog .dialog-grid > .dialog-label { text-align: left; white-space: nowrap; }
-.tool-dialog .dialog-grid > .custom-select.dialog-select { justify-self: start; }
-.tool-dialog .dialog-grid > .dialog-field, .tool-dialog .dialog-grid > .dialog-combo { width: 96px; }
+.tool-dialog .dialog-grid > .custom-select.dialog-select { justify-self: stretch; }
+.tool-dialog .dialog-grid .custom-select-trigger { width: 100%; box-sizing: border-box; }
+.tool-dialog .dialog-grid > .dialog-field, .tool-dialog .dialog-grid > .dialog-combo { width: 100%; }
 .tool-dialog .dialog-grid .dialog-combo .dialog-field { width: 100%; }
-.tool-dialog .dialog-grid-wide { grid-template-columns: auto minmax(0, 1fr); }
+.tool-dialog .dialog-grid-wide { grid-template-columns: auto 190px; }
+.tool-dialog .dialog-inline-row .dialog-field { width: 96px; flex: none; }
 /* The 글꼴 tab: font, style and size share one row of labels over their fields (list boxes), then the label/field pairs, then the 효과 group in two columns. */
-#doc-font-dialog .dialog-font-top { display: grid; grid-template-columns: minmax(0, 1fr) 128px 72px; align-items: start; gap: 2px 8px; margin-bottom: 8px; }
+#doc-font-dialog .dialog-font-top { display: grid; grid-template-columns: minmax(0, 1fr) 128px 72px; grid-template-rows: auto auto auto auto 1fr; grid-template-areas: "fl sl zl" "ff sf zf" "el sf zf" "ef sf zf" ". sf zf"; align-items: start; gap: 2px 8px; margin-bottom: 8px; }
 #doc-font-dialog .dialog-font-top > .dialog-label { text-align: left; }
 #doc-font-dialog .dialog-font-top > .custom-select { justify-self: stretch; }
 #doc-font-dialog .dialog-font-top .dialog-combo, #doc-font-dialog .dialog-font-top .dialog-field { width: 100%; }
-#doc-font-dialog .dialog-font-rows { margin-bottom: 8px; }
+#doc-font-dialog .dialog-font-top label[for="doc-font-family"] { grid-area: fl; }
+#doc-font-dialog .dialog-font-top label[for="doc-font-style"] { grid-area: sl; }
+#doc-font-dialog .dialog-font-top label[for="doc-font-size"] { grid-area: zl; }
+#doc-font-dialog .dialog-font-top label[for="doc-font-latin"] { grid-area: el; margin-top: 6px; }
+#doc-font-dialog .dialog-font-top .custom-select[data-select-id="doc-font-family"] { grid-area: ff; }
+#doc-font-dialog .dialog-font-top .custom-select[data-select-id="doc-font-latin"] { grid-area: ef; }
+#doc-font-dialog .dialog-font-top .dialog-combo:has(#doc-font-style) { grid-area: sf; }
+#doc-font-dialog .dialog-font-top .dialog-combo:has(#doc-font-size) { grid-area: zf; }
+/* 글꼴 색, 밑줄 스타일 and 밑줄 색 are three columns with the label over each control; 강조점 is the row below. */
+#doc-font-dialog .dialog-font-colors { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "cl ul uc" "ch us uh" "el . ." "es . ."; gap: 2px 8px; margin-bottom: 8px; align-items: start; }
+#doc-font-dialog .dialog-font-colors > .dialog-label { text-align: left; }
+#doc-font-dialog .dialog-font-colors label[for="doc-font-color"] { grid-area: cl; }
+#doc-font-dialog .dialog-font-colors label[for="doc-font-underline-style"] { grid-area: ul; }
+#doc-font-dialog .dialog-font-colors label[for="doc-font-underline-color"] { grid-area: uc; }
+#doc-font-dialog .dialog-font-colors label[for="doc-font-emphasis"] { grid-area: el; margin-top: 6px; }
+#doc-font-dialog .dialog-font-colors #doc-font-color-host { grid-area: ch; }
+#doc-font-dialog .dialog-font-colors #doc-font-underline-color-host { grid-area: uh; }
+#doc-font-dialog .dialog-font-colors .custom-select[data-select-id="doc-font-underline-style"] { grid-area: us; }
+#doc-font-dialog .dialog-font-colors .custom-select[data-select-id="doc-font-emphasis"] { grid-area: es; }
+#doc-font-dialog .dialog-font-colors > .custom-select, #doc-font-dialog .dialog-font-colors > .dialog-color-host { justify-self: stretch; }
+#doc-font-dialog .dialog-font-colors .custom-select-trigger, #doc-font-dialog .dialog-font-colors .dialog-swatch { width: 100%; box-sizing: border-box; }
+#doc-font-dialog .dialog-font-colors .dialog-swatch { justify-content: flex-start; }
+#doc-font-dialog .dialog-font-colors .dialog-swatch > :last-child { margin-left: auto; }
 #doc-font-dialog .dialog-effects { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
 /* The font dialog's footer: 기본값으로 설정 and 텍스트 효과 on the left, 확인 and 취소 on the right. */
 #doc-font-dialog .dialog-footer-split { display: flex; align-items: center; gap: 8px; }

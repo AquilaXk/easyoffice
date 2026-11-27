@@ -13,9 +13,9 @@
   const TABLE_FUNCS = new Set(["SUM", "AVERAGE", "COUNT", "MAX", "MIN", "PRODUCT"]);
   const TABLE_DIRS = new Set(["ABOVE", "BELOW", "LEFT", "RIGHT"]);
   const BOOL_KEYS = ["bold", "italic", "underline", "strike"];
-  const VALUE_KEYS = ["size", "spacing", "scale", "position", "kerning", "opentype", "nogrid", "textfx", "ucolor", "font", "face", "color", "highlight"];
+  const VALUE_KEYS = ["size", "spacing", "scale", "position", "kerning", "opentype", "nogrid", "textfx", "ucolor", "font", "eastfont", "face", "color", "highlight"];
   // Run fields of the structured payload (PD-077): `size` is sent as `sizeHalfPt`, `face` (the variant, PD-368) as `fontFace`; PD-372 adds scale/position/kerning, PD-374 `openType` and `nogrid` (sent as `snapToGrid: false`).
-  const RUN_FIELDS = { size: "sizeHalfPt", spacing: "letterSpacingTwips", scale: "scalePercent", position: "positionHalfPt", kerning: "kerningHalfPt", opentype: "openType", nogrid: "snapToGrid", textfx: "textFx", ucolor: "underlineColor", font: "font", face: "fontFace", color: "color", highlight: "highlight" };
+  const RUN_FIELDS = { size: "sizeHalfPt", spacing: "letterSpacingTwips", scale: "scalePercent", position: "positionHalfPt", kerning: "kerningHalfPt", opentype: "openType", nogrid: "snapToGrid", textfx: "textFx", ucolor: "underlineColor", font: "font", eastfont: "fontEastAsia", face: "fontFace", color: "color", highlight: "highlight" };
   const SCRIPT_TAGS = { SUP: "superscript", SUB: "subscript" };
   const LAYOUT_TAGS = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "ASIDE"]);
   const TWIPS_PER_PX = 15; // 1 px = 3/4 pt = 15 twips
@@ -425,7 +425,7 @@
         !a._keepEmpty &&
         runFlags(a) === runFlags(b) &&
         a.sizeHalfPt === b.size && a.letterSpacingTwips === b.spacing && a.scalePercent === b.scale && a.positionHalfPt === b.position && a.kerningHalfPt === b.kerning && a.openType === b.opentype && (a.snapToGrid === false) === Boolean(b.nogrid) && a.textFx === b.textfx && a.underlineColor === b.ucolor &&
-        a.font === b.font && a.fontFace === b.face &&
+        a.font === b.font && a.fontEastAsia === b.eastfont && a.fontFace === b.face &&
         a.color === b.color &&
         a.highlight === b.highlight &&
         a.link === b.link &&

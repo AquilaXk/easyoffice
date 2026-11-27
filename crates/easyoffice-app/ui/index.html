@@ -1635,10 +1635,10 @@
             <select id="doc-font-family" class="sb-combo dialog-select" data-accesskey="t"></select>
             <input id="doc-font-style" class="dialog-input dialog-field" type="text" data-accesskey="y" data-list="보통,기울임꼴,굵게,굵게 기울임꼴" />
             <input id="doc-font-size" class="dialog-input dialog-field" type="text" inputmode="decimal" data-accesskey="s" data-list="8,9,10,10.5,11,12,14,16,18,20,22,24,26,28,36,48,72" />
-          </div>
-          <div class="dialog-grid dialog-font-rows">
             <label class="dialog-label" for="doc-font-latin">영어 글꼴(<span class="dialog-key">F</span>):</label>
-            <select id="doc-font-latin" class="sb-combo dialog-select" data-accesskey="f" data-pending></select>
+            <select id="doc-font-latin" class="sb-combo dialog-select" data-accesskey="f"></select>
+          </div>
+          <div class="dialog-font-colors">
             <label class="dialog-label" for="doc-font-color">글꼴 색(<span class="dialog-key">C</span>):</label>
             <div id="doc-font-color-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle data-accesskey="c" aria-haspopup="true" aria-expanded="false" title="글꼴 색" aria-label="글꼴 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span class="dialog-swatch-text">자동</span><span aria-hidden="true">▾</span></button><input id="doc-font-color" type="color" value="#000000" aria-label="글꼴 색" /><div id="doc-font-color-palette" class="sb-hl-palette" hidden></div></div>
             <label class="dialog-label" for="doc-font-underline-style">밑줄 스타일(<span class="dialog-key">U</span>):</label>
@@ -1692,8 +1692,8 @@
               <label class="dialog-label" for="doc-font-position-kind">위치(<span class="dialog-key">P</span>):</label>
               <select id="doc-font-position-kind" class="sb-combo dialog-select" data-accesskey="p">
                 <option value="normal">표준</option>
-                <option value="raised">올림</option>
-                <option value="lowered">내림</option>
+                <option value="raised">글자 위치 올림</option>
+                <option value="lowered">글자 위치 내림</option>
               </select>
               <label class="dialog-label" for="doc-font-position-value">값(<span class="dialog-key">Y</span>):</label>
               <input id="doc-font-position-value" class="dialog-input dialog-field" type="text" data-accesskey="y" data-unit="pt" />
@@ -1724,13 +1724,13 @@
                 <option value="1">비례</option>
                 <option value="2">표 형식</option>
               </select>
-              <label class="dialog-label" for="doc-font-num-form">숫자 형식(<span class="dialog-key">F</span>):</label>
+              <label class="dialog-label" for="doc-font-num-form">숫자 양식(<span class="dialog-key">F</span>):</label>
               <select id="doc-font-num-form" class="sb-combo dialog-select" data-accesskey="f">
                 <option value="0">기본</option>
                 <option value="1">기준선 맞춤</option>
                 <option value="2">기존 스타일 맞춤</option>
               </select>
-              <label class="dialog-label" for="doc-font-style-set">스타일 세트(<span class="dialog-key">T</span>):</label>
+              <label class="dialog-label" for="doc-font-style-set">스타일 모음(<span class="dialog-key">T</span>):</label>
               <select id="doc-font-style-set" class="sb-combo dialog-select" data-accesskey="t">
                 <option value="0">기본</option>
                 <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>

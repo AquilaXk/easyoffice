@@ -170,7 +170,7 @@
   function open(runs, document) {
     const byId = (id) => document.getElementById(id);
     const els = {
-      dialog: byId("doc-font-dialog"), family: byId("doc-font-family"), style: byId("doc-font-style"), size: byId("doc-font-size"),
+      dialog: byId("doc-font-dialog"), family: byId("doc-font-family"), latin: byId("doc-font-latin"), style: byId("doc-font-style"), size: byId("doc-font-size"),
       strike: byId("doc-font-strike"), sup: byId("doc-font-sup"), sub: byId("doc-font-sub"),
       scale: byId("doc-font-scale"),
       kind: byId("doc-font-spacing-kind"), value: byId("doc-font-spacing-value"),
@@ -235,7 +235,7 @@
       const style = STYLE_OF[styleOfText(els.style.value)] || STYLE_OF.regular;
       const pt = Number.parseFloat(els.size.value);
       const css = els.sample.style;
-      css.fontFamily = els.family.value ? `"${els.family.value}", sans-serif` : "";
+      css.fontFamily = [els.latin.value, els.family.value].filter(Boolean).map((f) => `"${f}"`).concat("sans-serif").join(", ");
       css.fontWeight = style.bold ? "700" : "400";
       css.fontStyle = style.italic ? "italic" : "normal";
       css.fontSize = Number.isFinite(pt) ? `${Math.min(SAMPLE_MAX_PX, Math.max(8, pt * (4 / 3)))}px` : "";
@@ -258,24 +258,30 @@
     };
 
     // The font list is the style bar's, so the dialog offers what the bar does.
-    els.family.replaceChildren();
-    for (const o of Array.from(byId("doc-font-select")?.options || [])) {
-      const opt = document.createElement("option");
-      opt.value = o.value;
-      opt.textContent = o.textContent;
-      els.family.appendChild(opt);
+    // 한글 글꼴 is the East Asian face (the Latin one when the run names no other) and 영어 글꼴 the Latin one (PD-374).
+    const named = (v) => (typeof v === "string" && v !== MIXED ? v : "");
+    const latin = named(state.font);
+    const family = state.eastfont === MIXED ? "" : named(state.eastfont) || latin;
+    for (const [select, value] of [[els.family, family], [els.latin, latin]]) {
+      select.replaceChildren();
+      for (const o of Array.from(byId("doc-font-select")?.options || [])) {
+        const opt = document.createElement("option");
+        opt.value = o.value;
+        opt.textContent = o.textContent;
+        select.appendChild(opt);
+      }
+      if (value && !Array.from(select.querySelectorAll("option")).some((o) => o.value === value)) {
+        const opt = document.createElement("option");
+        opt.value = value;
+        opt.textContent = value;
+        select.appendChild(opt);
+      }
+      select.value = value;
     }
-    const family = typeof state.font === "string" && state.font !== MIXED ? state.font : "";
-    if (family && !Array.from(els.family.querySelectorAll("option")).some((o) => o.value === family)) {
-      const opt = document.createElement("option");
-      opt.value = family;
-      opt.textContent = family;
-      els.family.appendChild(opt);
-    }
-    els.family.value = family;
     const integer = (v) => (Number.isInteger(v) ? v : null);
     const initial = {
       family: els.family.value,
+      latin: els.latin.value,
       style: state.bold === MIXED || state.italic === MIXED ? "" : styleKey(state.bold === true, state.italic === true),
       size: Number.isInteger(state.size) ? String(state.size / 2) : "",
       strike: state.strike === true, sup: state.superscript === true, sub: state.subscript === true,
@@ -341,7 +347,7 @@
           current.drawSample();
         });
       }
-      for (const el of [els.family, els.style, els.size, els.value, els.scale, els.posValue, els.kernValue, els.strike, els.sup, els.sub]) {
+      for (const el of [els.family, els.latin, els.style, els.size, els.value, els.scale, els.posValue, els.kernValue, els.strike, els.sup, els.sub]) {
         el.addEventListener("input", () => current.drawSample());
         el.addEventListener("change", () => current.drawSample());
       }
@@ -423,17 +429,19 @@
   function setAsDefault() {
     const { els, document, R } = current;
     const defaults = host.__EASYOFFICE_DOC_FONT_DEFAULTS__;
-    const font = els.family.value || "";
+    const font = els.latin.value || els.family.value || "";
+    const eastFont = els.family.value || font;
     const pt = Number.parseFloat(els.size.value);
     const sizeHalfPt = Number.isFinite(pt) ? R.ptToHalfPt(Math.max(1, Math.min(1638, pt))) : undefined;
     if (!font && sizeHalfPt === undefined) {
       els.status.textContent = MSG_NO_DEFAULT;
       return;
     }
-    const summary = `기본 글꼴을 ${[font, sizeHalfPt === undefined ? "" : `${sizeHalfPt / 2}pt`].filter(Boolean).join(" ")}로 설정합니다.`;
+    const faces = font === eastFont ? [font] : [font, eastFont];
+    const summary = `기본 글꼴을 ${[...faces, sizeHalfPt === undefined ? "" : `${sizeHalfPt / 2}pt`].filter(Boolean).join(" ")}로 설정합니다.`;
     defaults?.ask(document, summary, () => {
       const root = document.getElementById("doc-editor");
-      if (root && defaults.setDefaults(root, { font, sizeHalfPt })) els.dialog.close();
+      if (root && defaults.setDefaults(root, { font, eastFont, sizeHalfPt })) els.dialog.close();
     });
   }
 
@@ -442,7 +450,12 @@
     const { els, initial, runs } = current;
     const patch = {};
     // Another font drops the variant, as the style bar's font list does (`setFont`, PD-368).
-    if (els.family.value && els.family.value !== initial.family) Object.assign(patch, { font: els.family.value, face: null });
+    // 한글 글꼴 or 영어 글꼴 changed: the patch names both, so the East Asian one is kept apart only when it differs.
+    if ((els.family.value && els.family.value !== initial.family) || (els.latin.value && els.latin.value !== initial.latin)) {
+      const latinFont = els.latin.value || els.family.value;
+      const eastFont = els.family.value || latinFont;
+      Object.assign(patch, { font: latinFont, eastfont: eastFont === latinFont ? null : eastFont, face: null });
+    }
     const chosen = styleOfText(els.style.value);
     if (chosen && chosen !== (initial.style || "regular")) {
       const style = STYLE_OF[chosen];
