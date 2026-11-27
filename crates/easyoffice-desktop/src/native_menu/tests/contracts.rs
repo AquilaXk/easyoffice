@@ -69,7 +69,7 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
     assert_eq!(
         border,
         [
-            "모두",
+            "모든 테두리",
             "바깥쪽",
             "안쪽",
             "위쪽",

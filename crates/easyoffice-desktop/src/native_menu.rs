@@ -226,7 +226,6 @@ pub fn label_for(kind: MenuKind, spec: &MenuItemSpec) -> &'static str {
     } else if kind == MenuKind::Doc {
         match spec.id {
             "file:doc-paper" | "page:doc-paper" => return "페이지 설정",
-            "file:print-preview" => return "인쇄 미리 보기",
             "edit:replace" => return "바꾸기",
             "view:zoom-fit-page" => return "한 페이지",
             "view:zoom-fit-width" => return "페이지 너비",

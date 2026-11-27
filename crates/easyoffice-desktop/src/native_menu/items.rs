@@ -182,7 +182,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     item("file:base-import", "가져오기…", None, "base-act:import"),
     item(
         "file:print-preview",
-        "인쇄 미리보기",
+        "인쇄 미리 보기",
         None,
         "verify-act:print-preview",
     ),
@@ -435,7 +435,12 @@ pub const ITEMS: &[MenuItemSpec] = &[
         "sheet-look:valign-bottom",
     ),
     item("format:wrap", "텍스트 줄 바꿈", None, "sheet-look:wrap"),
-    item("format:border-all", "모두", None, "sheet-look:border-all"),
+    item(
+        "format:border-all",
+        "모든 테두리",
+        None,
+        "sheet-look:border-all",
+    ),
     item(
         "format:border-outer",
         "바깥쪽",
@@ -780,7 +785,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     item(
         "table:fn-browser",
-        "함수 마법사",
+        "함수 삽입",
         None,
         "studio-cmd:data-fn-browser",
     ),
@@ -858,7 +863,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:ungroup", "그룹 해제", "ungroup"),
     sa!("sheet:hide-detail", "세부 정보 숨기기", "hide-detail"),
     sa!("sheet:show-detail", "세부 정보 표시", "show-detail"),
-    sa!("sheet:outline-clear", "윤곽선 지우기", "outline-clear"),
+    sa!("sheet:outline-clear", "윤곽 지우기", "outline-clear"),
     sa!("sheet:row-insert-above", "행 위에 삽입", "row-insert-above"),
     sa! { "sheet:row-insert-below", "행 아래에 삽입", "row-insert-below" },
     sa!("sheet:col-insert-left", "열 왼쪽에 삽입", "col-insert-left"),

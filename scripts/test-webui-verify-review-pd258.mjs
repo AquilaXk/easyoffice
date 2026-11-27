@@ -323,13 +323,13 @@ test("PD-258 창 내 실시간 인쇄 미리보기: 참조 앱 한국어 명칭,
   const pane = $(document, "print-preview-pane");
   assert.ok(pane, "#print-preview-pane exists");
   assert.equal(pane.hidden, true);
-  assert.equal(pane.getAttribute("aria-label"), "인쇄 미리보기");
+  assert.equal(pane.getAttribute("aria-label"), "인쇄 미리 보기");
 
   const toolbar = pane.querySelector(".print-preview-toolbar");
   assert.ok(toolbar);
   assert.equal(toolbar.getAttribute("role"), "toolbar");
-  assert.equal(toolbar.getAttribute("aria-label"), "인쇄 미리보기 도구");
-  assert.equal(pane.querySelector(".print-preview-title")?.textContent, "인쇄 미리보기");
+  assert.equal(toolbar.getAttribute("aria-label"), "인쇄 미리 보기 도구");
+  assert.equal(pane.querySelector(".print-preview-title")?.textContent, "인쇄 미리 보기");
   assert.equal($(document, "btn-pp-single")?.textContent, "한 쪽");
   assert.equal($(document, "btn-pp-spread")?.textContent, "두 쪽");
   assert.equal($(document, "btn-pp-zoom-out")?.getAttribute("aria-label"), "축소");

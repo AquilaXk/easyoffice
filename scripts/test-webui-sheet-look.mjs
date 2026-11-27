@@ -418,7 +418,7 @@ test("the 서식 menu and the toolbar list the look commands, each with a label 
   const items = [...h.document.querySelectorAll(".md-item[data-sheet-look]")];
   const labels = items.map((el) => el.querySelector(".md-label").textContent);
   assert.deepEqual(labels.slice(0, 7), ["텍스트 왼쪽 맞춤", "가운데 맞춤", "텍스트 오른쪽 맞춤", "위쪽 맞춤", "가운데 맞춤", "아래쪽 맞춤", "텍스트 줄 바꿈"]);
-  assert.deepEqual(labels.slice(7), ["모두", "바깥쪽", "안쪽", "위쪽", "아래쪽", "왼쪽", "오른쪽", "테두리 없음", "가는 실선", "굵은 실선", "파선", "점선", "이중 실선", "테두리 색…"]);
+  assert.deepEqual(labels.slice(7), ["모든 테두리", "바깥쪽", "안쪽", "위쪽", "아래쪽", "왼쪽", "오른쪽", "테두리 없음", "가는 실선", "굵은 실선", "파선", "점선", "이중 실선", "테두리 색…"]);
   const buttons = [...h.document.querySelectorAll(".tb-btn[data-sheet-look]")];
   assert.equal(buttons.length, 8);
   for (const b of buttons) assert.ok(b.getAttribute("aria-label"), b.dataset.sheetLook);

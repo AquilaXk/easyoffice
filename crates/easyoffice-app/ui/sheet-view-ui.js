@@ -141,7 +141,7 @@
         const outline = layoutApi.outlineOf(name);
         if (!outline || !outlineApi.hasGroups(outline)) return null;
         layoutApi.setOutline(name, outlineApi.clear(outline));
-        return "윤곽선 지우기";
+        return "윤곽 지우기";
       });
 
     // The outline bar's buttons: one group, or a level button for a whole axis.
