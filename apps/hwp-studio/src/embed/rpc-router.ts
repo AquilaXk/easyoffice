@@ -6,6 +6,7 @@ import {
   parseReadParagraphRangeParams,
   type ApplyCopilotEditsParams,
   type ApplyCopilotEditsResult,
+  type CaretRect,
   type ReadParagraphRangeParams,
   type ReadParagraphRangeResult,
 } from './copilot-bridge.ts';
@@ -69,6 +70,8 @@ export interface EmbedRpcHandlers {
   readParagraphRange(params: ReadParagraphRangeParams): Promise<ReadParagraphRangeResult>;
   /** EasyOffice extension (copilot-v1): single-snapshot batch paragraph replacement/append for Copilot. */
   applyCopilotEdits(params: ApplyCopilotEditsParams): Promise<ApplyCopilotEditsResult>;
+  /** EasyOffice extension (caret-rect-v1): the caret box in the editor's own viewport coordinates, read only (the shell adds the frame offset). */
+  getCaretRect(): Promise<CaretRect>;
   pageCount(): Promise<number>;
   getRendererDiagnostics(page: number): Promise<EmbedRendererDiagnosticsV1>;
   getFontDecisionTrace(page: number, maxCharacters: number): Promise<EmbedFontDecisionTraceV1>;
@@ -220,6 +223,9 @@ export async function routeEmbedRequest(
       return handlers.readParagraphRange(parseReadParagraphRangeParams(params));
     case 'applyCopilotEdits':
       return handlers.applyCopilotEdits(parseApplyCopilotEditsParams(params));
+    case 'getCaretRect':
+      assertEmptyParams(params, 'getCaretRect params');
+      return handlers.getCaretRect();
     case 'pageCount': return handlers.pageCount();
     case 'getPrintPages': {
       const range = parsePrintBatchRange(params);

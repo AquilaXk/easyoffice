@@ -70,6 +70,7 @@ import { renderPrintBatch } from './embed/print-batch.ts';
 import {
   applyCopilotEdits,
   createCopilotToggleRelay,
+  readCaretRect,
   readParagraphRange,
   type CopilotInputBridge,
 } from './embed/copilot-bridge.ts';
@@ -747,6 +748,11 @@ installEmbedRuntime({
         sbMessage().textContent = t('ui.sbMessage.filePages', { p1: wasm.fileName, p2: wasm.pageCount });
       }
       return result;
+    },
+    // EasyOffice extension (caret-rect-v1): where the caret is, read only (the Copilot pointer of the shell goes there).
+    async getCaretRect() {
+      await initPromise;
+      return readCaretRect(document);
     },
     async getRendererDiagnostics(pageIndex) {
       await initPromise;

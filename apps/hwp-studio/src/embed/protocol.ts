@@ -34,6 +34,8 @@ export const EMBED_CAPABILITIES = [
   'drag-over-v1',
   // EasyOffice extension: readParagraphRange and applyCopilotEdits RPCs for the shell Copilot panel.
   'copilot-v1',
+  // EasyOffice extension: getCaretRect RPC (the shell's Copilot pointer reads where the caret is, read only).
+  'caret-rect-v1',
 ] as const;
 
 export interface EmbedConnectAttempt {

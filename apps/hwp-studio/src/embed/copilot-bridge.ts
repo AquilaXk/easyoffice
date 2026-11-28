@@ -727,6 +727,33 @@ export function applyCopilotEdits(
   };
 }
 
+/** The caret box in the editor's viewport coordinates. `visible` is false while the editor shows no caret (no paste, no change of the document). */
+export interface CaretRect {
+  visible: boolean;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** The caret element (`.caret`) the editor draws; only what the Document interface needs of the page. */
+export interface CaretHost {
+  querySelector(selector: string): { getBoundingClientRect(): { left: number; top: number; width: number; height: number }; style?: { display?: string } } | null;
+}
+
+/**
+ * Read only. The shell's Copilot pointer asks where the caret is after it moved the editor to a paragraph, so the pointer can go there.
+ * Numbers that are not finite or a box without size read as "not visible".
+ */
+export function readCaretRect(root: CaretHost): CaretRect {
+  const hidden: CaretRect = { visible: false, left: 0, top: 0, width: 0, height: 0 };
+  const caret = root.querySelector('.caret');
+  if (!caret || caret.style?.display === 'none') return hidden;
+  const { left, top, width, height } = caret.getBoundingClientRect();
+  if (![left, top, width, height].every(Number.isFinite) || height <= 0) return hidden;
+  return { visible: true, left, top, width, height };
+}
+
 export interface CopilotToggleRelay {
   add(listener: (event: { schemaVersion: 1; reason: typeof SHELL_COPILOT_TOGGLE_REASON }) => void): () => void;
   toggle(): void;
