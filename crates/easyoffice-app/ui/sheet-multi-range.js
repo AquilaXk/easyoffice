@@ -99,20 +99,25 @@
     return { count, refused: false };
   }
 
-  // Collects numeric values across `ranges` without double-counting overlapping coordinates.
+  // Collects the numeric values across `ranges` without double-counting overlapping coordinates, and how many cells
+  // are not empty (`{ nums, filled }`, the status bar's 숫자 개수 and 개수).
   function collectNumbersMulti(ranges, liveTd, api, grid, numericOf) {
     const nums = [];
+    let filled = 0;
     const liveRef = liveTd ? liveTd.dataset.cell : "";
     const push = (ref) => {
       if (ref === liveRef) {
         const liveRaw = (liveTd.textContent || "").trim();
+        if (liveRaw !== "") filled += 1;
         if (liveRaw.startsWith("'") || liveTd._nf === "@") return;
         const n = numericOf(liveRaw);
         if (n !== null) nums.push(n);
         return;
       }
       const entry = api.getEntry(ref);
-      if (!entry || entry.t === "s" || entry.style?.numFmt === "@") return;
+      if (!entry) return;
+      if (entry.value !== undefined && entry.value !== null && entry.value !== "") filled += 1;
+      if (entry.t === "s" || entry.style?.numFmt === "@") return;
       const n = numericOf(entry.value);
       if (n !== null) nums.push(n);
     };
@@ -129,7 +134,7 @@
         for (let r = rg.r1; r <= rg.r2; r += 1) {
           for (let c = rg.c1; c <= rg.c2; c += 1) push(grid.refOf(r, c));
         }
-        return nums;
+        return { nums, filled };
       }
       const seen = new Set();
       for (let i = 0; i < ranges.length; i += 1) {
@@ -143,7 +148,7 @@
           }
         }
       }
-      return nums;
+      return { nums, filled };
     }
     let visitedLive = false;
     api.forEachEntryRef((ref, row, col) => {
@@ -156,7 +161,7 @@
       const p = grid.parseRef(liveRef);
       if (p && anyContainsCoord(ranges, p.row, p.col)) push(liveRef);
     }
-    return nums;
+    return { nums, filled };
   }
 
   host.__EASYOFFICE_SHEET_MULTI_RANGE__ = Object.freeze({

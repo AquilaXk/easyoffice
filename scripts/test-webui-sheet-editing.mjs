@@ -201,11 +201,7 @@ test("selection aggregate reflects the selected range only", async () => {
   key(b2, "ArrowRight", { shiftKey: true });
   key(b2, "ArrowDown", { shiftKey: true });
   const text = agg(document);
-  assert.match(text, /합계 4,250/);
-  assert.match(text, /평균 1,062\.5/);
-  assert.match(text, /개수 4/);
-  assert.match(text, /최소 920/);
-  assert.match(text, /최대 1,200/);
+  assert.equal(text, "평균: 1,062.5  개수: 4  숫자 개수: 4  최소값: 920  최대값: 1,200  합계: 4,250");
 });
 
 test("copy/cut/paste exchange TSV with the clipboard, grow the sheet and adjust relative references", async () => {
@@ -436,8 +432,8 @@ test("formatted currency, grouped numbers and percentages participate in SUM/AVE
   key(b2, "ArrowDown", { shiftKey: true });
   key(b2, "ArrowDown", { shiftKey: true });
   const text = agg(document);
-  assert.match(text, /합계 2,550/, "selection aggregate parses ₩1,000 + 1,500 + 50.0%");
-  assert.match(text, /개수 3/);
+  assert.match(text, /합계: 2,550/, "selection aggregate parses ₩1,000 + 1,500 + 50.0%");
+  assert.match(text, /숫자 개수: 3/);
 
   userClick(document.querySelector('.md-item[data-studio-menu-cmd="sheet-mod-pivot"]'));
   await flushAsyncTurns(10);

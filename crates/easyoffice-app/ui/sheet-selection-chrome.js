@@ -5,9 +5,6 @@
   // the border of an array's area, the name box, the formula bar text and the aggregate of the status bar.
   const { normalizeFormattedNumericCell } = host.__EASYOFFICE_SHEET_UTILS__;
 
-  // Ranges up to this many cells are read by address; larger ones pick the cheaper of address and entry walks.
-  const DIRECT_AREA_CELLS = 4096;
-
   function numericOf(raw) {
     const t = normalizeFormattedNumericCell(raw);
     if (t === "") return null;
@@ -15,15 +12,18 @@
     return Number.isFinite(n) ? n : null;
   }
 
-  function formatAggregate(nums) {
-    if (nums.length === 0) return "선택 집계 · 숫자 데이터 없음";
-    const { count, sum, min, max, avg: rawAvg } = host.__EASYOFFICE_SHEET_UTILS__.aggregateNumbers(nums);
-    const avg = Math.round(rawAvg * 10) / 10;
+  // The status bar of the spreadsheet program: 평균, 개수 (cells that are not empty), 숫자 개수, 최소값, 최대값, 합계, in
+  // that order; the number ones only when the selection holds a number, and nothing for an empty selection.
+  function formatAggregate({ nums, filled }) {
+    const parts = [];
     const fmt = (n) => Number(n.toPrecision(12)).toLocaleString();
-    return (
-      "선택 집계 · 합계 " + fmt(sum) + " · 평균 " + avg.toLocaleString() + " · 개수 " + count +
-      " · 최소 " + fmt(min) + " · 최대 " + fmt(max)
-    );
+    if (nums.length > 0) {
+      const { count, sum, min, max, avg } = host.__EASYOFFICE_SHEET_UTILS__.aggregateNumbers(nums);
+      parts.push("평균: " + (Math.round(avg * 10) / 10).toLocaleString(), "개수: " + filled, "숫자 개수: " + count, "최소값: " + fmt(min), "최대값: " + fmt(max), "합계: " + fmt(sum));
+    } else if (filled > 0) {
+      parts.push("개수: " + filled);
+    }
+    return parts.join("  ");
   }
 
   // `sel` is the selection of the input module (`ar`, `ac` the anchor, `cr`, `cc` the other corner), read as it changes.
@@ -31,54 +31,7 @@
     const multiApi = host.__EASYOFFICE_SHEET_MULTI_RANGE__;
     // ---- aggregate -------------------------------------------------------------------------
 
-    function collectNumbers(rangeOrList, liveTd) {
-      const ranges = Array.isArray(rangeOrList) ? rangeOrList : [rangeOrList];
-      if (multiApi) return multiApi.collectNumbersMulti(ranges, liveTd, api, grid, numericOf);
-      const range = ranges[0];
-      const nums = [];
-      const liveRef = liveTd ? liveTd.dataset.cell : "";
-      const push = (ref) => {
-        if (ref === liveRef) {
-          const liveRaw = (liveTd.textContent || "").trim();
-          if (liveRaw.startsWith("'") || liveTd._nf === "@") return;
-          const n = numericOf(liveRaw);
-          if (n !== null) nums.push(n);
-          return;
-        }
-        const entry = api.getEntry(ref);
-        if (!entry || entry.t === "s" || entry.style?.numFmt === "@") return;
-        const n = numericOf(entry.value);
-        if (n !== null) nums.push(n);
-      };
-      const area = (range.r2 - range.r1 + 1) * (range.c2 - range.c1 + 1);
-      // Counting the entries copies every key of the sheet: a small range is read cell by cell without it.
-      const mapSize =
-        area <= DIRECT_AREA_CELLS
-          ? area
-          : typeof api.getEntryCount === "function"
-            ? api.getEntryCount()
-            : (api.activeSheetMap?.size ?? 20000);
-      if (area <= mapSize) {
-        for (let r = range.r1; r <= range.r2; r += 1) {
-          for (let c = range.c1; c <= range.c2; c += 1) push(grid.refOf(r, c));
-        }
-        return nums;
-      }
-      let visitedLive = false;
-      api.forEachEntryRef((ref, row, col) => {
-        if (row >= range.r1 && row <= range.r2 && col >= range.c1 && col <= range.c2) {
-          if (ref === liveRef) visitedLive = true;
-          push(ref);
-        }
-      });
-      if (liveRef && !visitedLive) {
-        const p = grid.parseRef(liveRef);
-        if (p && p.row >= range.r1 && p.row <= range.r2 && p.col >= range.c1 && p.col <= range.c2) {
-          push(liveRef);
-        }
-      }
-      return nums;
-    }
+    const collectNumbers = (ranges, liveTd) => multiApi.collectNumbersMulti(ranges, liveTd, api, grid, numericOf);
 
     // ---- selection painting ----------------------------------------------------------------
     // The border of the area of the array the active cell belongs to, with the token of the selection stroke (PD-217).

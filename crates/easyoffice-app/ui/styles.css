@@ -292,6 +292,9 @@ select:focus-visible,
 .app-shell:not([data-module="SHEET"]) #status-sheet-agg {
   display: none;
 }
+#status-sheet-agg {
+  white-space: pre;
+}
 .app-shell:not([data-module="SHEET"]) #status-sheet-mode {
   display: none;
 }

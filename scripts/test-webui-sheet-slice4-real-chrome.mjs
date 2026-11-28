@@ -98,8 +98,8 @@ test("real Chrome: shortcuts, toolbar Σ, multi-range status aggregate, right-cl
   await mouseClick(td("A3"), "left", MULTI_MOD);
   await sleep(100);
   const summary = await js(`document.getElementById("status-sheet-agg").textContent`);
-  assert.match(summary, /합계\s+60/);
-  assert.match(summary, /개수\s+3/);
+  assert.match(summary, /합계: 60/);
+  assert.match(summary, /숫자 개수: 3/);
 
   // Right-click general cell opens #sheet-cell-menu; Escape closes it
   await mouseClick(td("B2"), "right");

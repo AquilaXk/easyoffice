@@ -52,7 +52,7 @@ test("PD-241: apostrophe-prefixed and explicit-text cells preserve type across g
   a1.focus();
   await flushAsyncTurns();
   assert.equal(formulaBar.value, "'123");
-  assert.match(aggBar.textContent, /숫자 데이터 없음/);
+  assert.equal(aggBar.textContent, "개수: 1");
 
   // 3. F2 unfolds `'123` into A1; Escape keeps `'123` intact; editing `'123` -> `123` updates SUM to 133, and Undo restores `'123` + SUM 10!
   const vp = document.getElementById("sheet-viewport");

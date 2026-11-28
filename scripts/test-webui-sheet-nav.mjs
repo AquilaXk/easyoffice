@@ -258,7 +258,7 @@ test("PageDown and PageUp move a screen of rows, Alt+PageDown and Alt+PageUp a s
   assert.equal(h.active(), "B1");
   h.go("B2");
   h.press("PageDown", { shiftKey: true });
-  assert.match(h.document.getElementById("status-sheet-agg").textContent, /개수 5 /, "the range runs from B2 down past B8");
+  assert.match(h.document.getElementById("status-sheet-agg").textContent, /개수: 5 /,"the range runs from B2 down past B8");
   h.press("Home", CTRL);
   h.go("B2");
   h.press("PageDown", CTRL);

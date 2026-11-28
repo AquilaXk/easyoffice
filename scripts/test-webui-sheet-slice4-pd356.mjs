@@ -209,8 +209,8 @@ test("Ctrl+click multi-range selection deduplicates aggregates, paints ranges, r
   assert.equal(cell(h, "C1").classList.contains("in-range"), true);
   assert.equal(cell(h, "D3").classList.contains("selected-cell"), true);
   const summary = byId(h, "status-sheet-agg").textContent;
-  assert.match(summary, /합계\s+205/, "B1(20) and B2(40) are NOT double-counted: " + summary);
-  assert.match(summary, /개수\s+6/);
+  assert.match(summary, /합계: 205/, "B1(20) and B2(40) are NOT double-counted: " + summary);
+  assert.match(summary, /숫자 개수: 6/);
 
   // Multi-range Ctrl+C shows refusal message without crash
   const handled = cell(h, "D3").dispatchEvent({ type: "copy", target: cell(h, "D3"), clipboardData: { setData() {} }, bubbles: true });
