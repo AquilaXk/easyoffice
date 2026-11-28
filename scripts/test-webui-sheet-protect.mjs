@@ -772,7 +772,7 @@ test("checklist: the fill handle by drag and by double click for every pair of l
 
 test("checklist: find and replace by value, by formula and over all sheets leave locked cells and hidden formulas alone", async () => {
   const t = await scene();
-  t.sandbox.dispatchWindowKeydown({ key: "F2", ctrlKey: true });
+  t.sandbox.dispatchWindowKeydown({ key: "h", ctrlKey: true });
   const find = async (query, replacement, { formula = false, workbook = false } = {}) => {
     for (const [id, value] of [["find-query", query], ["find-replacement", replacement]]) {
       t.byId(id).value = value;

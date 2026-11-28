@@ -82,10 +82,10 @@ fn accelerator_of(spec: &MenuItemSpec) -> Option<&'static str> {
     })
 }
 
-/// The key an item gets for a specific window kind (HWP leaves CmdOrCtrl+K for two-key chords;
-/// SHEET adds standard spreadsheet workbook/formula/table accelerators).
+/// The key an item gets for a specific window kind (HWP leaves CmdOrCtrl+K for two-key chords and the
+/// replace key to the editor's own Ctrl+F2; SHEET adds standard spreadsheet workbook/formula/table accelerators).
 fn accelerator_for(kind: MenuKind, spec: &MenuItemSpec) -> Option<&'static str> {
-    if kind == MenuKind::Hwp && spec.id == "insert:link" {
+    if kind == MenuKind::Hwp && matches!(spec.id, "insert:link" | "edit:replace") {
         return None;
     }
     if kind == MenuKind::Sheet {

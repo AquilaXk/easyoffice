@@ -352,10 +352,12 @@
     // The table of a sheet is made with Ctrl+T (Cmd+T on a Mac) as in the spreadsheet program; a browser keeps the key for a new
     // tab, so it is bound in the desktop shell only (PD-231).
     { keys: "Ctrl+T", action: "insert-table", ribbon: true, module: "SHEET", desktopOnly: true, notInField: true },
-    // Find and replace as in the reference editor (Ctrl+F, Ctrl+F2). Ctrl+H is left alone: it is the
-    // system "hide" key on macOS and the history page in browsers.
+    // Find and replace as in the spreadsheet and word processor programs: Ctrl+F finds and Ctrl+H replaces. On macOS the
+    // replace key is the Control key itself (`macControl`): ⌘H is the system's "hide" key and never reaches the page. The
+    // Hangul editor keeps its own Ctrl+F2, so that window answers it too (PD-390).
     { keys: "Ctrl+F", action: "find" },
-    { keys: "Ctrl+F2", action: "replace" },
+    { keys: "Ctrl+H", action: "replace", macControl: true },
+    { keys: "Ctrl+F2", action: "replace", module: "HWP" },
     { keys: "Ctrl+B", action: "home-bold", ribbon: true },
     { keys: "Ctrl+I", action: "home-italic", ribbon: true },
     { keys: "Ctrl+U", action: "home-underline", ribbon: true },

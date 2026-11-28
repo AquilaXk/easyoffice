@@ -907,6 +907,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       const binding = bindingFor(combo);
       if (!binding) return false;
       if (isStartWindow() && !START_SHORTCUT_ACTIONS.has(binding.action)) return false;
+      if (binding.macControl && isMacClient() && !e.ctrlKey) return false;
       if (binding.module && getActiveModule() !== binding.module) return false;
       if (binding.modules && !binding.modules.includes(getActiveModule())) return false;
       if (binding.notInField && /^(INPUT|TEXTAREA|SELECT)$/.test(String(document.activeElement?.tagName || "").toUpperCase())) return false;

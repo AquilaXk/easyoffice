@@ -2,7 +2,7 @@
   "use strict";
 
   // The find / replace dialog (#find-dialog) for the document, sheet and base modules (Ctrl+F finds,
-  // Ctrl+F2 replaces, as in the reference editor). It is not modal: the page stays editable, the
+  // Ctrl+H replaces; the Hangul window keeps the editor's Ctrl+F2). It is not modal: the page stays editable, the
   // matches are painted with the CSS Custom Highlight API (no DOM change) when the web view has it,
   // otherwise the current match is selected. The text, the matches and the offset table live in
   // `find-core.js` and a source (`find-doc.js`, `find-sheet.js`, `find-base.js`); this file is the UI around them.

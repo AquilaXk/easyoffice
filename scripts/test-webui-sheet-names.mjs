@@ -73,8 +73,8 @@ test("the 수식 menu has 이름 정의 and 이름 관리, and both dialogs use 
   const menu = [...t.document.querySelectorAll('.menu-item[data-menu="formula"] .md-label')].map((el) => el.textContent);
   assert.deepEqual(menu, [
     "이름 정의…",
-    "이름 관리…",
-    "선택 영역에서 이름 만들기…",
+    "이름 관리자",
+    "선택 영역에서 만들기…",
     "수식에서 사용",
     "이름 붙여넣기…",
     "계산 옵션",
@@ -233,7 +233,7 @@ test("the arrow opens the list of the names a sheet sees, a click selects, the l
   t.document.getElementById("btn-name-box-list").dispatchEvent({ type: "mousedown", target: t.document.getElementById("btn-name-box-list") });
   assert.equal(list.hidden, false);
   const items = [...list.querySelectorAll("li")];
-  assert.deepEqual(items.map((li) => li.querySelector("span")?.textContent ?? li.textContent), ["Block", "Single", "이름 관리…"]);
+  assert.deepEqual(items.map((li) => li.querySelector("span")?.textContent ?? li.textContent), ["Block", "Single", "이름 관리자"]);
   items[1].dispatchEvent({ type: "mousedown", target: items[1], bubbles: true });
   await flushAsyncTurns(20);
   assert.equal(list.hidden, true);

@@ -84,7 +84,7 @@ test("BASE enables find/replace menu items and opens find dialog instead of comm
   assert.equal($(h.document, "cmd-palette-modal").open, false);
   assert.equal($(h.document, "find-sheet-options").hidden, true, "sheet-only checkboxes stay hidden in BASE");
   assert.equal($(h.document, "find-replace-row").hidden, true);
-  ctrl(h, "F2");
+  ctrl(h, "h");
   assert.equal($(h.document, "find-replace-row").hidden, false);
   assert.equal($(h.document, "find-replace-buttons").hidden, false);
 
@@ -190,7 +190,7 @@ test("BASE replace & replace-all commit in 1 Ctrl+Z undo step, skip formula cell
   stData.tables[0].records[3].values.f1 = "바꿀값_둘";
   const { h, studio } = await openBase(stData);
 
-  ctrl(h, "F2");
+  ctrl(h, "h");
   typeInput(h, "find-query", "바꿀값");
   typeInput(h, "find-replacement", "고친값");
   assert.equal(countText(h), "1 / 2");
@@ -213,7 +213,7 @@ test("BASE replace & replace-all commit in 1 Ctrl+Z undo step, skip formula cell
 
   // Relation label replacement -> stores relation target id.
   studio.selectCellById("r0", "f1");
-  ctrl(h, "F2");
+  ctrl(h, "h");
   typeInput(h, "find-query", "고객가");
   typeInput(h, "find-replacement", "고객나_특별");
   assert.equal(countText(h), "1 / 4");

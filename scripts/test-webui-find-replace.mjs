@@ -28,7 +28,7 @@ const type = (h, id, value) => {
 const count = (h) => $(h.document, "find-count").textContent || $(h.document, "find-status").textContent;
 const editorText = (h) => $(h.document, "doc-editor").textContent;
 
-test("Ctrl+F opens the find dialog (not the palette), Ctrl+F2 adds the replace row, Ctrl+/ opens the palette", async () => {
+test("Ctrl+F opens the find dialog (not the palette), Ctrl+H adds the replace row, Ctrl+/ opens the palette", async () => {
   const h = await openDoc();
   const dialog = $(h.document, "find-dialog");
   assert.equal(ctrl(h, "f").defaultPrevented, true);
@@ -37,11 +37,10 @@ test("Ctrl+F opens the find dialog (not the palette), Ctrl+F2 adds the replace r
   assert.equal($(h.document, "find-replace-row").hidden, true);
   assert.equal($(h.document, "find-dialog-title").textContent, "찾기");
   assert.equal($(h.document, "find-replace-buttons").hidden, true);
-  ctrl(h, "F2");
+  ctrl(h, "h");
   assert.equal($(h.document, "find-replace-buttons").hidden, false, "the replace button row follows the replace mode");
   assert.equal($(h.document, "find-replace-row").hidden, false);
   assert.equal($(h.document, "find-dialog-title").textContent, "찾기 및 바꾸기");
-  assert.equal(ctrl(h, "h").defaultPrevented, false, "Ctrl+H is not taken (macOS hide, browser history)");
   ctrl(h, "/");
   assert.equal($(h.document, "cmd-palette-modal").open, true);
   $(h.document, "cmd-palette-modal").close();
@@ -52,7 +51,7 @@ test("Ctrl+F opens the find dialog (not the palette), Ctrl+F2 adds the replace r
   switchModule(h.document, "DOC");
   await flushAsyncTurns(4);
   $(h.document, "doc-editor").dataset.eoDocFlavor = "pages";
-  ctrl(h, "F2");
+  ctrl(h, "h");
   assert.equal($(h.document, "find-dialog-title").textContent, "찾기 및 대치");
   assert.equal($(h.document, "find-replace-row").querySelector("label").textContent, "대치할 내용");
   assert.equal($(h.document, "btn-find-replace").textContent, "대치");
@@ -65,9 +64,9 @@ test("the shortcut table has no repeated combination and keeps print, find and r
   const keys = table.map((b) => b.keys);
   assert.equal(new Set(keys).size, keys.length);
   const action = (k) => table.find((b) => b.keys === k)?.action;
-  assert.deepEqual([action("Ctrl+F"), action("Ctrl+F2"), action("Ctrl+/"), action("Ctrl+P")], ["find", "replace", "palette", "print"]);
+  assert.deepEqual([action("Ctrl+F"), action("Ctrl+H"), action("Ctrl+/"), action("Ctrl+P")], ["find", "replace", "palette", "print"]);
+  assert.deepEqual(table.filter((b) => b.action === "replace").map((b) => [b.keys, b.module || ""]), [["Ctrl+H", ""], ["Ctrl+F2", "HWP"]], "Ctrl+F2 stays with the Hangul window only");
   assert.equal(action("Ctrl+K"), "insert-link", "Ctrl+K is the hyperlink of the document, sheet and slide windows");
-  assert.equal(action("Ctrl+H"), undefined);
   assert.equal(action("Ctrl+L"), undefined, "Ctrl+L is the browser address bar");
 });
 
@@ -104,7 +103,7 @@ test("Korean: typing waits for the composition to end, then finds the syllables"
 test("replace all is one undo step and keeps the run formatting", async () => {
   const h = await openDoc();
   const before = editorText(h);
-  ctrl(h, "F2");
+  ctrl(h, "h");
   type(h, "find-query", "apple");
   type(h, "find-replacement", "배");
   $(h.document, "btn-find-replace-all").click();
@@ -120,7 +119,7 @@ test("replace all is one undo step and keeps the run formatting", async () => {
 
 test("replace one replaces the current match and moves to the next", async () => {
   const h = await openDoc();
-  ctrl(h, "F2");
+  ctrl(h, "h");
   type(h, "find-query", "apple");
   type(h, "find-replacement", "pear");
   $(h.document, "btn-find-replace").click();
@@ -131,7 +130,7 @@ test("replace one replaces the current match and moves to the next", async () =>
 
 test("find dialog keys follow the reference: Enter next, Shift+Enter previous, Enter in the replace field replaces, Esc closes, other keys stay inside", async () => {
   const h = await openDoc();
-  ctrl(h, "F2");
+  ctrl(h, "h");
   type(h, "find-query", "apple");
   const query = $(h.document, "find-query");
   const press = (target, key, extra = {}) => {
@@ -175,7 +174,7 @@ test("the sheet module finds cell text, replaces values (not formula results), a
   );
   await flushAsyncTurns(12);
   const cellText = (ref) => h.document.querySelector(`#pane-sheet td[data-cell="${ref}"]`)?.textContent;
-  ctrl(h, "F2");
+  ctrl(h, "h");
   type(h, "find-query", "사과");
   assert.equal(count(h), "1 / 2");
   $(h.document, "btn-find-next").click();
@@ -209,7 +208,7 @@ test("a replacement that is an address makes no automatic link and leaves the li
   );
   await flushAsyncTurns(12);
   const td = (ref) => h.document.querySelector(`#pane-sheet td[data-cell="${ref}"]`);
-  ctrl(h, "F2");
+  ctrl(h, "h");
   type(h, "find-query", "홈 하나");
   type(h, "find-replacement", "https://example.com/typed");
   $(h.document, "btn-find-replace-all").click();
@@ -254,7 +253,7 @@ test("the sheet options row shows only for sheets; whole cell narrows the count;
 test("formula search matches and replaces the formula text; a value search skips the formula cell", async () => {
   const h = await openSheet([{ name: "Sheet1", cells: [{ ref: "A1", raw: "5" }, { ref: "B1", raw: "=A1*2" }, { ref: "C1", raw: "SUM" }] }]);
   const cellText = (ref) => h.document.querySelector(`#pane-sheet td[data-cell="${ref}"]`)?.textContent;
-  ctrl(h, "F2");
+  ctrl(h, "h");
   type(h, "find-query", "A1");
   assert.match(count(h), /일치하는 항목이 없습니다/, "the result 10 does not contain A1");
   checkbox(h, "find-opt-formula");
@@ -271,7 +270,7 @@ test("the all-sheets scope finds cells on other sheets and replaces them in one 
     { name: "Sheet1", cells: [{ ref: "A1", raw: "사과" }] },
     { name: "Sheet2", cells: [{ ref: "B2", raw: "사과즙" }] },
   ]);
-  ctrl(h, "F2");
+  ctrl(h, "h");
   type(h, "find-query", "사과");
   assert.equal(count(h), "1 / 1", "the active sheet only");
   checkbox(h, "find-opt-workbook");

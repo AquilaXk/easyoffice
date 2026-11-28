@@ -124,7 +124,7 @@
       const manage = document.createElement("li");
       manage.setAttribute("role", "option");
       manage.dataset.manage = "1";
-      manage.textContent = "이름 관리…";
+      manage.textContent = "이름 관리자";
       list.appendChild(manage);
       return shown.length;
     }

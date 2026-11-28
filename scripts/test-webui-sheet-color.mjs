@@ -329,7 +329,7 @@ test("a color survives a typed edit of the cell and a find and replace of its te
   await flushAsyncTurns(6);
   assert.equal(fillOf(h, "A2"), "#ffff00", "the typed cell keeps its fill");
   h.sandbox.dispatchWindowKeydown({ key: "f", ctrlKey: true });
-  h.sandbox.dispatchWindowKeydown({ key: "F2", ctrlKey: true });
+  h.sandbox.dispatchWindowKeydown({ key: "h", ctrlKey: true });
   await flushAsyncTurns(3);
   for (const [id, value] of [["find-query", "99"], ["find-replacement", "77"]]) {
     $(h, id).value = value;

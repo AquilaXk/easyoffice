@@ -203,7 +203,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     item(
         "edit:replace",
         "찾기 및 바꾸기",
-        Some("CmdOrCtrl+F2"),
+        Some("Ctrl+H"),
         "replace",
     ),
     item(
@@ -837,7 +837,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:tab-unhide", "시트 숨기기 취소…", "tab-unhide"),
     sa!("sheet:link-remove", "하이퍼링크 제거", "link-remove"),
     sa!("sheet:name-define", "이름 정의…", "name-define"),
-    sa!("sheet:name-manage", "이름 관리…", "name-manage"),
+    sa!("sheet:name-manage", "이름 관리자", "name-manage"),
     sa!("sheet:calc-auto", "자동", "calc-auto"),
     sa!(
         "sheet:calc-auto-no-table",
@@ -854,7 +854,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
         "workbook-protect"
     ),
     sa!("sheet:protect-ranges", "범위 편집 허용", "range-allow"),
-    sa! { "sheet:name-create", "선택 영역에서 이름 만들기…", "name-create" },
+    sa! { "sheet:name-create", "선택 영역에서 만들기…", "name-create" },
     sa!("sheet:name-paste", "이름 붙여넣기…", "name-paste"),
     sa!("sheet:page-setup", "페이지 설정…", "page-setup"),
     sa!("sheet:print-area-set", "인쇄 영역 설정", "print-area-set"),

@@ -2,7 +2,8 @@ use super::*;
 
 mod contracts;
 
-const MODIFIERS: &[&str] = &["CmdOrCtrl", "Alt", "Shift"];
+const MODIFIERS: &[&str] = &["CmdOrCtrl", "Ctrl", "Alt", "Shift"];
+const REPLACE_ACCELERATOR: &str = "Ctrl+H";
 const GROUPS: &[&str] = &[
     "app", "file", "edit", "view", "insert", "format", "page", "slide", "sheet", "table", "tool",
     "help",
@@ -34,7 +35,11 @@ fn accelerators_are_command_based_and_do_not_collide() {
         };
         let mut parts: Vec<&str> = accelerator.split('+').collect();
         let key = parts.pop().unwrap();
-        assert!(parts.contains(&"CmdOrCtrl"), "{accelerator} uses Cmd");
+        // The replace key is the Control key itself on macOS: Cmd+H is the system's "hide" key.
+        assert!(
+            parts.contains(&"CmdOrCtrl") || accelerator == REPLACE_ACCELERATOR,
+            "{accelerator} uses Cmd"
+        );
         assert!(parts.iter().all(|p| MODIFIERS.contains(p)), "{accelerator}");
         assert!(
             key.len() == 1 || matches!(key, "Enter" | "F2"),
@@ -745,7 +750,7 @@ fn paste_and_close_are_system_items_that_stay_in_the_table_for_the_page_menu() {
 fn synced_edit_and_format_accelerators_match_webui_while_other_format_items_stay_unbound() {
     let explicit = [
         ("edit:find", Some("CmdOrCtrl+F")),
-        ("edit:replace", Some("CmdOrCtrl+F2")),
+        ("edit:replace", Some("Ctrl+H")),
         ("edit:paste-special", Some("CmdOrCtrl+Alt+V")),
         ("format:bold", Some("CmdOrCtrl+B")),
         ("format:italic", Some("CmdOrCtrl+I")),
