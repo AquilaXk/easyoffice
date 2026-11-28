@@ -50,6 +50,7 @@ mod pages_schema;
 mod pages_table;
 mod pages_write;
 mod pdf_chart;
+mod pdf_fixed;
 mod pdf_highlight;
 mod pdf_image;
 mod pdf_laid;

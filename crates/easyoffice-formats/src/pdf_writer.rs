@@ -13,6 +13,7 @@
 //! content (line breaking, mixed fonts, watermark and stamp markers) and the `/PageNumber` entry the
 //! engine's reader looks for.
 
+use crate::pdf_fixed::push_fixed2;
 use crate::pdf_highlight::{write_annotation, HighlightPass, PageAnnotation, PdfHighlight};
 use crate::pdf_image::PdfImageObject;
 use crate::pdf_sheet_icons::{icon_form_content, IconKey, ICON_BOX_UNITS};
@@ -76,7 +77,19 @@ pub(crate) fn mixed_units(text: &str) -> u32 {
 pub(crate) fn text_ops(x: f64, y: f64, size: f64, text: &str) -> String {
     if !text.chars().any(|c| matches!(c, '\u{A0}'..='\u{FF}')) {
         let (font, operand) = tj_operand(text);
-        return format!("BT {font} {size:.2} Tf {x:.2} {y:.2} Td {operand} Tj ET");
+        let mut ops = String::with_capacity(operand.len() + 64);
+        ops.push_str("BT ");
+        ops.push_str(font);
+        ops.push(' ');
+        push_fixed2(&mut ops, size);
+        ops.push_str(" Tf ");
+        push_fixed2(&mut ops, x);
+        ops.push(' ');
+        push_fixed2(&mut ops, y);
+        ops.push_str(" Td ");
+        ops.push_str(&operand);
+        ops.push_str(" Tj ET");
+        return ops;
     }
     let mut out = String::from("BT");
     // `Td` moves from the start of the previous run: the offset is the width of that run, rounded

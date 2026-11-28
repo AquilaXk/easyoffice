@@ -73,9 +73,53 @@ pub fn plain_cell_numeric(styling: Option<&SheetStyling>, at: (u32, u32), text: 
         .map_or_else(|| is_number(text), |k| k == crate::CellValueKind::Number)
 }
 
+/// Whether `text` without its thousands commas reads as an `f64` (what `str::parse::<f64>` accepts). The sheet asks it
+/// for every cell that has no kind of its own, and a page of a big sheet has tens of thousands of them: the text is checked
+/// against the grammar of the parser (a sign, then `inf`, `infinity` or `nan`, or digits with at most one point and an
+/// optional exponent) and no copy or conversion is made (PD-397).
 fn is_number(text: &str) -> bool {
-    let t = text.trim().replace(',', "");
-    !t.is_empty() && t.parse::<f64>().is_ok()
+    let mut bytes = text.trim().bytes().filter(|&b| b != b',').peekable();
+    if matches!(bytes.peek(), Some(b'+' | b'-')) {
+        bytes.next();
+    }
+    let rest: Vec<u8> = match bytes.peek() {
+        // A word: only these three are numbers, in any case.
+        Some(b'i' | b'I' | b'n' | b'N') => bytes.map(|b| b.to_ascii_lowercase()).collect(),
+        _ => return is_decimal(bytes),
+    };
+    matches!(rest.as_slice(), b"inf" | b"infinity" | b"nan")
+}
+
+/// Digits with at most one point (at least one digit around it) and an optional exponent (`e`, a sign, digits).
+fn is_decimal(mut bytes: impl Iterator<Item = u8>) -> bool {
+    let (mut digits, mut point) = (0usize, false);
+    let mut next = bytes.next();
+    while let Some(byte) = next {
+        match byte {
+            b'0'..=b'9' => digits += 1,
+            b'.' if !point => point = true,
+            _ => break,
+        }
+        next = bytes.next();
+    }
+    if digits == 0 {
+        return false;
+    }
+    let Some(b'e' | b'E') = next else {
+        return next.is_none();
+    };
+    let mut exponent = bytes.peekable();
+    if matches!(exponent.peek(), Some(b'+' | b'-')) {
+        exponent.next();
+    }
+    let mut exponent_digits = 0usize;
+    for byte in exponent {
+        if !byte.is_ascii_digit() {
+            return false;
+        }
+        exponent_digits += 1;
+    }
+    exponent_digits > 0
 }
 
 const PAPER: u32 = 0xFF_FFFF;
@@ -649,6 +693,10 @@ pub(crate) fn draw_text(
         canvas.stroke_line(x, at, x + width, at, ink, line_width);
     }
 }
+
+#[cfg(test)]
+#[path = "pdf_sheet_number_tests.rs"]
+mod number_tests;
 
 #[cfg(test)]
 mod tests {

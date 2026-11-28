@@ -6,7 +6,6 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::fmt::Write;
 use std::sync::OnceLock;
 
 #[path = "pdf_laid_doc.rs"]
@@ -15,6 +14,7 @@ pub(crate) use doc::laid_document_pdf;
 #[path = "pdf_sheet_wrap.rs"]
 mod wrap;
 
+use crate::pdf_fixed::{push_numbers, push_path};
 use crate::pdf_sheet_icons::{self, IconKey};
 use crate::pdf_sheet_rules::{self, plain_cell_numeric, RuleLayer, RuleOps, SheetShown};
 use crate::pdf_writer::{char_units, mixed_units, text_ops, PdfLaidPage, PdfPageEntry};
@@ -109,6 +109,9 @@ fn auto_text_color(fill: Option<u32>) -> Option<u32> {
     ((r * 76 + g * 151 + b * 29) / 256 <= DARK_FILL_LUMINANCE).then_some(0xFFFFFF)
 }
 
+/// Bytes an operator of a box, a line or a clip starts with: the colour and four or five numbers fit in it.
+const OP_CAPACITY: usize = 96;
+
 /// One page being drawn: the content stream in PDF user space (origin bottom left).
 pub(crate) struct Canvas {
     width: f64,
@@ -152,39 +155,52 @@ impl Canvas {
 
     /// A filled box with the corner `(x, y)` at the bottom left.
     pub(crate) fn fill_rect(&mut self, x: f64, y: f64, w: f64, h: f64, rgb: u32) {
-        self.ops.push(format!(
-            "q {} rg {x:.2} {y:.2} {w:.2} {h:.2} re f Q",
-            rgb_ops(rgb)
-        ));
+        let mut op = String::with_capacity(OP_CAPACITY);
+        op.push_str("q ");
+        op.push_str(&rgb_ops(rgb));
+        op.push_str(" rg ");
+        push_numbers(&mut op, &[x, y, w, h]);
+        op.push_str(" re f Q");
+        self.ops.push(op);
     }
 
     pub(crate) fn stroke_rect(&mut self, x: f64, y: f64, w: f64, h: f64, rgb: u32, width: f64) {
-        self.ops.push(format!(
-            "q {width:.2} w {} RG {x:.2} {y:.2} {w:.2} {h:.2} re S Q",
-            rgb_ops(rgb)
-        ));
+        let mut op = String::with_capacity(OP_CAPACITY);
+        op.push_str("q ");
+        push_numbers(&mut op, &[width]);
+        op.push_str(" w ");
+        op.push_str(&rgb_ops(rgb));
+        op.push_str(" RG ");
+        push_numbers(&mut op, &[x, y, w, h]);
+        op.push_str(" re S Q");
+        self.ops.push(op);
     }
 
     pub(crate) fn stroke_line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64, rgb: u32, width: f64) {
-        self.ops.push(format!(
-            "q {width:.2} w {} RG {x1:.2} {y1:.2} m {x2:.2} {y2:.2} l S Q",
-            rgb_ops(rgb)
-        ));
+        let mut op = String::with_capacity(OP_CAPACITY);
+        op.push_str("q ");
+        push_numbers(&mut op, &[width]);
+        op.push_str(" w ");
+        op.push_str(&rgb_ops(rgb));
+        op.push_str(" RG ");
+        push_numbers(&mut op, &[x1, y1]);
+        op.push_str(" m ");
+        push_numbers(&mut op, &[x2, y2]);
+        op.push_str(" l S Q");
+        self.ops.push(op);
     }
 
     pub(crate) fn stroke_polyline(&mut self, pts: &[(f64, f64)], rgb: u32, width: f64) {
         if pts.len() < 2 {
             return;
         }
-        let mut op = format!(
-            "q {width:.2} w 1 J 1 j {} RG {:.2} {:.2} m",
-            rgb_ops(rgb),
-            pts[0].0,
-            pts[0].1
-        );
-        for &(x, y) in &pts[1..] {
-            let _ = write!(op, " {x:.2} {y:.2} l");
-        }
+        let mut op = String::with_capacity(OP_CAPACITY + pts.len() * 16);
+        op.push_str("q ");
+        push_numbers(&mut op, &[width]);
+        op.push_str(" w 1 J 1 j ");
+        op.push_str(&rgb_ops(rgb));
+        op.push_str(" RG ");
+        push_path(&mut op, pts);
         op.push_str(" S Q");
         self.ops.push(op);
     }
@@ -193,10 +209,11 @@ impl Canvas {
         if pts.len() < 3 {
             return;
         }
-        let mut op = format!("q {} rg {:.2} {:.2} m", rgb_ops(rgb), pts[0].0, pts[0].1);
-        for &(x, y) in &pts[1..] {
-            let _ = write!(op, " {x:.2} {y:.2} l");
-        }
+        let mut op = String::with_capacity(OP_CAPACITY + pts.len() * 16);
+        op.push_str("q ");
+        op.push_str(&rgb_ops(rgb));
+        op.push_str(" rg ");
+        push_path(&mut op, pts);
         op.push_str(" h f Q");
         self.ops.push(op);
     }
@@ -224,8 +241,11 @@ impl Canvas {
     }
 
     pub(crate) fn push_clip_rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
-        self.ops
-            .push(format!("q {x:.2} {y:.2} {w:.2} {h:.2} re W n"));
+        let mut op = String::with_capacity(OP_CAPACITY);
+        op.push_str("q ");
+        push_numbers(&mut op, &[x, y, w, h]);
+        op.push_str(" re W n");
+        self.ops.push(op);
     }
 
     pub(crate) fn pop_clip(&mut self) {
@@ -233,8 +253,12 @@ impl Canvas {
     }
 
     fn line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) {
-        self.ops
-            .push(format!("{x1:.2} {y1:.2} m {x2:.2} {y2:.2} l S"));
+        let mut op = String::with_capacity(OP_CAPACITY);
+        push_numbers(&mut op, &[x1, y1]);
+        op.push_str(" m ");
+        push_numbers(&mut op, &[x2, y2]);
+        op.push_str(" l S");
+        self.ops.push(op);
     }
 
     /// The grid lines of one page at one width: every row edge and column edge once, or, without grid lines, the box of the
@@ -854,6 +878,10 @@ fn sheet_area_pages(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "pdf_laid_ops_tests.rs"]
+mod ops_tests;
 
 #[cfg(test)]
 mod tests {
