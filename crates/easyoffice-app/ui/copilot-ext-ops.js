@@ -369,6 +369,16 @@
       return true;
     }
 
+    const focusHwpParagraph = (hwp, entry) => hwp.call("focusTarget", {
+      target: {
+        kind: "body_paragraph",
+        section: entry.section,
+        paragraph: entry.paragraph,
+        charOffset: 0,
+        length: Array.from(entry.text || "").length,
+      },
+    });
+
     async function locateHwpTarget(loc) {
       const hwp = getEmbedHwpHost();
       if (!hwp) return false;
@@ -380,16 +390,29 @@
         entry = single?.paragraphs?.[0];
       }
       if (!entry) return false;
-      await hwp.call("focusTarget", {
-        target: {
-          kind: "body_paragraph",
-          section: entry.section,
-          paragraph: entry.paragraph,
-          charOffset: 0,
-          length: Array.from(entry.text || "").length,
-        },
-      });
+      await focusHwpParagraph(hwp, entry);
       return true;
+    }
+
+    // 연출(PD-387)이 쓰는 한글 쪽 도움: 편집기 iframe 요소와, 대상 문단의 셸 화면 사각형(`index`는 문단 번호 또는 `"end"`).
+    // 편집기를 그 문단으로 옮긴 뒤 편집기의 읽기 전용 `getCaretRect`로 캐럿 상자를 받고 iframe 위치를 더한다. 문단이 읽어 둔 범위 밖이거나
+    // 편집기가 조회를 모르면 `null`이고, 연출은 편집기 가운데를 가리킨다. 표시 상자는 캐럿에서 시작해 한 줄 너비로 넓힌다.
+    const HWP_MARK_WIDTH = 320;
+    const getHwpFrame = () => getEmbedHwpHost()?.getFrame?.() ?? null;
+
+    async function hwpParagraphRect(index) {
+      const hwp = getEmbedHwpHost();
+      const frame = getHwpFrame();
+      if (!hwp || !frame) return null;
+      const snap = cachedHwpSnapshot;
+      const entry = snap?.byIndex?.get(index === "end" ? (snap.totalParagraphs || 0) - 1 : index);
+      if (!entry) return null;
+      await focusHwpParagraph(hwp, entry);
+      const caret = await hwp.call("getCaretRect", {});
+      if (!caret?.visible) return null;
+      const origin = frame.getBoundingClientRect();
+      const left = origin.left + caret.left;
+      return { left, top: origin.top + caret.top, width: Math.max(Math.min(HWP_MARK_WIDTH, origin.right - left - 8), caret.width), height: caret.height };
     }
 
     async function readDocBlocksTool(mod, args, docBlocksOf) {
@@ -834,6 +857,18 @@
       return true;
     }
 
+    // 연출(PD-387)이 쓰는 보드 쪽 도움: 있는 노드의 틀들과, 이 그래프 연산이 놓을 노드의 틀들(적용과 같은 배치 함수, 앞 그래프의 틀은 `existing`에 넣어 받는다).
+    const boardExistingFrames = () => {
+      const state = host.__EASYOFFICE_BASE_BOARD_HOST__?.getBoardStudio?.()?.getState?.();
+      return (state?.nodes || []).map(({ x, y, w, h }) => ({ x, y, w, h }));
+    };
+    const boardNewFrames = (op, existing) => computeLayeredGraphCoordinates(
+      Array.isArray(op.nodes) ? op.nodes : [],
+      Array.isArray(op.edges) ? op.edges : [],
+      existing,
+      op.direction,
+    );
+
     function boardEntries(op, entries, change) {
       const nodes = Array.isArray(op.nodes) ? op.nodes : [];
       const edges = Array.isArray(op.edges) ? op.edges : [];
@@ -930,6 +965,10 @@
       applyBoardOperationsBatch,
       boardEntries,
       boardFingerprint,
+      getHwpFrame,
+      hwpParagraphRect,
+      boardExistingFrames,
+      boardNewFrames,
     };
   }
 

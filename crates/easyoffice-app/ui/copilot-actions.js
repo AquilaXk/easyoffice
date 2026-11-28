@@ -107,6 +107,9 @@
       isReducedMotion,
       createCursor: () => cursorApi.createCopilotCursor({ document, win: host }),
       createTypist: host.__EASYOFFICE_COPILOT_TYPING__.createTypist,
+      hwpApi: { isEmbed: () => Boolean(extOps.getEmbedHwpHost()), frame: extOps.getHwpFrame, paragraphRect: extOps.hwpParagraphRect },
+      boardApi: { existing: extOps.boardExistingFrames, frames: extOps.boardNewFrames },
+      goToPdfPage: (page) => extOps.locatePdfTarget({ page }),
     });
 
     function getSelectionLabel(mod = getActiveModule()) {
@@ -831,11 +834,8 @@
      */
     async function applyOperationsAnimated(mod, mode, operations, turnId) {
       if (!canApply(mod, mode, operations)) return { applied: false, locations: [] };
-      if (mod === "HWP" && extOps.getEmbedHwpHost()) {
-        const applied = await applyOperations(mod, mode, operations, turnId);
-        return { ...applied, interrupted: false };
-      }
-      const beforeSnap = captureWorkspaceSnapshot(false);
+      // 내장 한글 편집기는 되돌리기를 편집기가 맡는다(`applyOperations`가 그 경로를 탄다): 작업공간 스냅숏이 필요 없다.
+      const beforeSnap = mod === "HWP" && extOps.getEmbedHwpHost() ? undefined : captureWorkspaceSnapshot(false);
       const run = performer.perform(mod, operations);
       activeRun = run;
       let result;
@@ -848,6 +848,25 @@
       if (result.operations.length === 0) return { applied: false, locations: [], interrupted: result.interrupted };
       const applied = await applyOperations(mod, mode, result.operations, turnId, { beforeSnap });
       return { ...applied, interrupted: result.interrupted };
+    }
+
+    /**
+     * PDF 답변이 인용한 쪽(위치 칩의 `page`)으로 포인터가 가서 쪽을 강조한다(PD-387). 편집이 없는 연출이라 문서는 바뀌지 않는다.
+     * 인용이 없거나, 다른 연출이 돌고 있거나, 움직임 줄이기가 켜져 있으면 아무것도 하지 않는다.
+     */
+    async function pointAtPdfPages(locations) {
+      const steps = (Array.isArray(locations) ? locations : [])
+        .filter((loc) => loc?.module === "PDF" && Number.isInteger(loc.page))
+        .map((loc) => ({ op: "pdf.point", page: loc.page }));
+      if (steps.length === 0 || activeRun !== null) return;
+      const run = performer.perform("PDF", steps);
+      if (!run.active) return;
+      activeRun = run;
+      try {
+        await run.done;
+      } finally {
+        endRun();
+      }
     }
 
     // A restore would drop whatever the user did after the turn, so the undo is gone once the history moved.
@@ -933,6 +952,7 @@
       snapshotTarget,
       applyOperations,
       applyOperationsAnimated,
+      pointAtPdfPages,
       dryRunVerifyOperations,
       executeReadTool,
       verifyFingerprintAsync,

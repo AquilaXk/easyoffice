@@ -34,3 +34,10 @@ export function loadUiModule(modulePath, env) {
   }
   return env;
 }
+
+const PERFORM_PARTS = ["copilot-perform-slide.js", "copilot-perform-sheet.js", "copilot-perform-ext.js", "copilot-perform-hwp.js", "copilot-perform-cite.js"];
+
+/** The per-module parts the copilot performer (`copilot-perform.js`) reads when it is created; load them before it. */
+export function loadPerformParts(env) {
+  for (const name of PERFORM_PARTS) loadUiModule(fileURLToPath(new URL("../../crates/easyoffice-app/ui/" + name, import.meta.url)), env);
+}

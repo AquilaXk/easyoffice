@@ -3,8 +3,10 @@
 // 누르기·끌기·놓기·쉼 같은 몸짓은 `copilot-timeline.js`의 장면(단계 목록 + `at` 위치)으로 짜고 재생기가 시각에 맞춰 돌린다. 이 파일의 나머지(연산에서 목표 뽑기,
 // 쓴 곳까지 연산 자르기, 임시로 쓴 것 되돌리기)는 직접 썼다: 포인터가 선택하고 글을 쳐 넣는 문서 편집이라는 원본이 따로 없다.
 //
-// 슬라이드 쪽(새 슬라이드, 개체 놓기·옮기기, 레이아웃·전환, 노트)은 `copilot-perform-slide.js`가 맡고, 이 파일은 문서·시트와 공통 도구(포인터, 타이핑, 드래그 선택,
+// 슬라이드 쪽(새 슬라이드, 개체 놓기·옮기기, 레이아웃·전환, 노트)은 `copilot-perform-slide.js`가 맡고, 이 파일은 문서·시트 셀 쓰기와 공통 도구(포인터, 타이핑, 드래그 선택,
 // 임시로 쓴 것의 되돌리기)를 둔다. 문서의 범위 교체(`doc.replace_paragraphs`의 `startIndex`·`endIndex`)는 옛 범위를 끌어 선택하고 가린 뒤 새 블록을 그 자리에 친다(PD-304).
+// 글을 치지 않는 연출(PD-387)은 모듈별 파일이 맡는다: 시트 서식·차트·행/열(`copilot-perform-sheet.js`), 데이터베이스·보드(`copilot-perform-ext.js`),
+// 내장 한글 편집기(`copilot-perform-hwp.js`), PDF 인용 쪽(`copilot-perform-cite.js`). 옛 편집기 한글은 문서 연출을 그대로 탄다.
 //
 // 연출은 눈에 보이는 임시 입력일 뿐이다. 글자는 편집 DOM에 한 자씩 써 넣지만 되돌리기 기록은 만들지 않고(글자마다 스냅숏을 뜨면 한 턴이 한 단계라는 규칙이 깨진다),
 // 끝나거나 멈추면 임시로 쓴 것을 원래대로 돌린 다음 한 번만 기존 적용 경로(`applyOperations`)로 쓴다. 멈추면 쓰던 부분까지만 연산으로 잘라 적용한다.
@@ -19,12 +21,40 @@
   // 셀 하나를 채우는 시간 상한(ms)과 글자 간격.
   const CELL_TYPE_MS = 500;
   const CELL_TYPE_SPEED = 12;
+  const CLICK_MS = 160;
   const opKind = (op) => String(op?.op || op?.type || op?.kind || "").trim();
 
   function createCopilotPerformer(deps) {
     const { document, win = host, docBlocksOf, getWorkspacePanels, slideDeckState, getActiveSlideIndex, getActiveSheetName, getSheetController, isReducedMotion, createCursor, createTypist } = deps;
-    const { blockText } = deps;
+    const { blockText, hwpApi = null, boardApi = null, goToPdfPage } = deps;
     const slidePerf = host.__EASYOFFICE_COPILOT_PERFORM_SLIDE__.createSlidePerformance({ document, slideDeckState, getActiveSlideIndex, getWorkspacePanels });
+    const sheetPerf = host.__EASYOFFICE_COPILOT_PERFORM_SHEET__.createSheetPerformance({ document, getActiveSheetName });
+    const extPerf = host.__EASYOFFICE_COPILOT_PERFORM_EXT__.createExtPerformance({ document, boardApi });
+    const hwpPerf = host.__EASYOFFICE_COPILOT_PERFORM_HWP__.createHwpPerformance({ hwpApi });
+    const pdfPerf = host.__EASYOFFICE_COPILOT_PERFORM_PDF__.createPdfPerformance({ document, goToPdfPage });
+    // 글을 치지 않는 단계가 잘리는 방식은 모듈이 정한다(`target.owner`).
+    const owners = { sheet: sheetPerf, ext: extPerf, hwp: hwpPerf, pdf: pdfPerf };
+    // 모듈별 연출 단계 수 상한(앞 이름이 단계 종류의 앞부분이다). 셀 쓰기(`sheet-cell`)는 `MAX_ANIMATED_CELLS`가 따로 센다.
+    const STEP_BUDGETS = {
+      sheet: host.__EASYOFFICE_COPILOT_PERFORM_SHEET__.MAX_SHEET_STEPS,
+      base: host.__EASYOFFICE_COPILOT_PERFORM_EXT__.MAX_BASE_STEPS,
+      board: host.__EASYOFFICE_COPILOT_PERFORM_EXT__.MAX_BOARD_NODES,
+      hwp: host.__EASYOFFICE_COPILOT_PERFORM_HWP__.MAX_HWP_STEPS,
+      pdf: host.__EASYOFFICE_COPILOT_PERFORM_PDF__.MAX_PDF_PAGES,
+    };
+    const budgetKey = (kind) => {
+      const family = kind.split("-")[0];
+      return kind !== "sheet-cell" && Object.hasOwn(STEP_BUDGETS, family) ? family : null;
+    };
+    const withinBudgets = (targets) => {
+      const used = {};
+      return targets.filter((target) => {
+        const key = budgetKey(target.kind);
+        if (!key) return true;
+        used[key] = (used[key] || 0) + 1;
+        return used[key] <= STEP_BUDGETS[key];
+      });
+    };
 
     const isTableDocItem = (item) => {
       if (typeof item === "string") return /^<table\b/i.test(item.trim());
@@ -38,9 +68,13 @@
       const targets = [];
       // 앞 연산이 더한 슬라이드까지 센 슬라이드 수(그 슬라이드는 아직 없다).
       const deck = mod === "SLIDE" ? { length: slideDeckState.length } : null;
+      // 내장 한글 편집기는 문서 편집기 DOM이 없다. 옛 편집기 한글은 문서와 같은 연출을 탄다.
+      const embedHwp = mod === "HWP" && Boolean(hwpApi?.isEmbed?.());
+      // 응답 하나 안에서 연산 사이로 이어지는 값: 보드에 앞 그래프가 놓은 틀들, PDF에서 이미 가리킨 쪽.
+      const carried = { placed: [], pages: new Set() };
       operations.forEach((op, opIndex) => {
         const kind = opKind(op);
-        if (mod === "DOC") {
+        if (mod === "DOC" || (mod === "HWP" && !embedHwp)) {
           if (kind === "doc.replace_span") {
             const index = Number(op?.index);
             if (Number.isInteger(index) && index >= 0) {
@@ -85,14 +119,24 @@
           }
         } else if (mod === "SLIDE") {
           targets.push(...slidePerf.collect(op, opIndex, kind, deck));
-        } else if (mod === "SHEET" && kind === "sheet.write" && Array.isArray(op.cells)) {
-          op.cells.slice(0, MAX_ANIMATED_CELLS).forEach((cell, entry) => {
-            const coord = String(cell?.coord || "").trim().toUpperCase();
-            if (coord) targets.push({ opIndex, kind: "sheet-cell", entry, coord, sheet: String(op.sheet || getActiveSheetName()), text: String(cell.raw ?? cell.formula ?? cell.value ?? "") });
-          });
+        } else if (mod === "SHEET" && kind === "sheet.write") {
+          if (Array.isArray(op.cells)) {
+            op.cells.slice(0, MAX_ANIMATED_CELLS).forEach((cell, entry) => {
+              const coord = String(cell?.coord || "").trim().toUpperCase();
+              if (coord) targets.push({ opIndex, kind: "sheet-cell", entry, coord, sheet: String(op.sheet || getActiveSheetName()), text: String(cell.raw ?? cell.formula ?? cell.value ?? "") });
+            });
+          }
+        } else if (mod === "SHEET") {
+          targets.push(...sheetPerf.collect(op, opIndex, kind));
+        } else if (embedHwp) {
+          targets.push(...hwpPerf.collect(op, opIndex, kind));
+        } else if (mod === "BASE" || mod === "BOARD") {
+          targets.push(...extPerf.collect(mod, op, opIndex, kind, carried));
+        } else if (mod === "PDF") {
+          targets.push(...pdfPerf.collect(op, opIndex, kind, carried.pages));
         }
       });
-      return targets.slice(0, MAX_ANIMATED_TARGETS);
+      return withinBudgets(targets).slice(0, MAX_ANIMATED_TARGETS);
     }
 
     // 셀 값으로 읽히는 글(수식, 숫자, 백분율, 통화, 괄호 음수, 날짜, 시간, 참거짓)은 쓰다 만 것이 다른 값이 되므로 통째로 쓰이거나 아예 쓰이지 않는다.
@@ -120,6 +164,12 @@
         if (opIndex > target.opIndex) return;
         if (target.kind.startsWith("slide")) {
           const kept = slidePerf.cut(op, opKind(op), target, typed, targets.slice(0, targets.indexOf(target)));
+          if (kept) out.push(kept);
+          return;
+        }
+        const owner = owners[target.owner];
+        if (owner) {
+          const kept = owner.cut(op, opKind(op), target);
           if (kept) out.push(kept);
           return;
         }
@@ -412,6 +462,17 @@
         play, gesture,
         click: (ms) => play([{ run: () => cursor.press(true) }, { at: ms, run: () => cursor.press(false) }]),
         hold: (ms) => play([{ duration: ms }]),
+        // 화면에 보이는 요소의 사각형. 없거나 가려져 크기가 없으면 `null`(그 단계는 연출 없이 지나간다).
+        visibleRect: (el) => {
+          if (!el) return null;
+          const rect = elementRect(el);
+          return rect.width > 0 && rect.height > 0 ? rect : null;
+        },
+        // 사각형 가운데로 가서 누른다.
+        clickAt: async (rect) => {
+          await session.moveTo(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          await session.click(CLICK_MS);
+        },
       };
       const drivers = {
         "doc-replace": docTarget,
@@ -420,6 +481,10 @@
         "doc-range": docRangeTarget,
         "sheet-cell": sheetTarget,
         ...slidePerf.createDrivers(session),
+        ...sheetPerf.createDrivers(session),
+        ...extPerf.createDrivers(session),
+        ...hwpPerf.createDrivers(session),
+        ...pdfPerf.createDrivers(session),
       };
 
       const done = (async () => {
@@ -452,7 +517,10 @@
       return { done, stop, discard, active: true };
     }
 
-    return { perform, collectTargets, cutOperations, MAX_ANIMATED_CELLS };
+    return {
+      perform, collectTargets, cutOperations, MAX_ANIMATED_CELLS,
+      MAX_SHEET_STEPS: STEP_BUDGETS.sheet, MAX_BASE_STEPS: STEP_BUDGETS.base, MAX_BOARD_NODES: STEP_BUDGETS.board, MAX_HWP_STEPS: STEP_BUDGETS.hwp, MAX_PDF_PAGES: STEP_BUDGETS.pdf,
+    };
   }
 
   host.__EASYOFFICE_CREATE_COPILOT_PERFORMER__ = createCopilotPerformer;

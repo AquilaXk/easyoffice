@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { loadUiModule } from "./test-support/load-ui-module.mjs";
+import { loadPerformParts, loadUiModule } from "./test-support/load-ui-module.mjs";
 
 // The rollback of a failed operation list (PD-264): a failed restore is reported with the original error, and a restore that
 // would drop the user's own edits (the history moved while the operations ran) is not done.
@@ -17,7 +17,7 @@ function actions({ restore, epoch }) {
   loadUiModule(UI("copilot-cursor.js"), env);
   loadUiModule(UI("copilot-timeline.js"), env);
   loadUiModule(UI("copilot-preview.js"), env);
-  loadUiModule(UI("copilot-perform-slide.js"), env);
+  loadPerformParts(env);
   loadUiModule(UI("copilot-perform.js"), env);
   loadUiModule(UI("copilot-edit-mode.js"), env);
   loadUiModule(UI("copilot-actions.js"), env);

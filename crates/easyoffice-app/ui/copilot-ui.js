@@ -643,6 +643,7 @@
         assistantEntry.reply = String(res?.reply || "요청을 처리했습니다.");
         assistantEntry.reasoning = String(res?.reasoning || "");
         assistantEntry.locations = explicitLocs;
+        if (mod === "PDF") void copilotActions.pointAtPdfPages(explicitLocs);
         if (mode === "edit" && ops.length > 0) await presentEdit(assistantEntry, mod, ops, turn.frozenSelection);
         const dropped = Number(res?.droppedOperations) || 0;
         if (dropped > 0) setStatusFeedback?.("형식이 맞지 않는 작업 " + dropped + "개를 건너뛰었습니다");

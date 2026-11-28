@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { loadUiModule } from "./test-support/load-ui-module.mjs";
+import { loadPerformParts, loadUiModule } from "./test-support/load-ui-module.mjs";
 
 // PD-267: the copilot page never sends a lone surrogate (the engine refuses the whole request for one), asks a command
 // again only for a target that did not change, and paints a selection on paper in a translucent blue in both themes.
@@ -18,7 +18,7 @@ function loadText() {
   loadUiModule(UI("copilot-cursor.js"), env);
   loadUiModule(UI("copilot-timeline.js"), env);
   loadUiModule(UI("copilot-preview.js"), env);
-  loadUiModule(UI("copilot-perform-slide.js"), env);
+  loadPerformParts(env);
   loadUiModule(UI("copilot-perform.js"), env);
   return env.__EASYOFFICE_COPILOT_TEXT__.clipCodePoints;
 }
@@ -53,7 +53,7 @@ function makeActions(texts, selectedText = "") {
   loadUiModule(UI("copilot-cursor.js"), env);
   loadUiModule(UI("copilot-timeline.js"), env);
   loadUiModule(UI("copilot-preview.js"), env);
-  loadUiModule(UI("copilot-perform-slide.js"), env);
+  loadPerformParts(env);
   loadUiModule(UI("copilot-perform.js"), env);
   loadUiModule(UI("sheet-refs.js"), env);
   loadUiModule(UI("copilot-edit-mode.js"), env);
@@ -147,7 +147,7 @@ test("BASE and BOARD context cut every text at a code point", () => {
   loadUiModule(UI("copilot-cursor.js"), env);
   loadUiModule(UI("copilot-timeline.js"), env);
   loadUiModule(UI("copilot-preview.js"), env);
-  loadUiModule(UI("copilot-perform-slide.js"), env);
+  loadPerformParts(env);
   loadUiModule(UI("copilot-perform.js"), env);
   loadUiModule(UI("base-board-host.js"), env);
   env.__EASYOFFICE_BASE_BOARD_HOST__.init({ document: { getElementById: () => null }, env: { addEventListener() {} }, invokeIpc: async () => ({}) });

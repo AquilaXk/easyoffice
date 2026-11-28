@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { loadUiModule } from "./test-support/load-ui-module.mjs";
+import { loadPerformParts, loadUiModule } from "./test-support/load-ui-module.mjs";
 
 // PD-267: what the copilot page code sends and what it refuses. Context indexes, the omitted-paragraph count, the
 // selection command target, undo after the user edited, and a sheet name that does not exist.
@@ -55,7 +55,7 @@ function createActions({ texts = [], epoch = () => 1, selection = null, slides =
   loadUiModule(UI("copilot-cursor.js"), env);
   loadUiModule(UI("copilot-timeline.js"), env);
   loadUiModule(UI("copilot-preview.js"), env);
-  loadUiModule(UI("copilot-perform-slide.js"), env);
+  loadPerformParts(env);
   loadUiModule(UI("copilot-perform.js"), env);
   loadUiModule(UI("copilot-edit-mode.js"), env);
   loadUiModule(UI("copilot-actions.js"), env);

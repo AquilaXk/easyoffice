@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { loadUiModule } from "./test-support/load-ui-module.mjs";
+import { loadPerformParts, loadUiModule } from "./test-support/load-ui-module.mjs";
 
 // PD-304: which steps a slide change or a range replacement becomes, and where a stopped performance cuts the operations.
 
@@ -10,7 +10,7 @@ const UI = (name) => fileURLToPath(new URL("../crates/easyoffice-app/ui/" + name
 function performer({ elements = [], registered = [] } = {}) {
   const env = { __EASYOFFICE_SHEET_UTILS__: { registerDocImage: (...args) => registered.push(args) } };
   loadUiModule(UI("slide-canvas.js"), env);
-  loadUiModule(UI("copilot-perform-slide.js"), env);
+  loadPerformParts(env);
   loadUiModule(UI("copilot-perform.js"), env);
   const deck = [{ aspect: "16:9", title: "첫 슬라이드", lower: "", elements }];
   return env.__EASYOFFICE_CREATE_COPILOT_PERFORMER__({ document: {}, slideDeckState: deck, getActiveSlideIndex: () => 0, getActiveSheetName: () => "Sheet1", blockText: (x) => String(x?.text ?? x) });

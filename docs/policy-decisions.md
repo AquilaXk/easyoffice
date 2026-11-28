@@ -6819,3 +6819,18 @@
 - **Trade-offs** 새 내용은 승인 전에 문서에 들어간다. 되돌리기 한 단계로 막고, 버리기가 안 되는 경우(그 사이 직접 고침)는 단추를 끈다. HWP 아래에 삽입은 실제 편집기에서 직접 확인하지 못했고 모의 편집기 시험으로만 확인했다.
 - **Verified by** `scripts/test-copilot-edit-mode-pd386.mjs`, `scripts/test-webui-copilot-*.mjs`, `scripts/test-design-guard.mjs`, WebKit `scripts/webkit-dom/run.mjs`.
 - **Revisit when** 시트 `chart`를 새 내용으로 볼지, HWP 아래에 삽입을 실제 편집기에서 확인할 때.
+
+## PD-387 — 코파일럿 포인터 연출을 시트 서식·차트·행/열, HWP, BASE, BOARD, PDF 인용 쪽까지 넓힌다 (2026-11-28)
+
+- **Decision (QA 2026-11-27)** 포인터 연출(`copilot-perform.js`)을 모듈별 파일로 나눠 빠진 곳에 더했다. 연출은 눈에 보이는 임시 표시(포인터와 선택 강조)일 뿐이고 문서·표·보드 DOM은 바꾸지 않는다. 쓰기는 연출이 끝난 뒤 기존 적용 경로 한 번이라 결과는 연출이 없을 때와 같다. 움직임 줄이기가 켜져 있으면 연출 없이 바로 적용하고, 화면 입력이 끼어들면 멈춘다.
+  - **SHEET** (`copilot-perform-sheet.js`) `sheet.format`은 범위를 끌어 선택하고 바뀌는 서식 단추(굵게·채우기 색·글꼴 색·백분율/통화)로 가서 누른다. `sheet.chart`는 데이터 범위를 끌어 선택하고 삽입 메뉴를 누른 뒤 범위 오른쪽에 차트 자리를 끌어 그린다. `sheet.structure`의 행·열 삽입/삭제는 그 행·열 머리글로 가서 선택·누른다. 표·피벗·정렬/필터·조건부 서식·메모는 범위를 선택하고 해당 메뉴를 누른다. 틀 고정과 읽히지 않는 범위는 단계가 없다.
+  - **HWP** 옛 편집기(문서 편집기 DOM을 쓰는 경우)는 `collectTargets`가 DOC와 같은 연출을 태운다. 내장 편집기(`hwp-studio` iframe)는 `copilot-perform-hwp.js`가 문단으로 가서 선택 표시를 하고 누른다(글을 한 자씩 치지는 않는다). 문단 자리는 편집기 쪽 읽기 전용 RPC `getCaretRect`(`caret-rect-v1`, `copilot-bridge.ts`의 `readCaretRect`)로 받는다: 셸이 그 문단으로 편집기를 옮기고(`focusTarget`) 캐럿 상자를 받아 iframe 위치를 더한다. 자리를 모르면 편집기 가운데를 누른다.
+  - **BASE·BOARD** (`copilot-perform-ext.js`) 새 필드는 마지막 머리글 끝, 새 레코드는 맨 아래 `새 레코드` 단추, 레코드 수정은 그 행의 칸을 누른다. 보드 `board.add_graph`는 적용과 같은 배치 함수(`computeLayeredGraphCoordinates`)로 놓일 틀을 구해 캔버스 안에 맞춰 노드마다 끌어 그린다.
+  - **PDF** (`copilot-perform-cite.js`) 편집 연산이 없으므로 답변의 구조화된 위치 칩(`locations`의 `{ module: "PDF", page }`)이 인용한 쪽으로 뷰어를 보내고 포인터가 쪽 카드로 가서 강조만 한다(`pointAtPdfPages`). 본문 글에서 쪽 번호를 찾아 읽지 않는다.
+  - **멈춘 곳 자르기** 글을 치지 않는 단계는 멈춘 단계의 작업을 쓰지 않는다(절반만 적용된 서식·차트가 없도록). 레코드·수정 행·한글 문단·보드 노드는 끝낸 것까지 연산으로 잘라 적용한다(보드는 남은 노드 사이의 연결선만 남긴다).
+  - **상한(연출 수, 넘으면 연출 없이 마지막에 한꺼번에 적용)** 시트 24(`MAX_SHEET_STEPS`), BASE 20(`MAX_BASE_STEPS`), BOARD 노드 12(`MAX_BOARD_NODES`), HWP 문단 12(`MAX_HWP_STEPS`), PDF 쪽 3(`MAX_PDF_PAGES`). 기존 셀 쓰기 40과 전체 60은 그대로다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 포인터가 문서를 선택·조작하는 연출을 하는 허용 라이선스 라이브러리는 없다. (2) 이미 쓰는 포인터·몸짓·장면 재생기(`copilot-cursor.js`, `copilot-timeline.js`)와 슬라이드 개체 그리기 순서(`copilot-perform-slide.js`)를 그대로 쓴다. (3) 이식할 참조 구현이 없어 단계 뽑기·자르기·단추 찾기만 직접 썼다. 새 외부 코드는 없다.
+- **Why** 편집 연산이 있는 모듈마다 같은 연출이 있어야 코파일럿이 무엇을 어디에 하는지 보인다. 지금까지는 문서 문단·시트 셀 쓰기·슬라이드만 있었다.
+- **Trade-offs** 시트 서식·차트·행/열과 BASE·BOARD·HWP는 글을 치지 않고 이동·선택·누르기만 한다. 서식 단추와 메뉴 제목은 화면에 보이는 것만 누르고, 보이지 않으면(메뉴가 가려졌거나 가상 스크롤 밖) 그 단계는 이동 없이 지나간다. 내장 한글은 연출 중 편집기의 캐럿이 대상 문단으로 옮겨진다(문서는 바뀌지 않는다). 편집기가 옛 버전이라 조회를 모르면 편집기 가운데를 누른다.
+- **Verified by** `scripts/test-copilot-perform-pointer-pd387.mjs`(단계 뽑기·상한·자르기·같은 결과·움직임 줄이기), `scripts/test-webui-copilot-pointer-pd387.mjs`(시트 서식·차트·행 삽입이 연출 유무와 같은 결과, 손 대면 중단, PDF 인용 쪽, 한글·보드 도움 함수, 편집기 캐럿 조회), `scripts/test-hwp-studio.mjs`, WebKit `scripts/webkit-dom/run.mjs`.
+- **Revisit when** 내장 한글의 캐럿 자리를 실제 편집기에서 확인할 때, 시트 메뉴 단추가 가려진 채 눌리는 모양이 어색하면 메뉴를 열어 보이는 방식으로 바꿀 때.

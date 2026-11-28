@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { acceptProposal, reviewButton } from "./test-support/copilot-accept.mjs";
-import { loadUiModule } from "./test-support/load-ui-module.mjs";
+import { loadPerformParts, loadUiModule } from "./test-support/load-ui-module.mjs";
 import { open, answer } from "./test-support/copilot-open.mjs";
 import {
   applyCopilotEdits,
@@ -303,7 +303,7 @@ test("SLIDE omits duplicate body/notes/default layout, PDF sends activePage, SHE
   loadUiModule(UI("copilot-cursor.js"), env);
   loadUiModule(UI("copilot-timeline.js"), env);
   loadUiModule(UI("copilot-preview.js"), env);
-  loadUiModule(UI("copilot-perform-slide.js"), env);
+  loadPerformParts(env);
   loadUiModule(UI("copilot-perform.js"), env);
   loadUiModule(UI("copilot-edit-mode.js"), env);
   loadUiModule(UI("copilot-actions.js"), env);
@@ -466,7 +466,7 @@ test("regression fixes: live UI chunk eviction across 9 turns, <del> active span
   p.textContent = "안녕 세계 끝";
   const perfEnv = { ...uiH.host };
   loadUiModule(UI("copilot-timeline.js"), perfEnv);
-  loadUiModule(UI("copilot-perform-slide.js"), perfEnv);
+  loadPerformParts(perfEnv);
   loadUiModule(UI("copilot-perform.js"), perfEnv);
   const performer = perfEnv.__EASYOFFICE_CREATE_COPILOT_PERFORMER__({
     document: uiH.document,
