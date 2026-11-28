@@ -6,8 +6,9 @@ import { KNOWN_DIALOG_VIOLATIONS } from "./dialog-known.mjs";
 // tab of it) through the menu command a user would use, measures it (dialog-layout.mjs) and fails with the dialog, the
 // element and the measured values. What a dialog already breaks is listed per step in dialog-known.mjs; that list only shrinks.
 //
-// Not covered yet (TODO.md): the hyperlink, table properties and image dialogs (they need a selection first), and the dialogs of the
-// slide, PDF and base windows.
+// A dialog that needs a selection or an object gets it in its opening steps (a pasted table, a pasted picture, a made table).
+// The slide, PDF and base windows have their own lists. The base import dialog (it opens after a file is chosen), the
+// slide and PDF dialogs that need a loaded file, and the pivot and chart sub-dialogs are not covered yet.
 
 const click = (selector) => (page) => page.evaluate((target) => document.querySelector(target).click(), selector);
 const choose = (selector, value) => (page) => page.evaluate(([target, picked]) => {
@@ -153,5 +154,35 @@ function layoutStep([name, dialogId, opens]) {
   }];
 }
 
+/** A slide dialog through the opener the double click and the ribbon use (`slide-dialogs.js`), with the element it edits. */
+const slideDialog = (opener, element) => (page) => page.evaluate(([name, spec]) => {
+  const canvas = window.__EASYOFFICE_SLIDE_CANVAS__;
+  canvas.dialogs[name](spec ? canvas.addElement(spec) : null);
+}, [opener, element]);
+const PNG_1X1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+const SLIDE_DIALOGS = [
+  ["마스터 레이아웃", "slide-layout-dialog", [click('[data-studio-menu-cmd="slide-mod-master"]')]],
+  ["도형", "slide-shape-dialog", [slideDialog("openShapeDialog")]],
+  ["표", "slide-table-dialog", [slideDialog("openTableDialog")]],
+  ["차트", "slide-chart-dialog", [slideDialog("openChartDialog")]],
+  ["그림", "slide-image-dialog", [slideDialog("openImageDialog", { kind: "image", x: 100, y: 100, w: 240, h: 160, data: PNG_1X1, mime: "image/png" })]],
+];
+
+const PDF_DIALOGS = [
+  ["형광펜·밑줄 주석", "pdf-highlight-dialog", [click('[data-studio-menu-cmd="pdf-mod-highlight"]')]],
+  ["페이지 분할·병합", "pdf-splitmerge-dialog", [(page) => page.evaluate(() => document.getElementById("pdf-splitmerge-dialog").showModal())]],
+  ["문서 구조", "outline-dialog", [click('[data-studio-menu-cmd="view-outline"]')]],
+  ["개인정보 지우기", "pii-dialog", [click('[data-studio-menu-cmd="scrub-pii"]')]],
+];
+
+const BASE_DIALOGS = [
+  ["필드 추가", "base-field-dialog", [press("#btn-base-add-field")]],
+  ["필드 설정", "base-field-dialog", [press(".base-field-edit-btn")]],
+];
+
 export const sheetDialogSteps = SHEET_DIALOGS.map(layoutStep);
 export const docDialogSteps = DOC_DIALOGS.map(layoutStep);
+export const slideDialogSteps = SLIDE_DIALOGS.map(layoutStep);
+export const pdfDialogSteps = PDF_DIALOGS.map(layoutStep);
+export const baseDialogSteps = BASE_DIALOGS.map(layoutStep);

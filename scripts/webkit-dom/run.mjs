@@ -4,7 +4,7 @@
 import { baseSteps } from "./base.mjs";
 import { copilotDocSteps, copilotSlideSteps } from "./copilot.mjs";
 import { copilotBasePointerSteps, copilotBoardPointerSteps, copilotSheetPointerSteps } from "./copilot-pointer.mjs";
-import { docDialogSteps, sheetDialogSteps } from "./dialogs.mjs";
+import { baseDialogSteps, docDialogSteps, pdfDialogSteps, sheetDialogSteps, slideDialogSteps } from "./dialogs.mjs";
 import { docSteps } from "./doc.mjs";
 import { sheetSteps } from "./sheet.mjs";
 import { findEngine, loadPlaywright, runSteps, startEngine, tempCaptureDir } from "./support.mjs";
@@ -25,9 +25,10 @@ try {
     groups: [
       { module: "SHEET", steps: [...sheetSteps, ...sheetDialogSteps, ...copilotSheetPointerSteps] },
       { module: "DOC", steps: [...docSteps, ...copilotDocSteps, ...docDialogSteps] },
-      { module: "SLIDE", steps: copilotSlideSteps },
-      { module: "BASE", steps: [...baseSteps, ...copilotBasePointerSteps] },
+      { module: "SLIDE", steps: [...copilotSlideSteps, ...slideDialogSteps] },
+      { module: "BASE", steps: [...baseSteps, ...copilotBasePointerSteps, ...baseDialogSteps] },
       { module: "BOARD", steps: copilotBoardPointerSteps },
+      { module: "PDF", steps: pdfDialogSteps },
     ],
   });
   if (failed) console.log(`${failed} step(s) failed, captures in ${captureDir}`);
