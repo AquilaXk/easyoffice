@@ -26,8 +26,13 @@
 
   const functionOf = (id) => FUNCTIONS.find((fn) => fn.id === id) || null;
   const valueOf = (entry) => String(entry?.value ?? "");
-  const isSubtotalRow = (cells) => cells.some((entry) => SUBTOTAL_FORMULA.test(String(entry?.formula ?? "")));
-  const hasOtherFormula = (cells) => cells.some((entry) => entry?.formula && !SUBTOTAL_FORMULA.test(String(entry.formula)));
+  // A row this command made: a `SUBTOTAL` formula and a label in the form it writes (`총합계`, `가 합계`, or the function's name
+  // alone). A row the user built with `SUBTOTAL` by hand has no such label and stays a row of the list.
+  const isLabel = (text) => text === GRAND_TOTAL || FUNCTIONS.some((fn) => text === fn.label || text.endsWith(" " + fn.label));
+  const isSubtotalRow = (cells) =>
+    cells.some((entry) => SUBTOTAL_FORMULA.test(String(entry?.formula ?? ""))) && cells.some((entry) => !entry?.formula && isLabel(valueOf(entry)));
+  // Formulas in the rows that move would point at the wrong cells afterwards: the list is refused.
+  const hasOtherFormula = (cells) => cells.some((entry) => Boolean(entry?.formula));
 
   // `rows[0]` is the header row; each row is the cells of the list's columns (`{ value, formula, style }` or null). `options`:
   // `{ firstRow, firstCol, groupCol, calcCols, fn, below, replace, colName }` with `groupCol` and `calcCols` as 0-based offsets in a row
@@ -106,5 +111,39 @@
     return { rows: [rows[0], ...detail] };
   }
 
-  host.__EASYOFFICE_SHEET_SUBTOTAL__ = Object.freeze({ FUNCTIONS, GRAND_TOTAL, functionOf, plan, removeAll, isSubtotalRow });
+  // Whether the text of a formula (or of a name or chart reference) points into `region` (`{ r1, c1, r2, c2 }`, 1-based) of
+  // `sheet`. `home` is the sheet the text lives on: its references without a sheet name are that sheet's. Whole row and column
+  // references (`A:A`, `2:5`) count when they cover any part of the region. `colIndex` turns letters into a column number.
+  const CELL_REF = /(?:((?:'(?:[^']|'')+'|[A-Za-z_][\w.]*))!)?\$?([A-Za-z]{1,3})\$?(\d{1,7})(?::\$?([A-Za-z]{1,3})\$?(\d{1,7}))?(?![\w(])/g;
+  const COL_REF = /(?:((?:'(?:[^']|'')+'|[A-Za-z_][\w.]*))!)?\$?([A-Za-z]{1,3}):\$?([A-Za-z]{1,3})(?![\w(])/g;
+  const ROW_REF = /(?:((?:'(?:[^']|'')+'|[A-Za-z_][\w.]*))!)?\$?(\d{1,7}):\$?(\d{1,7})(?![\w(])/g;
+
+  function refersInto(text, { sheet, home, region, colIndex }) {
+    const same = (prefix) => {
+      if (!prefix) return home === sheet;
+      const name = prefix.startsWith("'") ? prefix.slice(1, -1).replaceAll("''", "'") : prefix;
+      return name.toLowerCase() === sheet.toLowerCase();
+    };
+    const overlaps = (r1, c1, r2, c2) => r1 <= region.r2 && r2 >= region.r1 && c1 <= region.c2 && c2 >= region.c1;
+    const source = String(text ?? "");
+    for (const m of source.matchAll(CELL_REF)) {
+      if (!same(m[1])) continue;
+      const [c1, r1] = [colIndex(m[2].toUpperCase()), Number(m[3])];
+      const [c2, r2] = m[4] ? [colIndex(m[4].toUpperCase()), Number(m[5])] : [c1, r1];
+      if (overlaps(Math.min(r1, r2), Math.min(c1, c2), Math.max(r1, r2), Math.max(c1, c2))) return true;
+    }
+    for (const m of source.matchAll(COL_REF)) {
+      if (!same(m[1])) continue;
+      const [a, b] = [colIndex(m[2].toUpperCase()), colIndex(m[3].toUpperCase())];
+      if (overlaps(1, Math.min(a, b), Number.MAX_SAFE_INTEGER, Math.max(a, b))) return true;
+    }
+    for (const m of source.matchAll(ROW_REF)) {
+      if (!same(m[1])) continue;
+      const [a, b] = [Number(m[2]), Number(m[3])];
+      if (overlaps(Math.min(a, b), 1, Math.max(a, b), Number.MAX_SAFE_INTEGER)) return true;
+    }
+    return false;
+  }
+
+  host.__EASYOFFICE_SHEET_SUBTOTAL__ = Object.freeze({ FUNCTIONS, GRAND_TOTAL, MAX_ROWS, functionOf, plan, removeAll, isSubtotalRow, refersInto });
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

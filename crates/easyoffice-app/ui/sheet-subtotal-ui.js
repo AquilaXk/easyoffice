@@ -5,6 +5,8 @@
   // `sheet-subtotal.js` into the sheet. The list is the selection (several cells) or the region around the active cell; its first
   // row holds the headings. The subtotal rows are made by one structure edit (rows inserted or deleted after the list) and the
   // list is written over its rows in that same undo step, together with the outline groups that fold the details.
+  // Cells of a list the command reads.
+  const MAX_LIST_CELLS = 1000000;
   const MESSAGES = {
     none: "제거할 부분합이 없습니다",
     rows: "머리글 아래에 데이터가 있어야 합니다",
@@ -14,11 +16,13 @@
     kept: "이미 부분합이 있습니다. 새로운 값으로 대치하세요",
     limit: "데이터가 너무 많습니다",
     beside: "목록 옆에 다른 데이터가 있어 쓸 수 없습니다",
+    referenced: "다른 수식·이름·차트가 이 목록을 참조해 쓸 수 없습니다",
+    tables: "표나 병합 셀이 있는 목록에는 쓸 수 없습니다",
     function: "사용할 함수를 고르세요",
   };
 
   function createSheetSubtotalUi(deps) {
-    const { document, kit, sheetDataStore, getActiveSheetName, getRanges, getSelection, snapshotDomSheetCells, commitIfEditing, editAxis, applyCellEdits, grid, say } = deps;
+    const { document, kit, sheetDataStore, getActiveSheetName, getRanges, getSelection, getExtent, snapshotDomSheetCells, commitIfEditing, editAxis, applyCellEdits, grid, say } = deps;
     const subtotal = host.__EASYOFFICE_SHEET_SUBTOTAL__;
     const special = host.__EASYOFFICE_SHEET_SPECIAL_CELLS__;
     const outlineApi = host.__EASYOFFICE_SHEET_OUTLINE__;
@@ -30,7 +34,11 @@
     function listRegion(map) {
       const ranges = getRanges();
       const only = ranges.length === 1 ? ranges[0] : null;
-      if (only && (only.r1 !== only.r2 || only.c1 !== only.c2)) return { ...only };
+      // A selection is cut to the cells that hold data: Ctrl+A or whole columns must not make the command read a million lines.
+      if (only && (only.r1 !== only.r2 || only.c1 !== only.c2)) {
+        const extent = getExtent();
+        return { r1: only.r1, c1: only.c1, r2: Math.min(only.r2, extent.dataRows), c2: Math.min(only.c2, extent.dataCols) };
+      }
       const at = getSelection();
       const filled = (row, col) => {
         const entry = map[refsApi.refOf(row, col)];
@@ -44,6 +52,37 @@
       for (let col = region.c1; col <= region.c2; col += 1) cells.push(map[refsApi.refOf(row, col)] ?? null);
       return cells;
     };
+
+    // Why a list may not be reorganised, or `null`: too big, a table or merged cells in it, or a formula, name or chart that
+    // points into it (the rows move by this command, and what points at them would not follow).
+    function refusalFor(map, region, sheet) {
+      const rows = region.r2 - region.r1 + 1;
+      const cols = region.c2 - region.c1 + 1;
+      if (rows < 1 || cols < 1) return "rows";
+      if (rows > subtotal.MAX_ROWS || rows * cols > MAX_LIST_CELLS) return "limit";
+      if (layoutApi.tablesIn(sheet, region.r1, region.c1, region.r2, region.c2).length > 0 || layoutApi.mergesIn(sheet, region.r1, region.c1, region.r2, region.c2).length > 0) return "tables";
+      const look = (text, home) => subtotal.refersInto(text, { sheet, home, region, colIndex: refsApi.colIndex });
+      const inside = (p) => p.row >= region.r1 && p.row <= region.r2 && p.col >= region.c1 && p.col <= region.c2;
+      for (const name of Object.keys(sheetDataStore)) {
+        const cells = name === sheet ? map : sheetDataStore[name] || {};
+        for (const ref of Object.keys(cells)) {
+          const formula = cells[ref]?.formula;
+          if (!formula) continue;
+          const p = name === sheet ? refsApi.parseRef(ref) : null;
+          if (p && inside(p)) continue;
+          if (look(formula, name)) return "referenced";
+        }
+      }
+      const names = host.__EASYOFFICE_SHEET_NAMES__?.getAll?.() ?? [];
+      if (names.some((def) => look(def.refersTo, null))) return "referenced";
+      for (const owner of Object.keys(sheetDataStore)) {
+        for (const chart of layoutApi.chartsOf(owner)) {
+          const texts = [chart.dataRange, ...(chart.series || []).flatMap((s) => [s.nameRef, s.categoriesRef, s.valuesRef])];
+          if (texts.some((text) => text && look(text, owner))) return "referenced";
+        }
+      }
+      return null;
+    }
 
     // The rows of the list, and whether something sits beside it in its rows (those cells would not move with the list).
     function readList(map, region) {
@@ -179,6 +218,11 @@
       const region = listRegion(map);
       if (region.r2 - region.r1 < 1) {
         say(MESSAGES.rows);
+        return false;
+      }
+      const refused = refusalFor(map, region, getActiveSheetName());
+      if (refused) {
+        say(MESSAGES[refused]);
         return false;
       }
       const list = readList(map, region);

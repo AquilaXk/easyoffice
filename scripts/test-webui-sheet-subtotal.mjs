@@ -150,3 +150,67 @@ test("부분합 writes the rows over the list in one step with their outline, an
   assert.equal(cellAt("A13").textContent, "");
   assert.equal((h.host.__EASYOFFICE_SHEET_LAYOUT__.outlineOf(sheet)?.rows || []).length, 0, "the groups go with the subtotals");
 });
+
+test("refersInto sees a formula, name or chart text that points into the list, by sheet", () => {
+  const colIndex = (letters) => [...letters].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+  const region = { r1: 9, c1: 1, r2: 12, c2: 2 };
+  const into = (text, home = "S", sheet = "S") => subtotal.refersInto(text, { sheet, home, region, colIndex });
+  assert.equal(into("=SUM(B10:B11)"), true);
+  assert.equal(into("=A9*2"), true);
+  assert.equal(into("=SUM($A$1:$B$40)"), true, "a range that covers the list");
+  assert.equal(into("=SUM(B13:B20)"), false, "below the list");
+  assert.equal(into("=SUM(C9:C12)"), false, "beside the list");
+  assert.equal(into("=SUM(A:A)"), true, "a whole column");
+  assert.equal(into("=SUM(10:11)"), true, "whole rows");
+  assert.equal(into("=SUM(2:5)"), false);
+  assert.equal(into("=B10", "T"), false, "the unprefixed cell of another sheet is that sheet's");
+  assert.equal(into("=T!B10", "S"), false);
+  assert.equal(into("='S'!B10", "T"), true);
+  assert.equal(into("=S!B10+1", "T"), true);
+  assert.equal(into("=LOG10(2)+B1"), false, "a function name is no cell");
+});
+
+test("a formula, a table or a name that points into the list keeps 부분합 from moving it", async () => {
+  const h = await openSheet();
+  const get = (id) => h.document.getElementById(id);
+  const say = () => get("status-command-feedback").textContent;
+  for (const [ref, text] of [["A9", "item"], ["B9", "amount"], ["A10", "x"], ["B10", "1"], ["A11", "y"], ["B11", "2"], ["D1", "=SUM(B10:B11)"]]) await type(h, ref, text);
+  const select = async (range) => {
+    h.userClick(h.document.querySelector('.md-item[data-sheet-act="goto"]'));
+    await flushAsyncTurns(6);
+    get("sheet-goto-ref").value = range;
+    h.userClick(get("btn-sheet-goto-ok"));
+    await flushAsyncTurns(10);
+  };
+  await select("A9:B11");
+  h.userClick(h.document.querySelector('.md-item[data-sheet-act="subtotal"]'));
+  await flushAsyncTurns(10);
+  assert.equal(get("sheet-subtotal-dialog").open, false);
+  assert.equal(say(), "다른 수식·이름·차트가 이 목록을 참조해 쓸 수 없습니다");
+});
+
+test("a whole-sheet selection is cut to the data and a SUBTOTAL row the user built by hand is not taken for one of ours", async () => {
+  const h = await openSheet();
+  const get = (id) => h.document.getElementById(id);
+  const select = async (range) => {
+    h.userClick(h.document.querySelector('.md-item[data-sheet-act="goto"]'));
+    await flushAsyncTurns(6);
+    get("sheet-goto-ref").value = range;
+    h.userClick(get("btn-sheet-goto-ok"));
+    await flushAsyncTurns(10);
+  };
+  await select("A1:XFD1048576");
+  const started = Date.now();
+  h.userClick(h.document.querySelector('.md-item[data-sheet-act="subtotal"]'));
+  await flushAsyncTurns(10);
+  assert.ok(Date.now() - started < 3000, "Ctrl+A reads the used range, not 17 billion cells");
+  const feedback = get("status-command-feedback").textContent;
+  assert.ok(get("sheet-subtotal-dialog").open || feedback !== "", "it opened or said why not: " + feedback);
+  if (get("sheet-subtotal-dialog").open) get("sheet-subtotal-dialog").close();
+  // by hand: a SUBTOTAL formula and a label of the user's own
+  const own = [[{ value: "item" }, { value: "amount" }], [{ value: "x" }, { value: "1" }], [{ value: "합계표" }, { value: "", formula: "=SUBTOTAL(9,B2:B2)" }]];
+  assert.equal(subtotal.isSubtotalRow(own[2]), false);
+  assert.equal(subtotal.plan(own, options()).error, "formulas", "the hand-made row is a row of the list, and a list with formulas is refused");
+  assert.equal(subtotal.isSubtotalRow([{ value: "x 합계" }, { value: "", formula: "=SUBTOTAL(9,B2:B3)" }]), true);
+  assert.equal(subtotal.isSubtotalRow([{ value: "총합계" }, { value: "", formula: "=SUBTOTAL(9,B2:B3)" }]), true);
+});
