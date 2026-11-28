@@ -130,8 +130,7 @@
         const ls = saved?.layoutStyle || {};
         const tempDiv = document.createElement("div");
         restoreDomChildren(tempDiv, saved?.editorNodes || [], document);
-        if (ls.eoTrackChanges === "true") tempDiv.dataset.eoTrackChanges = "true";
-        if (ls.eoDefaults) tempDiv.dataset.eoDefaults = ls.eoDefaults;
+        for (const key of ["eoTrackChanges", "eoDefaults", "eoWordMeta"]) if (ls[key]) tempDiv.dataset[key] = ls[key];
         const options = {
           baseAlign: ls.textAlign,
           baseLineHeight: ls.lineHeight,

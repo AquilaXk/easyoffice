@@ -83,6 +83,7 @@
               <div class="md-item" data-kinds="SHEET" data-sheet-act="page-setup" role="menuitem" tabindex="-1"><span class="md-label">페이지 설정…</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="print-area-set" role="menuitem" tabindex="-1"><span class="md-label">인쇄 영역 설정</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="print-area-clear" role="menuitem" tabindex="-1"><span class="md-label">인쇄 영역 해제</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="doc-properties" role="menuitem" tabindex="-1"><span class="md-label">문서 속성…</span></div>
               <div class="md-item" data-kinds="DOC" data-verify-act="print-preview" role="menuitem" tabindex="-1"><span class="md-label">인쇄 미리 보기</span></div>
               <div class="md-item" data-kinds="PAGES SHEET SLIDE BASE BOARD PDF" data-verify-act="print-preview" role="menuitem" tabindex="-1"><span class="md-label">인쇄 미리 보기</span></div>
               <div class="md-item" data-kinds="DOC SHEET SLIDE BASE BOARD PDF" data-studio-menu-cmd="print" role="menuitem" tabindex="-1"><span class="md-label">인쇄…</span><span class="md-shortcut">Ctrl+P</span></div>
@@ -190,6 +191,11 @@
               </div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="mod-symbol" role="menuitem" tabindex="-1"><span class="md-label">문자표</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크</span><span class="md-shortcut">Ctrl+K</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-bookmark" role="menuitem" tabindex="-1"><span class="md-label">책갈피…</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-xref" role="menuitem" tabindex="-1"><span class="md-label">상호 참조…</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-caption" role="menuitem" tabindex="-1"><span class="md-label">캡션 삽입…</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-datetime" role="menuitem" tabindex="-1"><span class="md-label">날짜 및 시간…</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="field-update" role="menuitem" tabindex="-1"><span class="md-label">필드 업데이트</span><span class="md-shortcut">F9</span></div>
               <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">링크</span><span class="md-shortcut">Ctrl+K</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크</span></div>
               <div class="md-sep"></div>
@@ -466,6 +472,17 @@
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="layout-columns" role="menuitem" tabindex="-1"><span class="md-label">단</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="layout-columns" role="menuitem" tabindex="-1"><span class="md-label">다단 설정</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="doc-mod-page-break" role="menuitem" tabindex="-1"><span class="md-label">페이지 나누기</span><span class="md-shortcut">Ctrl+Enter</span></div>
+              <div class="md-sub" data-kinds="DOC" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">구역 나누기</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="구역 나누기">
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="section-break-nextPage" role="menuitem" tabindex="-1"><span class="md-label">다음 페이지</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="section-break-continuous" role="menuitem" tabindex="-1"><span class="md-label">연속</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="section-break-evenPage" role="menuitem" tabindex="-1"><span class="md-label">짝수 페이지</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="section-break-oddPage" role="menuitem" tabindex="-1"><span class="md-label">홀수 페이지</span></div>
+                </div>
+              </div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="layout-linenumbers" role="menuitem" tabindex="-1"><span class="md-label">줄 번호…</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="layout-watermark" role="menuitem" tabindex="-1"><span class="md-label">워터마크…</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="hwp-mod-header" role="menuitem" tabindex="-1"><span class="md-label">행정 공문서 두문·결재란</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="hwp-mod-manuscript" role="menuitem" tabindex="-1"><span class="md-label">200자 원고지 매수 검산</span></div>
@@ -540,6 +557,9 @@
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="table-border-bg" role="menuitem" tabindex="-1"><span class="md-label">테두리 및 음영</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="table-border-bg" role="menuitem" tabindex="-1"><span class="md-label">셀 테두리/배경</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="table-cell-props" role="menuitem" tabindex="-1"><span class="md-label">표 속성</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="table-header-repeat" role="menuitem" tabindex="-1"><span class="md-label">머리글 행 반복</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="table-from-text" role="menuitem" tabindex="-1"><span class="md-label">텍스트를 표로 변환…</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="table-to-text" role="menuitem" tabindex="-1"><span class="md-label">표를 텍스트로 변환…</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="table-cell-props" role="menuitem" tabindex="-1"><span class="md-label">표/셀 속성</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="table-sum" role="menuitem" tabindex="-1"><span class="md-label">블록 합계</span></div>
@@ -1664,6 +1684,134 @@
         </div>
         <div class="dialog-footer">
           <button id="btn-doc-paragraph-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-datetime-dialog" class="tool-dialog" aria-labelledby="doc-datetime-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-datetime-title">날짜 및 시간</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="doc-dt-format">사용 가능한 형식(A)</label><select id="doc-dt-format" class="sb-combo dialog-select"></select></div>
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="doc-dt-update" type="checkbox" />자동으로 업데이트(U)</label></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-dt-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-bookmark-dialog" class="tool-dialog" aria-labelledby="doc-bookmark-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-bookmark-title">책갈피</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="doc-bm-name">책갈피 이름(B)</label><input id="doc-bm-name" class="dialog-text-input" type="text" maxlength="40" autocomplete="off" spellcheck="false" /></div>
+          <ul id="doc-bm-list" class="dialog-list" role="listbox" aria-label="책갈피 목록"></ul>
+          <div class="dialog-row"><label class="dialog-label" for="doc-bm-sort">정렬 기준</label><select id="doc-bm-sort" class="sb-combo dialog-select"><option value="name">이름</option><option value="position">위치</option></select></div>
+          <div class="dialog-status-row"><span id="doc-bm-status" class="dialog-status" role="status" aria-live="polite"></span></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-bm-add" type="button" class="dialog-btn dialog-btn-primary">추가(A)</button>
+          <button id="btn-doc-bm-go" type="button" class="dialog-btn">이동(G)</button>
+          <button id="btn-doc-bm-delete" type="button" class="dialog-btn">삭제(D)</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-xref-dialog" class="tool-dialog" aria-labelledby="doc-xref-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-xref-title">상호 참조</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="doc-xref-type">참조 형식(T)</label><select id="doc-xref-type" class="sb-combo dialog-select"></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-xref-kind">참조 대상(R)</label><select id="doc-xref-kind" class="sb-combo dialog-select"></select></div>
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="doc-xref-link" type="checkbox" checked />하이퍼링크로 삽입(H)</label></div>
+          <ul id="doc-xref-list" class="dialog-list" role="listbox" aria-label="참조할 항목"></ul>
+          <div class="dialog-status-row"><span id="doc-xref-status" class="dialog-status" role="status" aria-live="polite"></span></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-xref-insert" type="button" class="dialog-btn dialog-btn-primary">삽입(I)</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-caption-dialog" class="tool-dialog" aria-labelledby="doc-caption-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-caption-title">캡션</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="doc-cap-text">캡션(C)</label><input id="doc-cap-text" class="dialog-text-input" type="text" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-cap-label">레이블(L)</label><select id="doc-cap-label" class="sb-combo dialog-select"><option value="그림">그림</option><option value="표">표</option><option value="수식">수식</option></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-cap-pos">위치(P)</label><select id="doc-cap-pos" class="sb-combo dialog-select"><option value="below">선택 항목 아래</option><option value="above">선택 항목 위</option></select></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-cap-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-properties-dialog" class="tool-dialog" aria-labelledby="doc-props-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-props-title">문서 속성</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="doc-prop-title">제목(T)</label><input id="doc-prop-title" class="dialog-text-input" type="text" autocomplete="off" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-prop-subject">주제(S)</label><input id="doc-prop-subject" class="dialog-text-input" type="text" autocomplete="off" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-prop-author">작성자(A)</label><input id="doc-prop-author" class="dialog-text-input" type="text" autocomplete="off" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-prop-keywords">키워드(K)</label><input id="doc-prop-keywords" class="dialog-text-input" type="text" autocomplete="off" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-prop-comments">설명(C)</label><input id="doc-prop-comments" class="dialog-text-input" type="text" autocomplete="off" /></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-prop-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-linenumbers-dialog" class="tool-dialog" aria-labelledby="doc-ln-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-ln-title">줄 번호</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="doc-ln-on" type="checkbox" />줄 번호 추가(A)</label></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-ln-start">시작 번호(S)</label><input id="doc-ln-start" class="dialog-input" type="number" min="0" max="31680" step="1" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-ln-distance">텍스트와의 간격(F)</label><input id="doc-ln-distance" class="dialog-input" type="number" min="0" step="0.1" /><span class="dialog-unit">mm</span></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-ln-by">번호 간격(B)</label><input id="doc-ln-by" class="dialog-input" type="number" min="1" max="31680" step="1" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-ln-restart">번호 매기기</label><select id="doc-ln-restart" class="sb-combo dialog-select"><option value="newPage">페이지마다 다시 시작(R)</option><option value="newSection">구역마다 다시 시작(E)</option><option value="continuous">연속(C)</option></select></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-ln-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-watermark-dialog" class="tool-dialog" aria-labelledby="doc-wm-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-wm-title">인쇄된 워터마크</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="doc-wm-text">텍스트(T)</label><input id="doc-wm-text" class="dialog-text-input" type="text" maxlength="64" autocomplete="off" spellcheck="false" /></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-wm-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button id="btn-doc-wm-remove" type="button" class="dialog-btn">워터마크 제거(R)</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-table-convert-dialog" class="tool-dialog" aria-labelledby="doc-tc-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-tc-title">텍스트를 표로 변환</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row" id="doc-tc-cols-row"><label class="dialog-label" for="doc-tc-cols">열 개수(C)</label><input id="doc-tc-cols" class="dialog-input" type="number" min="1" max="63" step="1" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-tc-sep">구분 기호</label><select id="doc-tc-sep" class="sb-combo dialog-select"><option value="paragraph">단락(P)</option><option value="comma">쉼표(M)</option><option value="tab">탭(T)</option><option value="other">기타(O)</option></select></div>
+          <div class="dialog-row" id="doc-tc-other-row"><label class="dialog-label" for="doc-tc-other">기타 구분 기호</label><input id="doc-tc-other" class="dialog-text-input" type="text" maxlength="1" autocomplete="off" /></div>
+          <div class="dialog-status-row"><span id="doc-tc-status" class="dialog-status" role="status" aria-live="polite"></span></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-tc-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>
       </div>
@@ -3523,6 +3671,7 @@
     <script src="./doc-page-frame.js"></script>
     <script src="./doc-page-setup.js"></script>
     <script src="./doc-page-print.js"></script>
+    <script src="./save-payload-doc-meta.js"></script>
     <script src="./save-payload.js"></script>
     <script src="./desktop-bridge.js"></script>
     <script src="./home-screen.js"></script>
@@ -3549,6 +3698,8 @@
     <script src="./doc-word-count.js"></script>
     <script src="./doc-word-commands.js"></script>
     <script src="./doc-format-tools.js"></script>
+    <script src="./doc-word-model.js"></script>
+    <script src="./doc-word-fields.js"></script>
     <script src="./doc-dialogs-ext.js"></script>
     <script src="./workspace-tools.js"></script>
     <script src="./workspace-panels.js"></script>

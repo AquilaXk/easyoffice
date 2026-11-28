@@ -109,6 +109,7 @@
   // Character-run values (size in half-points, font, color, highlight) from run spans and pasted
   // inline styles; the innermost element wins.
   function mergeRunValues(el, outer, next) {
+    host.__EASYOFFICE_DOC_WORD_MODEL__?.carry(el, outer, next);
     const runs = host.__EASYOFFICE_DOC_RUNS__;
     VALUE_KEYS.forEach((k) => {
       if (outer[k] !== undefined) next[k] = outer[k];
@@ -430,6 +431,7 @@
         a.highlight === b.highlight &&
         a.link === b.link &&
         a.commentId === b.commentId &&
+        (host.__EASYOFFICE_DOC_WORD_MODEL__?.sameMarks(a, b) ?? true) &&
         sameRevision(a.revision, b.revision)
     );
   }
@@ -444,6 +446,7 @@
     if (includeLink && fmt.link) run.link = fmt.link;
     if (fmt.commentId !== undefined) run.commentId = fmt.commentId;
     if (fmt.revision) run.revision = { ...fmt.revision };
+    host.__EASYOFFICE_DOC_WORD_MODEL__?.applyMarks(run, fmt);
     BOOL_KEYS.forEach((k) => {
       if (fmt[k]) run[k] = true;
     });
@@ -523,7 +526,7 @@
     const rows = texts.map((row, r) => row.map((text, c) => (values[r][c] === null ? { text } : { text, value: values[r][c] })));
     const keptLinks = links.filter((l) => values[l.row]?.[l.col] === null);
     const keptCellParas = cellParagraphs.filter((cp) => values[cp.row]?.[cp.col] === null);
-    const block = { type: "table", rows };
+    const block = { type: "table", rows, ...host.__EASYOFFICE_DOC_WORD_MODEL__?.tableFlags(table) };
     if (merges.length > 0) block.merges = merges;
     if (keptLinks.length > 0) block.links = keptLinks;
     if (colWidthsTwips.length > 0) block.colWidthsTwips = colWidthsTwips;
@@ -570,6 +573,8 @@
           if (cur.ctx.list === "ordered" && cur.ctx.listNumber) block.listNumber = cur.ctx.listNumber;
         }
         if (cur.ctx.columns) block.columns = cur.ctx.columns;
+        if (cur.ctx.flags?.caption) block.caption = true;
+        if (cur.ctx.flags?.sectionBreak) block.sectionBreak = cur.ctx.flags.sectionBreak;
         blocks.push(block);
       }
       cur = null;
@@ -605,6 +610,14 @@
       if (!Number.isInteger(cid) || cid < 1) return;
       if (!cur) cur = { ctx, runs: [] };
       cur.runs.push(applyFmtFields({ text: "", commentId: cid, _keepEmpty: true }, { ...fmt, commentId: cid }, false));
+    }
+
+    // A bookmark marker is an empty run that opens or closes the bookmark (`doc-word-model.js`).
+    function walkBookmarkMarker(node, ctx) {
+      const run = host.__EASYOFFICE_DOC_WORD_MODEL__?.bookmarkRun(node);
+      if (!run) return;
+      if (!cur) cur = { ctx, runs: [] };
+      cur.runs.push(run);
     }
 
     function walkTextNode(node, ctx, fmt) {
@@ -682,6 +695,7 @@
         listNumber,
         columns,
         layout: LAYOUT_TAGS.has(tag) ? paragraphLayout(node, baseLineHeight) : ctx.layout,
+        flags: host.__EASYOFFICE_DOC_WORD_MODEL__?.paragraphFlags(node),
       };
     }
 
@@ -714,6 +728,7 @@
       if (tag === "TABLE") return walkTable(node);
       if (tag === "IMG" && node.dataset?.eoImageId) return pushImage(node);
       if (FIELD_KEYS[node.dataset?.eoField]) return walkField(node, ctx, fmt);
+      if (tag === "SPAN" && (node.dataset?.eoBookmarkStart !== undefined || node.dataset?.eoBookmarkEnd !== undefined)) return walkBookmarkMarker(node, ctx);
       if (tag === "SUP" && (node.dataset?.eoNoteKind === "footnote" || node.dataset?.eoNoteKind === "endnote")) {
         return walkNoteRef(node, ctx, fmt);
       }
@@ -767,87 +782,8 @@
     return frame;
   }
 
-  const MAX_ANNOTATION_ITEMS = 2048;
-
-  // The document defaults of an opened DOCX, ODT or RTF (PD-363) ride on the editor root as one JSON string (`eoDefaults`)
-  // from open to save. Both ends keep only the known keys: integers, and names of at most 256 characters.
-  const DEFAULT_INTEGERS = ["sizeHalfPoints", "spaceBeforeTwips", "spaceAfterTwips", "line240ths", "tabStopTwips"];
-  function packDocDefaults(raw) {
-    if (!raw || typeof raw !== "object" || !DEFAULT_INTEGERS.every((k) => Number.isSafeInteger(raw[k]))) return "";
-    const out = Object.fromEntries(DEFAULT_INTEGERS.map((k) => [k, raw[k]]));
-    for (const k of ["font", "eastAsianFont", "alignment"]) if (typeof raw[k] === "string" && raw[k].length <= 256) out[k] = raw[k];
-    return JSON.stringify(out);
-  }
-  function unpackDocDefaults(text) {
-    try {
-      const packed = packDocDefaults(JSON.parse(text));
-      return packed ? JSON.parse(packed) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  function collectDocAnnotations(root) {
-    const out = {};
-    if (!root) return out;
-    if (root.dataset?.eoTrackChanges === "true") out.trackChanges = true;
-    const defaults = unpackDocDefaults(root.dataset?.eoDefaults);
-    if (defaults) out.docDefaults = defaults;
-    const refKeys = new Set();
-    const commentIds = new Set();
-    const scanBody = (node) => {
-      for (const child of node.childNodes || []) {
-        if (child.nodeType !== 1) continue;
-        const tag = (child.tagName || "").toUpperCase();
-        const ds = child.dataset;
-        if (tag === "FOOTER" || child.id === "hwp-manuscript-preview" || (ds && (ds.eoNotes !== undefined || ds.eoComments !== undefined || ds.eoHf !== undefined))) continue;
-        if (tag === "SUP" && (ds?.eoNoteKind === "footnote" || ds?.eoNoteKind === "endnote")) {
-          const id = Number(ds.eoNoteId);
-          if (Number.isInteger(id) && id >= 1) refKeys.add(ds.eoNoteKind + ":" + id);
-          continue;
-        }
-        if (ds?.eoCommentId !== undefined) {
-          const cid = Number(ds.eoCommentId);
-          if (Number.isInteger(cid) && cid >= 1) commentIds.add(cid);
-        }
-        scanBody(child);
-      }
-    };
-    scanBody(root);
-    const notes = [];
-    for (const kind of ["footnote", "endnote"]) {
-      for (const sec of Array.from(root.children || [])) {
-        if (sec.dataset?.eoNotes !== kind) continue;
-        for (const item of Array.from(sec.children || [])) {
-          if (notes.length >= MAX_ANNOTATION_ITEMS) break;
-          if (!item.classList?.contains("eo-doc-note-item")) continue;
-          const id = Number(item.dataset?.eoNoteId);
-          if (!Number.isInteger(id) || id < 1 || !refKeys.has(kind + ":" + id)) continue;
-          const bodies = item.querySelectorAll ? Array.from(item.querySelectorAll(".eo-doc-note-body")) : [];
-          const text = (bodies.length > 0 ? bodies.map((b) => String(b.textContent || "")).join("\n") : String(item.textContent || "")).slice(0, 65536);
-          notes.push({ id, kind, text });
-        }
-      }
-    }
-    if (notes.length > 0) out.notes = notes;
-    const comments = [];
-    for (const sec of Array.from(root.children || [])) {
-      if (sec.dataset?.eoComments === undefined) continue;
-      for (const art of Array.from(sec.children || [])) {
-        if (comments.length >= MAX_ANNOTATION_ITEMS) break;
-        const id = Number(art.dataset?.eoCommentId);
-        if (!Number.isInteger(id) || id < 1 || !commentIds.has(id)) continue;
-        comments.push({
-          id,
-          author: String(art.dataset?.eoAuthor || "작성자").slice(0, 128),
-          date: String(art.dataset?.eoDate || "").slice(0, 64),
-          text: String(art.textContent || "").slice(0, 65536),
-        });
-      }
-    }
-    if (comments.length > 0) out.comments = comments;
-    return out;
-  }
+  // The defaults, notes, comments and Word-style settings of a document live in `save-payload-doc-meta.js`.
+  const docMeta = () => host.__EASYOFFICE_SAVE_DOC_META__;
 
   function plainParagraphBlocks(lines) {
     return lines
@@ -988,8 +924,8 @@
   host.__EASYOFFICE_SAVE_PAYLOAD__ = {
     collectDocBlocks,
     collectPageFrame,
-    collectDocAnnotations,
-    packDocDefaults,
+    collectDocAnnotations: (root) => docMeta().collectDocAnnotations(root),
+    packDocDefaults: (raw) => docMeta().packDocDefaults(raw),
     plainParagraphBlocks,
     evaluateDocTableFormulas,
     buildSheetsPayload,

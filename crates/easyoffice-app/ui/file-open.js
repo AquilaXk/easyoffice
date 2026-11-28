@@ -123,7 +123,7 @@
       const gap = Number.isInteger(cols.gapTwips) && cols.gapTwips >= 0 ? cols.gapTwips : 720;
       spec.data.eoCols = cols.count + "," + (cols.equal === false ? 0 : 1) + "," + gap;
     }
-    return spec;
+    return host.__EASYOFFICE_DOC_WORD_MODEL__.paragraph(spec, block);
   }
 
   // A picture block: bytes live in the image store, the node carries only the id, size and alt.
@@ -423,7 +423,7 @@
       openToc = null;
       if (block.type === "table") {
         openList = null;
-        nodes.push(tableSpec(block));
+        nodes.push(host.__EASYOFFICE_DOC_WORD_MODEL__.table(tableSpec(block), block));
         return;
       }
       if (block.type === "image") {
@@ -432,7 +432,7 @@
         return;
       }
       const style = block.align ? { textAlign: block.align } : {};
-      const inline = runSpecs(block.runs, noteSeq);
+      const inline = host.__EASYOFFICE_DOC_WORD_MODEL__.runSpecs(block.runs, noteSeq, runSpecs);
       const heading = Number(block.heading) || 0;
       if (heading >= 1 && heading <= 6) {
         openList = null;
@@ -676,6 +676,7 @@
             eoEvenOdd: res.evenOddDifferent ? "true" : "",
             eoTrackChanges: res.trackChanges === true ? "true" : "",
             eoDefaults: host.__EASYOFFICE_SAVE_PAYLOAD__.packDocDefaults(res.docDefaults),
+            eoWordMeta: host.__EASYOFFICE_SAVE_DOC_META__.wordMetaOfOpen(res),
             ...host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.layoutFields(host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.fromDecoded(res.pageSetup, mod)),
           },
         };

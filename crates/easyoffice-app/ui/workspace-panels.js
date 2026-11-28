@@ -24,6 +24,7 @@
         eoEvenOdd: "",
         eoTrackChanges: "",
         eoDefaults: "",
+        eoWordMeta: "",
         eoDocFlavor: "",
         styleRole: "",
         showCtrlMarks: "",
@@ -46,6 +47,7 @@
       eoEvenOdd: editor.dataset.eoEvenOdd || "",
       eoTrackChanges: editor.dataset.eoTrackChanges || "",
       eoDefaults: editor.dataset.eoDefaults || "",
+      eoWordMeta: editor.dataset.eoWordMeta || "",
       eoDocFlavor: editor.dataset.eoDocFlavor || "",
       styleRole: editor.dataset.styleRole || "",
       showCtrlMarks: editor.dataset.showCtrlMarks || "",
@@ -65,7 +67,7 @@
     editor.style.fontSize = ls.fontSize || "";
     editor.style.lineHeight = ls.lineHeight || "";
     editor.style.textAlign = ls.textAlign || "";
-    ["paperSize", "eoPage", "eoFirstPage", "eoEvenOdd", "eoTrackChanges", "eoDefaults", "eoDocFlavor", "styleRole", "showCtrlMarks", "showParaMarks"].forEach((k) => {
+    ["paperSize", "eoPage", "eoFirstPage", "eoEvenOdd", "eoTrackChanges", "eoDefaults", "eoWordMeta", "eoDocFlavor", "styleRole", "showCtrlMarks", "showParaMarks"].forEach((k) => {
       if (ls[k]) {
         editor.dataset[k] = ls[k];
       } else {
