@@ -62,6 +62,9 @@
   // 셀 병합: the cells of `range` become one. The texts of the cells (not empty) join in reading order into the origin, one per
   // line, and the others are emptied. `null` when the range is one cell.
   function mergeRange(rows, merges, range) {
+    // A range that lies outside the table (the table changed after the cells were clicked, an undo shrank it) is no range.
+    const onTable = (r, c) => Number.isInteger(r) && Number.isInteger(c) && r >= 0 && c >= 0 && r < rows.length && c < (rows[r]?.length ?? 0);
+    if (!onTable(range?.r0, range?.c0) || !onTable(range?.r1, range?.c1)) return null;
     const full = growRange(range, normalizeMerges(merges, rows.length, rows[0]?.length ?? 0));
     if (full.r0 === full.r1 && full.c0 === full.c1) return null;
     const texts = [];

@@ -288,6 +288,7 @@ fn parse_odp_frame(
     let (mut in_desc, mut tbl_rows, mut cur_row, mut cur_cell_p, mut cur_p) =
         (false, Vec::new(), Vec::new(), Vec::new(), String::new());
     let (mut header_row, mut in_tc, mut in_p, mut cell_buf_open) = (false, false, false, false);
+    let mut cell_repeat = 1usize;
     for ev in events {
         match ev {
             XmlEvent::Start { name, attrs } => match loc(name) {
@@ -320,22 +321,16 @@ fn parse_odp_frame(
                     cur_row.clear();
                 }
                 "table-cell" if has_tbl => {
-                    if cur_row.len() >= MAX_SLIDE_TABLE_COLS {
-                        return Err(EasyOfficeError::ResourceBudgetExceeded(
-                            "ODP 표 열 수 상한 초과".to_string(),
-                        ));
-                    }
+                    // A repeated cell (`table:number-columns-repeated`) is that many columns; the count is checked
+                    // against the column limit before anything is copied.
+                    cell_repeat = columns_repeated(attrs, cur_row.len())?;
                     in_tc = true;
                     cur_cell_p.clear();
                 }
                 // A cell a merge covers holds no text; it still takes its column so the grid stays rectangular.
                 "covered-table-cell" if has_tbl => {
-                    if cur_row.len() >= MAX_SLIDE_TABLE_COLS {
-                        return Err(EasyOfficeError::ResourceBudgetExceeded(
-                            "ODP 표 열 수 상한 초과".to_string(),
-                        ));
-                    }
-                    cur_row.push(String::new());
+                    let repeat = columns_repeated(attrs, cur_row.len())?;
+                    cur_row.extend(std::iter::repeat_n(String::new(), repeat));
                 }
                 "p" if in_tc => {
                     in_p = true;
@@ -360,7 +355,8 @@ fn parse_odp_frame(
                 }
                 "table-cell" if has_tbl && in_tc => {
                     in_tc = false;
-                    cur_row.push(cur_cell_p.join("\n"));
+                    let text = cur_cell_p.join("\n");
+                    cur_row.extend(std::iter::repeat_n(text, cell_repeat));
                 }
                 "table-row" if has_tbl => tbl_rows.push(std::mem::take(&mut cur_row)),
                 _ => {}
@@ -542,6 +538,22 @@ struct PageAcc {
     total_el: usize,
     total_img_b: usize,
     x: ExtAccum,
+}
+
+/// How many columns a table cell stands for (`table:number-columns-repeated`, 1 when absent or not a number) when `have`
+/// columns of the row are already read. A row past [`MAX_SLIDE_TABLE_COLS`] columns is refused (Fail-Closed), so a hostile
+/// count never allocates.
+fn columns_repeated(attrs: &Attrs<'_>, have: usize) -> Result<usize, EasyOfficeError> {
+    let n = attr(attrs, "table:number-columns-repeated")
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|n| *n >= 1)
+        .unwrap_or(1);
+    if have.saturating_add(n) > MAX_SLIDE_TABLE_COLS {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(
+            "ODP 표 열 수 상한 초과".to_string(),
+        ));
+    }
+    Ok(n)
 }
 
 /// Effects an element keeps, read from its style, transform and geometry attributes (tables and charts

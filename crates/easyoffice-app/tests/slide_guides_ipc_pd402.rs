@@ -69,6 +69,83 @@ fn a_deck_without_guides_writes_no_view_part() {
     assert!(entries.iter().all(|e| e.path != "ppt/viewProps.xml"));
 }
 
+const FILE_VIEW: &str = r#"<?xml version="1.0"?><p:viewPr xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:slideViewPr><p:cSldViewPr showGuides="1"><p:guideLst><p:guide pos="10"/></p:guideLst></p:cSldViewPr></p:slideViewPr><p:notesViewPr><p:cSldViewPr><p:guideLst><p:guide orient="horz" pos="99"/></p:guideLst></p:cSldViewPr></p:notesViewPr><p:gridSpacing cx="72008" cy="72008"/></p:viewPr>"#;
+
+fn view_part(pptx: &[u8]) -> String {
+    let entries = ZipArchiveCodec::unpack(pptx, &ZipSecurityPolicy::default()).unwrap();
+    let e = entries
+        .iter()
+        .find(|e| e.path == "ppt/viewProps.xml")
+        .unwrap();
+    String::from_utf8(e.data.clone()).unwrap()
+}
+
+#[test]
+fn a_file_view_part_keeps_its_other_views_through_a_save() {
+    let first = converted(&save_req(
+        r#""showGuides":true,"guides":[{"orient":"vert","posPt":1}],"#,
+    ));
+    let entries = ZipArchiveCodec::unpack(&first, &ZipSecurityPolicy::default()).unwrap();
+    let edited: Vec<(String, Vec<u8>)> = entries
+        .into_iter()
+        .map(|e| {
+            if e.path == "ppt/viewProps.xml" {
+                (e.path, FILE_VIEW.as_bytes().to_vec())
+            } else {
+                (e.path, e.data)
+            }
+        })
+        .collect();
+    let file = ZipArchiveCodec::pack(&edited).unwrap();
+    let dec = EasyOfficeIpcRouter::dispatch(
+        "convert_document_format",
+        &format!(
+            r#"{{"action":"decode","fileName":"g.pptx","sourceBase64":"{}"}}"#,
+            EasyOfficeIpcRouter::encode_base64(&file)
+        ),
+    )
+    .unwrap();
+    let value = StrictJsonValue::parse(&dec).unwrap();
+    let obj = value.as_object().unwrap();
+    assert_eq!(
+        field(obj, "guides").as_array().unwrap().len(),
+        1,
+        "the notes view's guide is not read"
+    );
+    let raw = field(obj, "viewProps").as_str().unwrap().to_string();
+    assert_eq!(raw, FILE_VIEW);
+    // Save again with another guide: the part is the file's, patched.
+    let escaped = raw.replace('"', "\\\"");
+    let saved = converted(&save_req(&format!(
+        r#""showGuides":true,"viewProps":"{escaped}","guides":[{{"orient":"horz","posPt":20}}],"#
+    )));
+    let xml = view_part(&saved);
+    assert!(
+        xml.contains(r#"<p:guideLst><p:guide orient="horz" pos="160"/></p:guideLst>"#),
+        "{xml}"
+    );
+    assert!(
+        xml.contains(
+            r#"<p:notesViewPr><p:cSldViewPr><p:guideLst><p:guide orient="horz" pos="99"/>"#
+        ),
+        "{xml}"
+    );
+    assert!(xml.contains(r#"<p:gridSpacing cx="72008" cy="72008"/>"#));
+    assert!(!xml.contains(r#"pos="10""#));
+    // A view part that is not safe XML or not a view part refuses the save.
+    for bad in [
+        "<!DOCTYPE x [<!ENTITY a \\\"b\\\">]><p:viewPr/>",
+        "not xml",
+        &"<p:viewPr/>".repeat(7000),
+    ] {
+        let resp = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            &save_req(&format!(r#""viewProps":"{bad}","#)),
+        );
+        assert!(resp.is_err(), "{}", &bad[..bad.len().min(30)]);
+    }
+}
+
 #[test]
 fn hostile_guides_refuse_the_save() {
     let many = (0..65)

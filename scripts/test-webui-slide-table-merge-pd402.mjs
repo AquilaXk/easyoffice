@@ -68,6 +68,27 @@ test("a row or column inserted through a merge grows it and one before it moves 
   assert.deepEqual(span.shiftMerges(m, "row", 2, -1), [{ row: 1, col: 1, rowSpan: 1, colSpan: 2 }]);
 });
 
+test("a range that lies outside the table (after an undo shrank it) merges nothing and throws nothing", async () => {
+  const h = await openSlide();
+  const { mergeRange } = h.host.__EASYOFFICE_SLIDE_TABLE_SPAN__;
+  const rows = [["a", "b"], ["c", "d"]];
+  for (const range of [{ r0: 0, c0: 0, r1: 5, c1: 1 }, { r0: 3, c0: 0, r1: 4, c1: 1 }, { r0: -1, c0: 0, r1: 1, c1: 1 }, { r0: 0, c0: 0, r1: 1, c1: 9 }, { r0: 0.5, c0: 0, r1: 1, c1: 1 }, {}, null, undefined]) {
+    assert.equal(mergeRange(rows, [], range), null, JSON.stringify(range));
+  }
+  assert.equal(mergeRange([], [], { r0: 0, c0: 0, r1: 0, c1: 1 }), null);
+  assert.ok(mergeRange(rows, [], { r0: 0, c0: 0, r1: 1, c1: 1 }));
+  // The menu command after the table shrank under the clicked cells says so and forgets them.
+  const canvas = h.host.__EASYOFFICE_SLIDE_CANVAS__;
+  canvas.addElement({ kind: "table", x: 40, y: 40, w: 400, h: 200, headerRow: false, rows: [["가", "나", "다"], ["라", "마", "바"], ["사", "아", "자"]] });
+  canvas.selectElement(canvas.getElements()[0].id);
+  click(h, 2, 2);
+  click(h, 0, 0, true);
+  canvas.updateElement(canvas.getElements()[0].id, { rows: [["가"]] });
+  click(h, 0, 0);
+  h.userClick(act(h.document, "table-merge"));
+  assert.match(feedback(h), /병합할 셀을 선택하세요/);
+});
+
 test("a hostile merge list is cut down to merges that fit and do not overlap", async () => {
   const h = await openSlide();
   const span = h.host.__EASYOFFICE_SLIDE_TABLE_SPAN__;

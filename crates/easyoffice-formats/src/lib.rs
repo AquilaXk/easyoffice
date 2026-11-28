@@ -205,6 +205,7 @@ pub use rich_slide::*;
 pub use rich_slide_ext::*;
 pub use rich_slide_guides::{
     check_guides, SlideGuide, GUIDE_UNITS_PER_PT, MAX_GUIDE_POS, MAX_SLIDE_GUIDES,
+    MAX_VIEW_PROPS_BYTES,
 };
 pub use rich_slide_table::{check_spans, CellCover};
 pub use rich_table::{

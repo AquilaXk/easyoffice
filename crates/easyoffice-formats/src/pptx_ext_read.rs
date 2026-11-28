@@ -10,11 +10,11 @@ use crate::rich_image::RichImage;
 use crate::rich_image_layout::RichImageCrop;
 use crate::rich_slide::{emu_to_pt, SlideElement, MAX_SLIDE_STROKE_PT};
 use crate::rich_slide_ext::{
-    clean_face, AnimClass, AnimDir, AnimEffect, AnimStart, ElementFx, SlideAnim, SlideBackground,
-    SlideBullet, SlideDash, SlideDate, SlideExt, SlideFooter, SlideGroup, SlideNumberStyle,
-    SlideOutline, SlideParaFmt, SlideShadow, DEFAULT_ANIM_MS, MAX_ANIM_MS, MAX_GROUP_NESTING,
-    MAX_LINE_SPACING_PCT, MAX_PARA_SPACE_PT, MAX_SHADOW_PT, MAX_SLIDE_ANIMS, MAX_SLIDE_GROUPS,
-    MIN_LINE_SPACING_PCT,
+    clean_face, is_valid_src_pad, AnimClass, AnimDir, AnimEffect, AnimStart, ElementFx, SlideAnim,
+    SlideBackground, SlideBullet, SlideDash, SlideDate, SlideExt, SlideFooter, SlideGroup,
+    SlideNumberStyle, SlideOutline, SlideParaFmt, SlideShadow, DEFAULT_ANIM_MS, MAX_ANIM_MS,
+    MAX_GROUP_NESTING, MAX_LINE_SPACING_PCT, MAX_PARA_SPACE_PT, MAX_SHADOW_PT, MAX_SLIDE_ANIMS,
+    MAX_SLIDE_GROUPS, MIN_LINE_SPACING_PCT,
 };
 use crate::xml_stream::{attr, XmlEvent};
 use crate::EasyOfficeError;
@@ -192,25 +192,33 @@ pub(crate) fn scan_fx(
                         out.fx.flip_v =
                             attr(attrs, "flipV").is_some_and(|v| v == "1" || v == "true");
                     }
-                    // Each side is a whole number of thousandths of a percent; a missing one is 0, and a negative or invalid
-                    // one (the picture is padded, not cut) leaves the picture whole.
-                    ("srcRect", "blipFill") if out.fx.crop.is_none() => {
+                    // Each side is a whole number of thousandths of a percent and a missing one is 0. Cut sides are a crop; a
+                    // rect with a negative side (the picture is padded, not cut) is kept as it is in `src_pad`; anything
+                    // else invalid leaves the picture whole.
+                    ("srcRect", "blipFill")
+                        if out.fx.crop.is_none() && out.fx.src_pad.is_none() =>
+                    {
                         let side = |key| match attr(attrs, key) {
                             None => Some(0),
-                            Some(v) => v.trim().parse::<u32>().ok(),
+                            Some(v) => v.trim().parse::<i32>().ok(),
                         };
-                        out.fx.crop = match (side("l"), side("t"), side("r"), side("b")) {
-                            (Some(left), Some(top), Some(right), Some(bottom)) => {
-                                Some(RichImageCrop {
+                        if let (Some(l), Some(t), Some(r), Some(b)) =
+                            (side("l"), side("t"), side("r"), side("b"))
+                        {
+                            if let [Ok(left), Ok(top), Ok(right), Ok(bottom)] =
+                                [l, t, r, b].map(u32::try_from)
+                            {
+                                out.fx.crop = Some(RichImageCrop {
                                     left,
                                     top,
                                     right,
                                     bottom,
                                 })
-                                .filter(|c| !c.is_none() && c.is_valid())
+                                .filter(|c| !c.is_none() && c.is_valid());
+                            } else if is_valid_src_pad([l, t, r, b]) {
+                                out.fx.src_pad = Some([l, t, r, b]);
                             }
-                            _ => None,
-                        };
+                        }
                     }
                     ("ln", "spPr") => {
                         ln_w =

@@ -197,6 +197,23 @@ pub struct ElementFx {
     pub spans: Vec<TableSpan>,
     /// Part of each side of a picture that is cut away (`a:srcRect`), PD-402; the document window's crop type.
     pub crop: Option<RichImageCrop>,
+    /// `a:srcRect` of a picture that is padded instead of cut (some side negative: the picture sits inside a larger
+    /// frame), as `[l, t, r, b]` thousandths of a percent. The editor does not draw or edit it; it is kept so a save writes
+    /// it back, PD-402.
+    pub src_pad: Option<[i32; 4]>,
+}
+
+/// Furthest a padded `a:srcRect` side may reach out of the picture, in thousandths of a percent.
+pub const MAX_SRC_PAD: i32 = 1_000_000;
+
+/// True when `rect` (`[l, t, r, b]`) is a padded `a:srcRect`: a side is negative, every side stays within
+/// [`MAX_SRC_PAD`] and the cut sides leave at least 1% of the picture across and down.
+pub fn is_valid_src_pad(rect: [i32; 4]) -> bool {
+    let max_cut = crate::MAX_CROP_SIDE as i32;
+    rect.iter().any(|v| *v < 0)
+        && rect.iter().all(|v| (-MAX_SRC_PAD..=max_cut).contains(v))
+        && rect[0] + rect[2] <= max_cut
+        && rect[1] + rect[3] <= max_cut
 }
 
 /// Longest typeface name a slide keeps (in characters).
@@ -233,6 +250,7 @@ impl ElementFx {
             && self.east_font.is_none()
             && self.spans.is_empty()
             && self.crop.is_none()
+            && self.src_pad.is_none()
     }
 
     fn validate(&self) -> Result<(), EasyOfficeError> {
@@ -240,6 +258,11 @@ impl ElementFx {
             return Err(EasyOfficeError::InvalidArgument(
                 "슬라이드 그림 자르기는 각 변이 99% 이하이고 가로·세로에 1% 이상 남아야 합니다."
                     .to_string(),
+            ));
+        }
+        if self.src_pad.is_some_and(|p| !is_valid_src_pad(p)) {
+            return Err(EasyOfficeError::InvalidArgument(
+                "슬라이드 그림 여백(srcRect)이 허용 범위를 벗어났습니다.".to_string(),
             ));
         }
         for face in [&self.font, &self.east_font].into_iter().flatten() {
@@ -417,6 +440,8 @@ pub struct DeckSettings {
     /// The drawing guides (`p:guideLst` of the view part) and whether they are shown, PD-402.
     pub guides: Vec<SlideGuide>,
     pub show_guides: bool,
+    /// The view part a PPTX came with, kept so a save writes its other views back as they were (see `rich_slide_guides.rs`).
+    pub view_props: Option<String>,
 }
 
 /// Number of colors in a DrawingML color scheme: dk1, lt1, dk2, lt2, accent1 to accent6, hlink, folHlink.

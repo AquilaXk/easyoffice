@@ -19,7 +19,7 @@
     radar: "방사형",
     bubble: "거품형",
     stock: "주식형",
-    combo: "혼합",
+    combo: "콤보",
   });
   // The kinds whose categories are X values: scatter and the bubble chart.
   const usesX = (chartType) => chartType === "scatter" || chartType === "bubble";

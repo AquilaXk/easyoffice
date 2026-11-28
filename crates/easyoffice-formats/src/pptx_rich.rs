@@ -18,13 +18,14 @@ use crate::pptx_master::{
 };
 pub use crate::pptx_rich_read::unpack_pptx_rich;
 use crate::pptx_transition::transition_xml;
-use crate::rich_image_layout::RichImageCrop;
 use crate::rich_image_writers::MediaParts;
 use crate::rich_slide::{
     pt_to_emu, pt_to_signed_emu, RichSlideDeck, SlideBox, SlideElement, SlideMasterLayout,
     SlideTextAlign,
 };
-use crate::rich_slide_ext::{hex6, ElementFx, SlideDash, SlideExt, SlideNode, SlideParaFmt};
+use crate::rich_slide_ext::{
+    hex6, is_valid_src_pad, ElementFx, SlideDash, SlideExt, SlideNode, SlideParaFmt,
+};
 use crate::rich_slide_table::{cover_map, CellCover};
 use crate::{EasyOfficeError, XmlSanitizer};
 
@@ -271,7 +272,7 @@ impl Emit<'_> {
                 } else {
                     alt.as_str()
                 };
-                let _ = write!(self.xml, "<p:pic><p:nvPicPr><p:cNvPr id=\"{sid}\" name=\"{}\" descr=\"{}\"/><p:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"{rid}\"/>{}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>", XmlSanitizer::escape(id), XmlSanitizer::escape(descr), src_rect_xml(fx.and_then(|f| f.crop)));
+                let _ = write!(self.xml, "<p:pic><p:nvPicPr><p:cNvPr id=\"{sid}\" name=\"{}\" descr=\"{}\"/><p:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"{rid}\"/>{}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>", XmlSanitizer::escape(id), XmlSanitizer::escape(descr), src_rect_xml(fx));
                 push_xfrm(&mut self.xml, "a:xfrm", *rect, fx);
                 self.xml
                     .push_str("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>");
@@ -433,14 +434,16 @@ impl Emit<'_> {
 }
 
 /// `a:srcRect` of a cropped picture: thousandths of a percent of each side (ECMA-376 20.1.8.55), as the DOCX writer writes it.
-fn src_rect_xml(crop: Option<RichImageCrop>) -> String {
-    crop.filter(|c| !c.is_none() && c.is_valid())
-        .map_or_else(String::new, |c| {
-            format!(
-                "<a:srcRect l=\"{}\" t=\"{}\" r=\"{}\" b=\"{}\"/>",
-                c.left, c.top, c.right, c.bottom
-            )
-        })
+/// A crop wins over a padded rect the file came with (an edited picture is cut, not padded).
+fn src_rect_xml(fx: Option<&ElementFx>) -> String {
+    let sides = fx
+        .and_then(|f| f.crop)
+        .filter(|c| !c.is_none() && c.is_valid())
+        .map(|c| [c.left as i32, c.top as i32, c.right as i32, c.bottom as i32])
+        .or_else(|| fx.and_then(|f| f.src_pad).filter(|p| is_valid_src_pad(*p)));
+    sides.map_or_else(String::new, |[l, t, r, b]| {
+        format!("<a:srcRect l=\"{l}\" t=\"{t}\" r=\"{r}\" b=\"{b}\"/>")
+    })
 }
 
 fn dash_of(fx: Option<&ElementFx>) -> SlideDash {

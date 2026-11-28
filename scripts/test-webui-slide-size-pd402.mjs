@@ -60,7 +60,7 @@ test("the dialog turns width and height into the preset they equal or into a cus
   assert.equal($(h.document, "slide-stage-box").style.aspectRatio, "", "a preset leaves the inline ratio");
 });
 
-test("a size outside 1 inch to 4000 pt is refused and nothing changes", async () => {
+test("a size outside 1 inch to 56 inches is refused and nothing changes", async () => {
   const h = await openSlide();
   for (const [w, hh] of [["1", "19"], ["33", "0"], ["200", "20"], ["-5", "10"], ["abc", "10"], ["1e9", "1e9"]]) {
     h.host.__EASYOFFICE_SLIDE_RUN_ACT__("slide-size");
@@ -68,7 +68,7 @@ test("a size outside 1 inch to 4000 pt is refused and nothing changes", async ()
     type(h, "slide-size-h", hh);
     $(h.document, "btn-slide-size-ok").dispatchEvent({ type: "click" });
     assert.equal($(h.document, "slide-size-dialog").open, true, `${w}x${hh} keeps the dialog open`);
-    assert.match($(h.document, "slide-size-status").textContent, /2\.54 cm에서 141\.11 cm 사이/);
+    assert.match($(h.document, "slide-size-status").textContent, /2\.54 cm에서 142\.24 cm 사이/);
     assert.equal(deckOf(h).aspect, "16:9");
     $(h.document, "slide-size-dialog").close();
   }
@@ -79,7 +79,7 @@ test("a deck from a file keeps its custom size and drops a hostile one", async (
   const codec = h.host.__EASYOFFICE_SLIDE_CANVAS_CODEC__;
   assert.deepEqual(codec.stageSizeOf("custom:9144000x5143500"), { w: 720, h: 405 });
   assert.deepEqual(codec.stageSizeOf("custom:9144000x5143500", "portrait"), { w: 405, h: 720 });
-  for (const bad of ["custom:1x1", "custom:99999999999x914400", "custom:914400x", "custom:-1x5", "custom:9144000x5143500;x", "custom:50800001x914400", "constructor"]) {
+  for (const bad of ["custom:1x1", "custom:99999999999x914400", "custom:914400x", "custom:-1x5", "custom:9144000x5143500;x", "custom:51206401x914400", "constructor"]) {
     assert.deepEqual(codec.stageSizeOf(bad), { w: 960, h: 540 }, bad);
   }
   const ok = codec.hydrateDecodedDeck({ aspect: "custom:9144000x5143500", slides: [] }, () => ({}));

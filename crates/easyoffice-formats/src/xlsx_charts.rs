@@ -163,21 +163,19 @@ fn push_series_list(
             );
         }
         let _ = write!(xml, "</{val_tag}>");
-        if let Some(size_ser) = series_list.get(idx * step + 1).filter(|_| step == 2) {
+        // A pair whose size series has no values leaves `c:bubbleSize` out (the element is optional).
+        if let Some(size_ser) = series_list
+            .get(idx * step + 1)
+            .filter(|s| step == 2 && !s.values_ref.is_empty())
+        {
             let sizes = cell_index.resolve_series(sheet_name, caches, size_ser);
-            xml.push_str("<c:bubbleSize>");
-            if size_ser.values_ref.is_empty() {
-                xml.push_str("<c:numLit><c:formatCode>General</c:formatCode><c:ptCount val=\"0\"/></c:numLit>");
-            } else {
-                let _ = write!(
-                    xml,
-                    "<c:numRef><c:f>{}</c:f>",
-                    XmlSanitizer::escape(&size_ser.values_ref)
-                );
-                push_num_cache(xml, &sizes.values);
-                xml.push_str("</c:numRef>");
-            }
-            xml.push_str("</c:bubbleSize>");
+            let _ = write!(
+                xml,
+                "<c:bubbleSize><c:numRef><c:f>{}</c:f>",
+                XmlSanitizer::escape(&size_ser.values_ref)
+            );
+            push_num_cache(xml, &sizes.values);
+            xml.push_str("</c:numRef></c:bubbleSize>");
         }
         xml.push_str("</c:ser>");
     }
@@ -414,12 +412,18 @@ pub(crate) fn parse_chart_xml(
                         return Ok(None);
                     }
                     // The sizes of a bubble series are the next series of the model (see `ChartKind`).
-                    let sizes = size_ref.take().map(|values_ref| ChartSeriesRef {
-                        name: format!("{} (크기)", cur_ser.name),
-                        categories_ref: cur_ser.categories_ref.clone(),
-                        values_ref,
-                        ..ChartSeriesRef::default()
-                    });
+                    // A bubble series with no `bubbleSize` still gets its (empty) size series, so the pairs of the model
+                    // never take the next series' values for sizes.
+                    let size_ref = size_ref.take();
+                    let sizes =
+                        (size_ref.is_some() || kind == Some(ChartKind::Bubble)).then(|| {
+                            ChartSeriesRef {
+                                name: format!("{} (크기)", cur_ser.name),
+                                categories_ref: cur_ser.categories_ref.clone(),
+                                values_ref: size_ref.unwrap_or_default(),
+                                ..ChartSeriesRef::default()
+                            }
+                        });
                     series.push(std::mem::take(&mut cur_ser));
                     if let Some(sizes) = sizes {
                         if series.len() >= MAX_SERIES_PER_CHART || !sizes.within_bounds() {

@@ -19,7 +19,7 @@
   });
   const CHART_LABELS = Object.freeze({
     column: "묶은 세로 막대형", bar: "묶은 가로 막대형", line: "꺾은선형", pie: "원형", scatter: "분산형",
-    doughnut: "도넛형", radar: "방사형", bubble: "거품형", stock: "주식형", combo: "혼합",
+    doughnut: "도넛형", radar: "방사형", bubble: "거품형", stock: "주식형", combo: "콤보",
   });
   // The slide transitions by their file name, with the names of the Korean presentation program's 화면 전환 list.
   const TRANSITION_LABELS = Object.freeze({

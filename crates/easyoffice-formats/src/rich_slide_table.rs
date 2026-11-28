@@ -100,6 +100,8 @@ pub(crate) struct SpanDialect {
     pub cells: &'static [&'static str],
     pub col_span: &'static str,
     pub row_span: &'static str,
+    /// The attribute that repeats a cell over several columns (ODF only).
+    pub col_repeat: Option<&'static str>,
 }
 
 pub(crate) const DRAWINGML: SpanDialect = SpanDialect {
@@ -107,6 +109,7 @@ pub(crate) const DRAWINGML: SpanDialect = SpanDialect {
     cells: &["tc"],
     col_span: "gridSpan",
     row_span: "rowSpan",
+    col_repeat: None,
 };
 
 pub(crate) const ODF: SpanDialect = SpanDialect {
@@ -114,6 +117,7 @@ pub(crate) const ODF: SpanDialect = SpanDialect {
     cells: &["table-cell", "covered-table-cell"],
     col_span: "table:number-columns-spanned",
     row_span: "table:number-rows-spanned",
+    col_repeat: Some("table:number-columns-repeated"),
 };
 
 /// Merged cells of a table subtree: every cell that starts a merge, kept through [`accepted_spans`], so a span past the
@@ -154,7 +158,14 @@ pub(crate) fn scan_spans(
                     });
                 }
             }
-            col += 1;
+            // A repeated cell takes that many columns (the reader refused a row past the column limit).
+            let repeat = dialect
+                .col_repeat
+                .and_then(|key| attr(attrs, key).or_else(|| attr(attrs, local(key))))
+                .and_then(|v| v.trim().parse::<usize>().ok())
+                .filter(|n| (1..=MAX_SLIDE_TABLE_COLS).contains(n))
+                .unwrap_or(1);
+            col += repeat;
         }
     }
     accepted_spans(&spans, rows, cols)

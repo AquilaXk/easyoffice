@@ -3,7 +3,7 @@
 
   // The page size of a slide deck (PD-402). The three presets travel by name ("16:9", "4:3", "A4"); any other size travels as
   // `custom:<cx>x<cy>` in EMU with the long side first, the string `SlideAspect::to_wire` writes (`rich_slide_aspect.rs`). The
-  // range is the engine's: 1 inch (914400 EMU) up to 4000 pt (50800000 EMU); a string outside it is not a size, never clamped.
+  // range is the engine's: 1 inch (914400 EMU) up to 56 inches (51206400 EMU); a string outside it is not a size, never clamped.
   // 참조 구현: the sizes are the file engine's, whose table follows PptxGenJS `src/pptxgen.ts` 315-324 (MIT, THIRD_PARTY_NOTICES.md).
   const STAGE_SIZES = Object.freeze({
     "16:9": Object.freeze({ w: 960, h: 540 }),
@@ -13,7 +13,7 @@
   const EMU_PER_PT = 12700;
   const EMU_PER_CM = 360000;
   const MIN_SIZE_EMU = 914400;
-  const MAX_SIZE_EMU = 50800000;
+  const MAX_SIZE_EMU = 51206400;
 
   const customSizeOf = (aspect) => {
     const m = /^custom:(\d{1,9})x(\d{1,9})$/.exec(typeof aspect === "string" ? aspect : "");

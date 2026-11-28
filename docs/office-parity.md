@@ -147,7 +147,7 @@
 | 개체 | 그림 삽입 | 4 | 있음 | ui/sheet-media-ui.js | |
 | 개체 | 차트 삽입(막대·꺾은선·원·분산·영역) | 3 | 있음 | ui/sheet-chart-ui.js | |
 | 개체 | 차트 서식(제목·범례·축·데이터 레이블) | 3 | 일부 | ui/sheet-chart-ui.js | 축·데이터 레이블 서식을 확인하지 못함 |
-| 개체 | 차트 종류 확장(도넛·방사형·거품·주식·혼합) | 3 | 있음 | ui/chart-kind-doughnut.js | 도넛형·방사형·거품형·주식형·혼합 5종을 슬라이드와 함께 넣음. XLSX `c:doughnutChart`·`c:radarChart`·`c:bubbleChart`·`c:stockChart` 왕복, 혼합은 첫 계열만 막대(PD-402) |
+| 개체 | 차트 종류 확장(도넛·방사형·거품·주식·콤보) | 3 | 있음 | ui/chart-kind-doughnut.js | 도넛형·방사형·거품형·주식형·콤보 5종을 슬라이드와 함께 넣음. XLSX `c:doughnutChart`·`c:radarChart`·`c:bubbleChart`·`c:stockChart` 왕복, 콤보는 첫 계열만 막대(PD-402) |
 | 개체 | 도형·텍스트 상자 | 3 | 없음 | — | |
 | 개체 | 스파크라인 | 3 | 없음 | — | XLSX `x14:sparklineGroups` 왕복과 셀 안 미니 차트 렌더를 새로 짜야 해 이번엔 하지 않음(PD-400) |
 | 검토 | 시트 보호·통합 문서 보호·범위 편집 허용 | 4 | 있음 | ui/sheet-protect-ui.js | |
@@ -177,7 +177,7 @@
 | 슬라이드 | 슬라이드 순서 이동 | 3 | 있음 | ui/slide-studio.js | |
 | 슬라이드 | 슬라이드 레이아웃 바꾸기 | 3 | 일부 | ui/slide-dialogs.js | 마스터 레이아웃 지정만, 슬라이드별 바꾸기 메뉴 없음 |
 | 슬라이드 | 슬라이드 마스터 | 3 | 일부 | ui/slide-dialogs.js | 레이아웃 선택만, 마스터 개체 편집 없음 |
-| 슬라이드 | 슬라이드 크기(화면 비율) | 3 | 있음 | ui/slide-size.js | 슬라이드 ▸ 슬라이드 크기(표준 4:3·와이드스크린 16:9·사용자 지정), 너비·높이(cm)·방향. PPTX `p:sldSz`·ODP 쪽 크기 왕복, 1인치~4000pt(PD-402) |
+| 슬라이드 | 슬라이드 크기(화면 비율) | 3 | 있음 | ui/slide-size.js | 슬라이드 ▸ 슬라이드 크기(표준 4:3·와이드스크린 16:9·사용자 지정), 너비·높이(cm)·방향. PPTX `p:sldSz`·ODP 쪽 크기 왕복, 1~56인치(PD-402) |
 | 슬라이드 | 배경 서식 | 3 | 있음 | ui/slide-page.js | 단색·그라데이션(2색 선형)·그림, 모두 적용(PD-394) |
 | 슬라이드 | 테마·색 구성표 | 3 | 일부 | ui/slide-colors.js | 색 구성표 7종 선택과 테마 `a:clrScheme` 왕복(PPTX). 테마 글꼴·효과 선택은 없음(PD-398) |
 | 슬라이드 | 슬라이드 숨기기 | 3 | 있음 | ui/slide-page.js | 발표·인쇄·PDF 내보내기에서 건너뜀(PD-394) |

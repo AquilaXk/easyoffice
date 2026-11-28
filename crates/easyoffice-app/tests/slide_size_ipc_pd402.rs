@@ -85,7 +85,7 @@ fn a_hostile_size_is_refused_by_the_save() {
         "custom:99999999999x914400",
         "custom:914400x",
         "custom:-9144000x5143500",
-        "custom:50800001x914400",
+        "custom:51206401x914400",
         "custom:9144000x5143500x1",
         "huge",
     ] {

@@ -123,6 +123,43 @@ fn an_invalid_srcrect_in_a_file_leaves_the_picture_whole() {
     }
 }
 
+fn pad_of(deck: &RichSlideDeck) -> Option<[i32; 4]> {
+    deck.slides[0].ext.fx_of("pic").and_then(|f| f.src_pad)
+}
+
+#[test]
+fn a_padded_src_rect_is_kept_and_written_back() {
+    let crop = RichImageCrop {
+        left: 10_000,
+        ..RichImageCrop::default()
+    };
+    let bytes = OoxmlCodec::pack_pptx_rich(&deck(Some(crop)), false).unwrap();
+    let padded = with_slide_xml(&bytes, |xml| {
+        xml.replace(
+            "<a:srcRect l=\"10000\" t=\"0\" r=\"0\" b=\"0\"/>",
+            "<a:srcRect l=\"-5000\" t=\"2000\" r=\"-1000\" b=\"0\"/>",
+        )
+    });
+    let read = OoxmlCodec::unpack_pptx_rich(&padded).unwrap();
+    assert_eq!(crop_of(&read), None);
+    assert_eq!(pad_of(&read), Some([-5000, 2000, -1000, 0]));
+    let again = OoxmlCodec::pack_pptx_rich(&read, false).unwrap();
+    assert!(slide_xml(&again).contains("<a:srcRect l=\"-5000\" t=\"2000\" r=\"-1000\" b=\"0\"/>"));
+    // Past the limits (or leaving under 1% of the picture) nothing is kept.
+    for hostile in [
+        "<a:srcRect l=\"-5000000\"/>",
+        "<a:srcRect l=\"-5\" r=\"99999\"/>",
+        "<a:srcRect l=\"-5\" t=\"60000\" b=\"60000\"/>",
+        "<a:srcRect l=\"-2147483649\"/>",
+    ] {
+        let edited = with_slide_xml(&bytes, |xml| {
+            xml.replace("<a:srcRect l=\"10000\" t=\"0\" r=\"0\" b=\"0\"/>", hostile)
+        });
+        let read = OoxmlCodec::unpack_pptx_rich(&edited).unwrap();
+        assert_eq!((crop_of(&read), pad_of(&read)), (None, None), "{hostile}");
+    }
+}
+
 #[test]
 fn the_pdf_clips_a_cropped_picture_to_its_frame() {
     let crop = RichImageCrop {

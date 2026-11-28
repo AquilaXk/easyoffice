@@ -62,6 +62,20 @@ test("the 자르기 menu item turns the mode on for a picture and the picture dr
   assert.match(h.document.getElementById("status-command-feedback").textContent, /가장자리 핸들을 끌어 자릅니다/);
 });
 
+test("a padded srcRect of a file is kept as it is and dropped when it does not fit", async () => {
+  const h = await openSlide();
+  const { normalizeSrcPad } = h.host.__EASYOFFICE_SLIDE_FX__;
+  assert.deepEqual(normalizeSrcPad([-5000, 2000, -1000, 0]), [-5000, 2000, -1000, 0]);
+  for (const bad of [[1, 2, 3, 4], [-5000000, 0, 0, 0], [-1, 99000, 0, 1], [-1, 0, 0, 60000, 1], [-1.5, 0, 0, 0], ["-1", 0, 0, 0], null, "x", [-1, 60000, 0, 60000]]) {
+    assert.equal(normalizeSrcPad(bad), null, JSON.stringify(bad));
+  }
+  const canvas = h.host.__EASYOFFICE_SLIDE_CANVAS__;
+  canvas.addElement({ kind: "image", x: 10, y: 10, w: 100, h: 60, data: PNG, alt: "그림", srcPad: [-5000, 0, 0, 0] });
+  assert.deepEqual(canvas.getElements()[0].srcPad, [-5000, 0, 0, 0]);
+  canvas.updateElement(canvas.getElements()[0].id, { crop: { left: 1000, top: 0, right: 0, bottom: 0 } });
+  assert.equal(canvas.getElements()[0].srcPad, undefined, "a crop replaces the padding");
+});
+
 test("a crop that does not fit is dropped from the element", async () => {
   const h = await openSlide();
   const canvas = h.host.__EASYOFFICE_SLIDE_CANVAS__;

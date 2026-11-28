@@ -3,7 +3,7 @@ import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule } from "./test-support/modules.mjs";
 
-// PD-402: the chart kinds 도넛형, 방사형, 거품형, 주식형 and 혼합 in the slide and sheet windows.
+// PD-402: the chart kinds 도넛형, 방사형, 거품형, 주식형 and 콤보 in the slide and sheet windows.
 
 async function openSlide() {
   const h = await createWorkspaceHarness({ search: "?module=SLIDE&win=w-chart-kinds-pd402" });
@@ -28,7 +28,7 @@ test("the insert dialogs list the five new kinds with the Korean names", async (
   const h = await openSlide();
   for (const id of ["slide-chart-type", "sheet-chart-type"]) {
     const options = h.document.getElementById(id).querySelectorAll("option").map((o) => [o.getAttribute("value"), o.textContent]);
-    assert.deepEqual(options.slice(5), [["doughnut", "도넛형"], ["radar", "방사형"], ["bubble", "거품형"], ["stock", "주식형"], ["combo", "혼합"]], id);
+    assert.deepEqual(options.slice(5), [["doughnut", "도넛형"], ["radar", "방사형"], ["bubble", "거품형"], ["stock", "주식형"], ["combo", "콤보"]], id);
   }
 });
 
@@ -86,7 +86,7 @@ test("주식형 draws a body between open and close and a whisker from low to hi
   assert.equal(candleAt(four.map((x) => ({ ...x, values: [null] })), 0), null, "a missing value leaves no candle");
 });
 
-test("혼합 draws the first series as columns and the others as lines on one scale", async () => {
+test("콤보 draws the first series as columns and the others as lines on one scale", async () => {
   const h = await openSlide();
   const svg = add(h, "combo", [s("막대", [10, 20, 30, 40]), s("선", [5, 15, 25, 35]), s("선 2", [40, 30, 20, 10])]);
   assert.equal(svg.querySelectorAll(".eo-chart-bar").length, 4);

@@ -10,11 +10,13 @@
 //! check is ours: PptxGenJS accepts any number, a hostile file must not.
 
 use crate::rich_slide::{EMU_PER_PT, MAX_SLIDE_COORD_PT};
+const _: () = assert!(MAX_SLIDE_SIZE_EMU as f64 / EMU_PER_PT >= MAX_SLIDE_COORD_PT);
 
-/// Shortest and longest side of a custom slide, in EMU (1 inch up to the coordinate cap of
-/// [`MAX_SLIDE_COORD_PT`]); a file or a request outside it is rejected, never clamped.
+/// Shortest and longest side of a custom slide, in EMU: 1 inch up to 56 inches, the range of the Korean presentation
+/// program's own size dialog, so a file it saves is never refused. A file or a request outside it is rejected, never
+/// clamped. Elements stay inside [`MAX_SLIDE_COORD_PT`] (4000 pt), which is 32 pt short of the widest page.
 pub const MIN_SLIDE_SIZE_EMU: u64 = 914_400;
-pub const MAX_SLIDE_SIZE_EMU: u64 = (MAX_SLIDE_COORD_PT * EMU_PER_PT) as u64;
+pub const MAX_SLIDE_SIZE_EMU: u64 = 51_206_400;
 const EMU_PER_CM: f64 = 360_000.0;
 const PRESET_TOLERANCE_PT: f64 = 0.6;
 /// Ratio of the long to the short side below which an out-of-range size is read as 4:3 or A4.

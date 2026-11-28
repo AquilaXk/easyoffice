@@ -134,3 +134,58 @@ fn hostile_spans_are_dropped_on_write_and_on_read() {
     let back = OoxmlCodec::unpack_pptx_rich(&ZipArchiveCodec::pack(&edited).unwrap()).unwrap();
     assert!(spans_of(&back).is_empty());
 }
+
+fn odp_with_content(f: impl Fn(String) -> String, spans: Vec<TableSpan>) -> Vec<u8> {
+    let same: Vec<Vec<String>> = (0..3).map(|_| vec!["x".to_string(); 4]).collect();
+    let bytes = OdfCodec::pack_odp_rich(&deck(same, spans)).unwrap();
+    let entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
+    let edited: Vec<(String, Vec<u8>)> = entries
+        .into_iter()
+        .map(|e| {
+            if e.path == "content.xml" {
+                (e.path, f(String::from_utf8(e.data).unwrap()).into_bytes())
+            } else {
+                (e.path, e.data)
+            }
+        })
+        .collect();
+    ZipArchiveCodec::pack(&edited).unwrap()
+}
+
+const X_CELL: &str =
+    "<table:table-cell office:value-type=\"string\"><text:p>x</text:p></table:table-cell>";
+
+#[test]
+fn repeated_odp_cells_take_their_columns_and_a_hostile_count_is_refused() {
+    // Two adjacent equal cells written as one cell repeated twice read back as the same four columns, and the merge that
+    // follows them keeps its column.
+    let repeated = |n: &str| {
+        let one = format!("<table:table-cell office:value-type=\"string\" table:number-columns-repeated=\"{n}\"><text:p>x</text:p></table:table-cell>");
+        move |c: String| c.replacen(&format!("{X_CELL}{X_CELL}"), &one, 1)
+    };
+    let ok = OdfCodec::unpack_odp_rich(&odp_with_content(repeated("2"), vec![])).unwrap();
+    let SlideElement::Table { rows, .. } = &ok.slides[0].elements[0] else {
+        panic!("table")
+    };
+    assert_eq!((rows.len(), rows[0].len()), (3, 4));
+    assert!(rows[0].iter().all(|c| c == "x"));
+    // A span after a repeated cell lands on its true column.
+    let spanned = OdfCodec::unpack_odp_rich(&odp_with_content(
+        |c| {
+            c.replacen(
+                &format!("{X_CELL}{X_CELL}{X_CELL}{X_CELL}"),
+                &format!(
+                    "<table:table-cell office:value-type=\"string\" table:number-columns-repeated=\"3\"><text:p>x</text:p></table:table-cell><table:table-cell office:value-type=\"string\" table:number-columns-spanned=\"1\" table:number-rows-spanned=\"2\"><text:p>x</text:p></table:table-cell>"
+                ),
+                1,
+            )
+        },
+        vec![],
+    ))
+    .unwrap();
+    assert_eq!(spans_of(&spanned), vec![span(0, 3, 2, 1)]);
+    for hostile in ["33", "1000000000", "18446744073709551615"] {
+        let bytes = odp_with_content(repeated(hostile), vec![]);
+        assert!(OdfCodec::unpack_odp_rich(&bytes).is_err(), "{hostile}");
+    }
+}

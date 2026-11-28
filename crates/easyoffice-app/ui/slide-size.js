@@ -5,7 +5,7 @@
   // size list, 너비, 높이 (centimetres, the unit of the Korean presentation program) and 방향 (가로, 세로). Width and height are the
   // page as shown, so a portrait page has the larger height; changing the orientation swaps them. A size equal to a preset
   // (within 0.6 pt) is saved as that preset, any other size as `custom:<cx>x<cy>` (`slide-stage-size.js`); a size outside 1 inch
-  // up to 4000 pt is refused with a message and nothing changes (the file engine rejects the same range).
+  // up to 56 inches is refused with a message and nothing changes (the file engine rejects the same range).
   const DIALOG = "slide-size-dialog";
   const PRESET_ITEMS = Object.freeze([["16:9", "와이드스크린(16:9)"], ["4:3", "표준(4:3)"], ["A4", "A4 용지(210x297 mm)"], ["custom", "사용자 지정"]]);
   const PRESET_ACTS = Object.freeze({ "slide-size-4x3": "4:3", "slide-size-16x9": "16:9" });

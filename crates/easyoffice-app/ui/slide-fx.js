@@ -84,6 +84,9 @@
     if (shadow) out.shadow = shadow;
     const crop = kind === "image" ? normalizeCrop(raw.crop) : null;
     if (crop) out.crop = crop;
+    // A picture padded by its file (a negative `a:srcRect` side) keeps that rect as it is unless it is cut in the editor.
+    const pad = kind === "image" && !crop ? normalizeSrcPad(raw.srcPad) : null;
+    if (pad) out.srcPad = pad;
     if (kind !== "image") {
       const para = normalizePara(raw.para);
       if (para) out.para = para;
@@ -103,7 +106,7 @@
     return [...face].length > 0 ? [...face].slice(0, MAX_FACE_CHARS).join("") : "";
   }
 
-  const FX_KEYS = ["rot", "flipH", "flipV", "dash", "outline", "shadow", "para", "font", "eastFont", "crop"];
+  const FX_KEYS = ["rot", "flipH", "flipV", "dash", "outline", "shadow", "para", "font", "eastFont", "crop", "srcPad"];
 
   // 그림 자르기 (PD-402): the part of each side of a picture that is cut away, in whole thousandths of a percent (`a:srcRect`, the
   // unit and limits of the document window's picture crop: each side up to 99000, and at least 1% left across and down). A value
@@ -119,6 +122,13 @@
     }
     if (crop.left + crop.right > MAX_CROP_SIDE || crop.top + crop.bottom > MAX_CROP_SIDE) return null;
     return crop.left + crop.top + crop.right + crop.bottom > 0 ? crop : null;
+  }
+
+  // `[l, t, r, b]` of a padded `a:srcRect` (some side negative, none past -1000000, the cut sides leaving 1%), or null.
+  function normalizeSrcPad(raw) {
+    if (!Array.isArray(raw) || raw.length !== 4 || !raw.every((v) => Number.isInteger(v) && v >= -1000000 && v <= MAX_CROP_SIDE)) return null;
+    const [l, t, r, b] = raw;
+    return raw.some((v) => v < 0) && l + r <= MAX_CROP_SIDE && t + b <= MAX_CROP_SIDE ? [l, t, r, b] : null;
   }
 
   // The picture inside its frame: drawn at the size of the whole image and shifted, the frame cuts the rest away.
@@ -242,6 +252,6 @@
   }
 
   host.__EASYOFFICE_SLIDE_FX__ = {
-    BULLET_CHARS, NUMBER_STYLES, MAX_CROP_SIDE, normalize, normalizeCrop, cropImage, clear, withFx, paintText, beginTextEdit, applyDom, markerFor, hex6,
+    BULLET_CHARS, NUMBER_STYLES, MAX_CROP_SIDE, normalize, normalizeCrop, normalizeSrcPad, cropImage, clear, withFx, paintText, beginTextEdit, applyDom, markerFor, hex6,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

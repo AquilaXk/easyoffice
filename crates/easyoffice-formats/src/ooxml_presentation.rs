@@ -520,7 +520,7 @@ pub(crate) fn build_slide_chart_xml(
             ser.values.iter().map(|v| v.to_string()),
             ser.values.len(),
         );
-        if let Some(sizes) = pair.get(1) {
+        if let Some(sizes) = pair.get(1).filter(|s| !s.values.is_empty()) {
             push_chart_pts(
                 &mut ser_xml,
                 "c:bubbleSize",
@@ -737,17 +737,20 @@ pub(crate) fn parse_slide_chart_xml(xml: &str) -> Result<DecodedSlideChart, Easy
                     }
                     let name = std::mem::take(&mut s_name);
                     // The sizes of a bubble series are the next series of the model (see `ChartKind`).
-                    let sizes = (!s_sizes.is_empty()).then(|| {
-                        let mut sizes =
-                            vec![0.0; s_sizes.iter().map(|(i, _)| *i).max().unwrap_or(0) + 1];
-                        for (i, n) in s_sizes.drain(..) {
-                            sizes[i] = n;
-                        }
-                        SlideChartSeries {
-                            name: format!("{name} (크기)"),
-                            values: sizes,
-                        }
-                    });
+                    // A bubble series with no `bubbleSize` still gets its (empty) size series, so the pairs of the model
+                    // never take the next series' values for sizes.
+                    let sizes =
+                        (!s_sizes.is_empty() || kind == Some(ChartKind::Bubble)).then(|| {
+                            let mut sizes =
+                                vec![0.0; s_sizes.iter().map(|(i, _)| *i + 1).max().unwrap_or(0)];
+                            for (i, n) in s_sizes.drain(..) {
+                                sizes[i] = n;
+                            }
+                            SlideChartSeries {
+                                name: format!("{name} (크기)"),
+                                values: sizes,
+                            }
+                        });
                     series.push(SlideChartSeries { name, values });
                     if let Some(sizes) = sizes {
                         if series.len() >= MAX_SLIDE_CHART_SERIES {

@@ -134,6 +134,9 @@ fn a_custom_size_round_trips_through_odp_within_the_unit_rounding() {
 
 #[test]
 fn sizes_outside_the_range_are_rejected_not_clamped() {
+    // 56 inches, the largest page the Korean presentation program saves, is accepted.
+    assert_eq!(MAX_SLIDE_SIZE_EMU, 56 * 914_400);
+    assert!(SlideAspect::custom(MAX_SLIDE_SIZE_EMU, MAX_SLIDE_SIZE_EMU).is_some());
     assert!(SlideAspect::custom(MIN_SLIDE_SIZE_EMU - 1, 914_400).is_none());
     assert!(SlideAspect::custom(914_400, MAX_SLIDE_SIZE_EMU + 1).is_none());
     assert!(SlideAspect::custom(u64::MAX, u64::MAX).is_none());

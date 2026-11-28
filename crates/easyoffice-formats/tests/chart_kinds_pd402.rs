@@ -280,6 +280,43 @@ fn hostile_chart_parts_are_refused() {
     assert!(OoxmlCodec::unpack_pptx_rich(&flood).is_err());
 }
 
+#[test]
+fn a_bubble_series_without_sizes_is_not_paired_with_the_next_one() {
+    let deck = slide_deck(
+        ChartKind::Bubble,
+        vec![
+            s("A", &[1.0, 2.0, 3.0]),
+            s("A (크기)", &[7.0, 8.0, 9.0]),
+            s("B", &[4.0, 5.0, 6.0]),
+            s("B (크기)", &[1.0, 2.0, 3.0]),
+        ],
+    );
+    // Cut the `c:bubbleSize` of the first series out of the part.
+    let cut = with_chart_xml(&deck, |x| {
+        let start = x.find("<c:bubbleSize>").unwrap();
+        let end = x.find("</c:bubbleSize>").unwrap() + "</c:bubbleSize>".len();
+        format!("{}{}", &x[..start], &x[end..])
+    });
+    let read = OoxmlCodec::unpack_pptx_rich(&cut).unwrap();
+    let (kind, series) = chart_of(&read);
+    assert_eq!(kind, ChartKind::Bubble);
+    assert_eq!(
+        series.len(),
+        4,
+        "the first series keeps an empty size series of its own"
+    );
+    assert!(series[1].values.is_empty());
+    assert_eq!(series[2].values, vec![4.0, 5.0, 6.0], "B is still B");
+    assert_eq!(series[3].values, vec![1.0, 2.0, 3.0]);
+    let back =
+        OoxmlCodec::unpack_pptx_rich(&OoxmlCodec::pack_pptx_rich(&read, false).unwrap()).unwrap();
+    assert_eq!(
+        chart_of(&back).1,
+        series,
+        "writing and reading again changes nothing"
+    );
+}
+
 fn bubble_ser(pptx: &[u8]) -> String {
     let entries = ZipArchiveCodec::unpack(pptx, &ZipSecurityPolicy::default()).unwrap();
     let xml = String::from_utf8(

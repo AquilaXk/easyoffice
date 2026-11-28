@@ -5,13 +5,13 @@
 use std::fmt::Write;
 
 use easyoffice_formats::{
-    base64_codec, check_guides, check_spans, clean_face, normalize_hex_color, AnimClass, AnimDir,
-    AnimEffect, AnimStart, ColorScheme, DeckSettings, EasyOfficeError, ElementFx, RichImage,
-    RichImageCrop, SlideAnim, SlideBackground, SlideBullet, SlideDash, SlideDate, SlideExt,
-    SlideFooter, SlideGroup, SlideGuide, SlideNumberStyle, SlideOutline, SlideParaFmt, SlideShadow,
-    StrictJsonValue, TableSpan, COLOR_SCHEME_SLOTS, DEFAULT_ANIM_MS, GUIDE_UNITS_PER_PT,
-    MAX_ADVANCE_MS, MAX_CROP_SIDE, MAX_GUIDE_POS, MAX_SLIDE_ANIMS, MAX_SLIDE_GROUPS,
-    MAX_SLIDE_TOTAL_IMAGE_BYTES,
+    base64_codec, check_guides, check_spans, clean_face, is_valid_src_pad, normalize_hex_color,
+    AnimClass, AnimDir, AnimEffect, AnimStart, ColorScheme, DeckSettings, EasyOfficeError,
+    ElementFx, RichImage, RichImageCrop, SlideAnim, SlideBackground, SlideBullet, SlideDash,
+    SlideDate, SlideExt, SlideFooter, SlideGroup, SlideGuide, SlideNumberStyle, SlideOutline,
+    SlideParaFmt, SlideShadow, StrictJsonValue, TableSpan, XmlSanitizer, COLOR_SCHEME_SLOTS,
+    DEFAULT_ANIM_MS, GUIDE_UNITS_PER_PT, MAX_ADVANCE_MS, MAX_CROP_SIDE, MAX_GUIDE_POS,
+    MAX_SLIDE_ANIMS, MAX_SLIDE_GROUPS, MAX_SLIDE_TOTAL_IMAGE_BYTES, MAX_VIEW_PROPS_BYTES,
 };
 
 use crate::convert_structured::{as_array, as_object, field, invalid, opt_str, Budget, JsonObject};
@@ -138,6 +138,7 @@ pub(crate) fn parse_element_fx(
         .filter(|p| !p.is_default());
     fx.font = face(obj, "font")?;
     fx.east_font = face(obj, "eastFont")?;
+    fx.src_pad = field(obj, "srcPad").map(parse_src_pad).transpose()?;
     fx.crop = field(obj, "crop")
         .map(parse_crop)
         .transpose()?
@@ -168,6 +169,29 @@ fn parse_crop(v: &StrictJsonValue) -> Result<RichImageCrop, EasyOfficeError> {
         Ok(crop)
     } else {
         Err(invalid("그림 자르기가 그림을 1% 미만으로 남깁니다."))
+    }
+}
+
+/// `srcPad` of a picture: `[l, t, r, b]` of a padded `a:srcRect` (some side negative), kept as the file had it. A value
+/// outside the limits of [`is_valid_src_pad`] refuses the save (Fail-Closed).
+fn parse_src_pad(v: &StrictJsonValue) -> Result<[i32; 4], EasyOfficeError> {
+    let items = as_array(v, "srcPad")?;
+    let mut rect = [0i32; 4];
+    if items.len() != rect.len() {
+        return Err(invalid("그림 여백 'srcPad'는 숫자 네 개여야 합니다."));
+    }
+    for (slot, item) in rect.iter_mut().zip(items) {
+        let StrictJsonValue::Number(raw) = item else {
+            return Err(invalid("그림 여백 'srcPad'는 숫자 네 개여야 합니다."));
+        };
+        *slot = raw
+            .parse::<i32>()
+            .map_err(|_| invalid("그림 여백 'srcPad'는 정수여야 합니다."))?;
+    }
+    if is_valid_src_pad(rect) {
+        Ok(rect)
+    } else {
+        Err(invalid("그림 여백 'srcPad'가 허용 범위를 벗어났습니다."))
     }
 }
 
@@ -465,6 +489,19 @@ pub(crate) fn parse_deck_settings(obj: &JsonObject) -> Result<DeckSettings, Easy
         color_scheme,
         guides,
         show_guides: flag(obj, "showGuides")?,
+        view_props: opt_str(obj, "viewProps")?
+            .map(|raw| {
+                // The view part of the opened file, handed back to be written with the guides patched in: it must be
+                // small, safe XML of a view part.
+                if raw.len() > MAX_VIEW_PROPS_BYTES || !raw.contains("<p:viewPr") {
+                    return Err(invalid(
+                        "보기 속성(viewProps)이 올바르지 않거나 너무 큽니다.",
+                    ));
+                }
+                XmlSanitizer::validate_safe_xml(raw)?;
+                Ok(raw.to_string())
+            })
+            .transpose()?,
     })
 }
 
@@ -482,6 +519,10 @@ pub(crate) fn write_deck_settings(
     }
     if settings.show_guides {
         out.push_str(",\"showGuides\":true");
+    }
+    if let Some(raw) = &settings.view_props {
+        out.push_str(",\"viewProps\":");
+        push_str(out, raw);
     }
     if !settings.guides.is_empty() {
         out.push_str(",\"guides\":[");
@@ -559,6 +600,9 @@ pub(crate) fn write_element_fx(
             let _ = write!(out, ",\"{key}\":");
             push_str(out, face);
         }
+    }
+    if let Some([l, t, r, b]) = fx.src_pad {
+        let _ = write!(out, ",\"srcPad\":[{l},{t},{r},{b}]");
     }
     if let Some(c) = fx.crop {
         let _ = write!(

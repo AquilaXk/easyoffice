@@ -86,7 +86,11 @@
       if (!from) return say(MSG_NO_RANGE);
       const range = { r0: Math.min(from.row, to.row), r1: Math.max(from.row, to.row), c0: Math.min(from.col, to.col), c1: Math.max(from.col, to.col) };
       const next = mergeRange(el.rows, el.merges || [], range);
-      if (!next) return say(MSG_NO_RANGE);
+      if (!next) {
+        // The clicked cells may be gone (an undo or a deleted row shrank the table): forget them.
+        if (range.r1 >= el.rows.length || range.c1 >= (el.rows[0]?.length ?? 0)) active = corner = null;
+        return say(MSG_NO_RANGE);
+      }
       pushUndoSnapshot(false);
       canvas.updateElement(el.id, { rows: next.rows, merges: next.merges }, { recordUndo: false });
       active = { id: el.id, row: next.range.r0, col: next.range.c0 };

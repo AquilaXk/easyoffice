@@ -311,6 +311,8 @@
     const guides = host.__EASYOFFICE_SLIDE_GUIDES_MATH__?.normalizeGuides(res?.guides) ?? [];
     if (guides.length > 0) out.guides = guides;
     if (res?.showGuides === true) out.showGuides = true;
+    // The view part of the opened file travels back untouched, so a save keeps the file's other views (64 KiB at most).
+    if (typeof res?.viewProps === "string" && res.viewProps.length <= 65536) out.viewProps = res.viewProps;
     return out;
   }
 
