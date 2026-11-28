@@ -408,7 +408,14 @@
       img.setAttribute("alt", el.alt || "");
       img.setAttribute("draggable", "false");
       if (el.imageId) img.dataset.eoImageId = el.imageId;
-      card.appendChild(img);
+      if (el.crop) {
+        // A cropped picture sits in a frame that cuts the rest away.
+        const frame = document.createElement("div");
+        frame.className = "slide-el-crop";
+        fx.cropImage(img, el.crop);
+        frame.appendChild(img);
+        card.appendChild(frame);
+      } else card.appendChild(img);
     } else if (el.kind === "table") {
       const tbl = document.createElement("table");
       tbl.className = "slide-el-table";

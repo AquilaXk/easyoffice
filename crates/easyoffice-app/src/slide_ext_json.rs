@@ -6,11 +6,11 @@ use std::fmt::Write;
 
 use easyoffice_formats::{
     base64_codec, check_spans, clean_face, normalize_hex_color, AnimClass, AnimDir, AnimEffect,
-    AnimStart, ColorScheme, DeckSettings, EasyOfficeError, ElementFx, RichImage, SlideAnim,
-    SlideBackground, SlideBullet, SlideDash, SlideDate, SlideExt, SlideFooter, SlideGroup,
-    SlideNumberStyle, SlideOutline, SlideParaFmt, SlideShadow, StrictJsonValue, TableSpan,
-    COLOR_SCHEME_SLOTS, DEFAULT_ANIM_MS, MAX_ADVANCE_MS, MAX_SLIDE_ANIMS, MAX_SLIDE_GROUPS,
-    MAX_SLIDE_TOTAL_IMAGE_BYTES,
+    AnimStart, ColorScheme, DeckSettings, EasyOfficeError, ElementFx, RichImage, RichImageCrop,
+    SlideAnim, SlideBackground, SlideBullet, SlideDash, SlideDate, SlideExt, SlideFooter,
+    SlideGroup, SlideNumberStyle, SlideOutline, SlideParaFmt, SlideShadow, StrictJsonValue,
+    TableSpan, COLOR_SCHEME_SLOTS, DEFAULT_ANIM_MS, MAX_ADVANCE_MS, MAX_CROP_SIDE, MAX_SLIDE_ANIMS,
+    MAX_SLIDE_GROUPS, MAX_SLIDE_TOTAL_IMAGE_BYTES,
 };
 
 use crate::convert_structured::{as_array, as_object, field, invalid, opt_str, Budget, JsonObject};
@@ -137,7 +137,37 @@ pub(crate) fn parse_element_fx(
         .filter(|p| !p.is_default());
     fx.font = face(obj, "font")?;
     fx.east_font = face(obj, "eastFont")?;
+    fx.crop = field(obj, "crop")
+        .map(parse_crop)
+        .transpose()?
+        .filter(|c| !c.is_none());
     Ok((!fx.is_default()).then_some(fx))
+}
+
+/// `crop` of a picture: the part of each side cut away, whole thousandths of a percent; a side past 99%, or sides that leave
+/// less than 1% of the picture, refuse the save (Fail-Closed).
+fn parse_crop(v: &StrictJsonValue) -> Result<RichImageCrop, EasyOfficeError> {
+    let o = as_object(v, "crop")?;
+    let side = |key: &str| -> Result<u32, EasyOfficeError> {
+        let n = num(o, key)?.unwrap_or(0.0);
+        if n.fract() != 0.0 || !(0.0..=f64::from(MAX_CROP_SIDE)).contains(&n) {
+            return Err(invalid(format!(
+                "그림 자르기 '{key}'는 0~{MAX_CROP_SIDE}의 정수여야 합니다."
+            )));
+        }
+        Ok(n as u32)
+    };
+    let crop = RichImageCrop {
+        left: side("left")?,
+        top: side("top")?,
+        right: side("right")?,
+        bottom: side("bottom")?,
+    };
+    if crop.is_valid() {
+        Ok(crop)
+    } else {
+        Err(invalid("그림 자르기가 그림을 1% 미만으로 남깁니다."))
+    }
 }
 
 /// Merged cells (`merges`) of a table object, PD-402: `None` when it has none. A span outside the `rows` x `cols`
@@ -482,6 +512,13 @@ pub(crate) fn write_element_fx(
             let _ = write!(out, ",\"{key}\":");
             push_str(out, face);
         }
+    }
+    if let Some(c) = fx.crop {
+        let _ = write!(
+            out,
+            ",\"crop\":{{\"left\":{},\"top\":{},\"right\":{},\"bottom\":{}}}",
+            c.left, c.top, c.right, c.bottom
+        );
     }
     if !fx.spans.is_empty() {
         out.push_str(",\"merges\":[");

@@ -860,10 +860,29 @@ fn render_element(cv: &mut PdfCanvas, el: &SlideElement, fx: Option<&ElementFx>)
             let py = cv.py(rect.y, rect.h);
             if let Some(obj) = pdf_image_object(image) {
                 let xname = format!("Im{}", cv.xobjects.len() + 1);
-                cv.ops.push(format!(
-                    "q {:.2} 0 0 {:.2} {:.2} {py:.2} cm /{xname} Do Q",
-                    rect.w, rect.h, rect.x
-                ));
+                // A cropped picture is drawn at the size of the whole image, clipped to its frame.
+                let crop = fx
+                    .and_then(|f| f.crop)
+                    .filter(|c| !c.is_none() && c.is_valid());
+                let op = if let Some(c) = crop {
+                    let side = |v: u32| f64::from(v) / 100_000.0;
+                    let full_w = rect.w / (1.0 - side(c.left) - side(c.right));
+                    let full_h = rect.h / (1.0 - side(c.top) - side(c.bottom));
+                    format!(
+                        "q {:.2} {py:.2} {:.2} {:.2} re W n {full_w:.2} 0 0 {full_h:.2} {:.2} {:.2} cm /{xname} Do Q",
+                        rect.x,
+                        rect.w,
+                        rect.h,
+                        rect.x - side(c.left) * full_w,
+                        py - side(c.bottom) * full_h
+                    )
+                } else {
+                    format!(
+                        "q {:.2} 0 0 {:.2} {:.2} {py:.2} cm /{xname} Do Q",
+                        rect.w, rect.h, rect.x
+                    )
+                };
+                cv.ops.push(op);
                 cv.xobjects.push((xname, obj));
             } else {
                 cv.fill_rect(rect.x, rect.y, rect.w, rect.h, 0xF8FAFC);

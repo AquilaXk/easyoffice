@@ -294,6 +294,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "slide-clipboard.js",
     "slide-colors.js",
     "slide-context-menu.js",
+    "slide-crop.js",
     "slide-dialogs.js",
     "slide-ext.js",
     "slide-font.js",

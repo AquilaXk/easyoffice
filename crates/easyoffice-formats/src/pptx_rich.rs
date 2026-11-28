@@ -18,6 +18,7 @@ use crate::pptx_master::{
 };
 pub use crate::pptx_rich_read::unpack_pptx_rich;
 use crate::pptx_transition::transition_xml;
+use crate::rich_image_layout::RichImageCrop;
 use crate::rich_image_writers::MediaParts;
 use crate::rich_slide::{
     pt_to_emu, pt_to_signed_emu, RichSlideDeck, SlideBox, SlideElement, SlideMasterLayout,
@@ -270,7 +271,7 @@ impl Emit<'_> {
                 } else {
                     alt.as_str()
                 };
-                let _ = write!(self.xml, "<p:pic><p:nvPicPr><p:cNvPr id=\"{sid}\" name=\"{}\" descr=\"{}\"/><p:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"{rid}\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>", XmlSanitizer::escape(id), XmlSanitizer::escape(descr));
+                let _ = write!(self.xml, "<p:pic><p:nvPicPr><p:cNvPr id=\"{sid}\" name=\"{}\" descr=\"{}\"/><p:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"{rid}\"/>{}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>", XmlSanitizer::escape(id), XmlSanitizer::escape(descr), src_rect_xml(fx.and_then(|f| f.crop)));
                 push_xfrm(&mut self.xml, "a:xfrm", *rect, fx);
                 self.xml
                     .push_str("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>");
@@ -429,6 +430,17 @@ impl Emit<'_> {
         }
         self.xml.push_str("</p:grpSp>");
     }
+}
+
+/// `a:srcRect` of a cropped picture: thousandths of a percent of each side (ECMA-376 20.1.8.55), as the DOCX writer writes it.
+fn src_rect_xml(crop: Option<RichImageCrop>) -> String {
+    crop.filter(|c| !c.is_none() && c.is_valid())
+        .map_or_else(String::new, |c| {
+            format!(
+                "<a:srcRect l=\"{}\" t=\"{}\" r=\"{}\" b=\"{}\"/>",
+                c.left, c.top, c.right, c.bottom
+            )
+        })
 }
 
 fn dash_of(fx: Option<&ElementFx>) -> SlideDash {

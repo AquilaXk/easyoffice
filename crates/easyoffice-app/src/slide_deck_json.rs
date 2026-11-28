@@ -358,7 +358,16 @@ pub(crate) fn parse_slide_deck(
                         fxs.extend(parse_table_fx(obj, el.id(), rows.len(), cols)?);
                     }
                     SlideElement::Chart { .. } => {}
-                    _ => fxs.extend(parse_element_fx(as_object(e_item, "elements")?, el.id())?),
+                    _ => {
+                        let mut fx = parse_element_fx(as_object(e_item, "elements")?, el.id())?;
+                        // Only a picture is cropped.
+                        if !matches!(el, SlideElement::Image { .. }) {
+                            if let Some(f) = fx.as_mut() {
+                                f.crop = None;
+                            }
+                        }
+                        fxs.extend(fx.filter(|f| !f.is_default()));
+                    }
                 }
                 elements.push(el);
             }

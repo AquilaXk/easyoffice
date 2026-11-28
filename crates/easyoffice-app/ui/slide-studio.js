@@ -109,7 +109,7 @@
       moveSlide: (from, to) => moveSlide(from, to), setDeckSize: (...a) => setDeckSize(...a), startShow: (...a) => startShow(...a),
       buildFrame: (slide, idx) => buildSlideFrame(slide, idx), deckAspect: () => deckAspect(), deckOrientation: () => deckOrientation(),
     };
-    const extraTools = ["PAINTER", "FONT", "TABLE", "OVERVIEW", "SHOW_SETUP", "SIZE", "COLORS"].map((name) => (slideCanvas ? host["__EASYOFFICE_CREATE_SLIDE_" + name + "__"]?.(deps, slideCanvas, ops) : null));
+    const extraTools = ["PAINTER", "FONT", "TABLE", "OVERVIEW", "SHOW_SETUP", "SIZE", "COLORS", "CROP"].map((name) => (slideCanvas ? host["__EASYOFFICE_CREATE_SLIDE_" + name + "__"]?.(deps, slideCanvas, ops) : null));
     const slideTools = [slideFormat, slidePage, slideAnim, ...extraTools];
     const showAnim = host.__EASYOFFICE_CREATE_SHOW_ANIM__?.();
     const timing = host.__EASYOFFICE_CREATE_SHOW_TIMING__?.();

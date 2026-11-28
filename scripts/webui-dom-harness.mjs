@@ -147,6 +147,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/slide-show-timing.js",
   "../crates/easyoffice-app/ui/slide-colors.js",
   "../crates/easyoffice-app/ui/slide-size.js",
+  "../crates/easyoffice-app/ui/slide-crop.js",
   "../crates/easyoffice-app/ui/slide-table.js",
   "../crates/easyoffice-app/ui/slide-show-anim.js",
   "../crates/easyoffice-app/ui/workspace-tools.js",

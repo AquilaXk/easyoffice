@@ -6,6 +6,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::rich_document::normalize_hex_color;
+use crate::rich_image_layout::RichImageCrop;
 use crate::rich_slide::{
     SlideBox, SlideElement, MAX_ELEMENTS_PER_SLIDE, MAX_SLIDE_STROKE_PT, MAX_SLIDE_TEXT_BYTES,
 };
@@ -193,6 +194,8 @@ pub struct ElementFx {
     pub east_font: Option<String>,
     /// Merged cells of a table element, PD-402 (see `rich_slide_table.rs`).
     pub spans: Vec<TableSpan>,
+    /// Part of each side of a picture that is cut away (`a:srcRect`), PD-402; the document window's crop type.
+    pub crop: Option<RichImageCrop>,
 }
 
 /// Longest typeface name a slide keeps (in characters).
@@ -228,9 +231,16 @@ impl ElementFx {
             && self.font.is_none()
             && self.east_font.is_none()
             && self.spans.is_empty()
+            && self.crop.is_none()
     }
 
     fn validate(&self) -> Result<(), EasyOfficeError> {
+        if self.crop.is_some_and(|c| !c.is_valid()) {
+            return Err(EasyOfficeError::InvalidArgument(
+                "슬라이드 그림 자르기는 각 변이 99% 이하이고 가로·세로에 1% 이상 남아야 합니다."
+                    .to_string(),
+            ));
+        }
         for face in [&self.font, &self.east_font].into_iter().flatten() {
             if clean_face(face).as_deref() != Some(face.as_str()) {
                 return Err(EasyOfficeError::InvalidArgument(

@@ -689,6 +689,7 @@
 .slide-el-textbox[contenteditable="plaintext-only"] { cursor: text; user-select: text; }
 .slide-el-shape-svg { display: block; width: 100%; height: 100%; pointer-events: none; }
 .slide-el-shape-text { position: absolute; inset: 6px 10px; display: flex; align-items: center; justify-content: center; text-align: center; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.3; pointer-events: none; }
+.slide-el-crop { position: absolute; inset: 0; overflow: hidden; }
 .slide-el-image { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 .slide-el--table { background: var(--doc-paper); overflow: hidden; }
 .slide-el-table { width: 100%; height: 100%; border-collapse: collapse; table-layout: fixed; font-size: var(--font-size-sm); color: var(--ui-text); }

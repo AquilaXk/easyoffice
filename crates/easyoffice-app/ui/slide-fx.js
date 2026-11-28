@@ -82,6 +82,8 @@
     }
     const shadow = normalizeShadow(raw.shadow);
     if (shadow) out.shadow = shadow;
+    const crop = kind === "image" ? normalizeCrop(raw.crop) : null;
+    if (crop) out.crop = crop;
     if (kind !== "image") {
       const para = normalizePara(raw.para);
       if (para) out.para = para;
@@ -101,7 +103,34 @@
     return [...face].length > 0 ? [...face].slice(0, MAX_FACE_CHARS).join("") : "";
   }
 
-  const FX_KEYS = ["rot", "flipH", "flipV", "dash", "outline", "shadow", "para", "font", "eastFont"];
+  const FX_KEYS = ["rot", "flipH", "flipV", "dash", "outline", "shadow", "para", "font", "eastFont", "crop"];
+
+  // 그림 자르기 (PD-402): the part of each side of a picture that is cut away, in whole thousandths of a percent (`a:srcRect`, the
+  // unit and limits of the document window's picture crop: each side up to 99000, and at least 1% left across and down). A value
+  // that does not fit is no crop.
+  const MAX_CROP_SIDE = 99000;
+  function normalizeCrop(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const crop = {};
+    for (const side of ["left", "top", "right", "bottom"]) {
+      const v = raw[side] === undefined ? 0 : raw[side];
+      if (!Number.isInteger(v) || v < 0 || v > MAX_CROP_SIDE) return null;
+      crop[side] = v;
+    }
+    if (crop.left + crop.right > MAX_CROP_SIDE || crop.top + crop.bottom > MAX_CROP_SIDE) return null;
+    return crop.left + crop.top + crop.right + crop.bottom > 0 ? crop : null;
+  }
+
+  // The picture inside its frame: drawn at the size of the whole image and shifted, the frame cuts the rest away.
+  function cropImage(img, crop) {
+    const kx = 1 - (crop.left + crop.right) / 100000;
+    const ky = 1 - (crop.top + crop.bottom) / 100000;
+    Object.assign(img.style, {
+      position: "absolute", maxWidth: "none", maxHeight: "none", objectFit: "fill",
+      width: round2(100 / kx) + "%", height: round2(100 / ky) + "%",
+      left: round2((-crop.left / 100000 / kx) * 100) + "%", top: round2((-crop.top / 100000 / ky) * 100) + "%",
+    });
+  }
 
   // Removes the effect properties of an element, so a merge can bring back only the ones it still has.
   function clear(el) {
@@ -213,6 +242,6 @@
   }
 
   host.__EASYOFFICE_SLIDE_FX__ = {
-    BULLET_CHARS, NUMBER_STYLES, normalize, clear, withFx, paintText, beginTextEdit, applyDom, markerFor, hex6,
+    BULLET_CHARS, NUMBER_STYLES, MAX_CROP_SIDE, normalize, normalizeCrop, cropImage, clear, withFx, paintText, beginTextEdit, applyDom, markerFor, hex6,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

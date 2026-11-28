@@ -475,8 +475,14 @@ fn dispatch_shape_subtree(
                     fx.spans = scan_spans(sub, &DRAWINGML, rows.len(), cols);
                 }
             }
-            FxKind::Shape => fx.outline = None,
-            FxKind::Overlay => fx.outline = scan.line,
+            FxKind::Shape => {
+                fx.outline = None;
+                fx.crop = None;
+            }
+            FxKind::Overlay => {
+                fx.outline = scan.line;
+                fx.crop = None;
+            }
             FxKind::Picture => {
                 fx.outline = scan.line;
                 fx.para = None;

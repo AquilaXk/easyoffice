@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use crate::pptx_rich_read::{loc, resolve_rel_entry, SlideCtx};
 use crate::pptx_theme_color::{ColorSpecBuilder, PptxClrMap, PptxThemePalette};
 use crate::rich_image::RichImage;
+use crate::rich_image_layout::RichImageCrop;
 use crate::rich_slide::{emu_to_pt, SlideElement, MAX_SLIDE_STROKE_PT};
 use crate::rich_slide_ext::{
     clean_face, AnimClass, AnimDir, AnimEffect, AnimStart, ElementFx, SlideAnim, SlideBackground,
@@ -190,6 +191,26 @@ pub(crate) fn scan_fx(
                             attr(attrs, "flipH").is_some_and(|v| v == "1" || v == "true");
                         out.fx.flip_v =
                             attr(attrs, "flipV").is_some_and(|v| v == "1" || v == "true");
+                    }
+                    // Each side is a whole number of thousandths of a percent; a missing one is 0, and a negative or invalid
+                    // one (the picture is padded, not cut) leaves the picture whole.
+                    ("srcRect", "blipFill") if out.fx.crop.is_none() => {
+                        let side = |key| match attr(attrs, key) {
+                            None => Some(0),
+                            Some(v) => v.trim().parse::<u32>().ok(),
+                        };
+                        out.fx.crop = match (side("l"), side("t"), side("r"), side("b")) {
+                            (Some(left), Some(top), Some(right), Some(bottom)) => {
+                                Some(RichImageCrop {
+                                    left,
+                                    top,
+                                    right,
+                                    bottom,
+                                })
+                                .filter(|c| !c.is_none() && c.is_valid())
+                            }
+                            _ => None,
+                        };
                     }
                     ("ln", "spPr") => {
                         ln_w =
