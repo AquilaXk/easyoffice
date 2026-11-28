@@ -99,6 +99,6 @@ test("a kind with too little data says so and an unknown kind is not drawn by th
   const empty = add(h, "doughnut", [s("a", [0, 0, 0, 0])]);
   assert.ok(empty.querySelector(".eo-chart-empty"), "no positive value, no ring");
   const registry = h.host.__EASYOFFICE_CHART_KINDS__;
-  assert.deepEqual(Object.keys(registry).sort(), ["bubble", "combo", "doughnut", "radar", "stock"]);
+  assert.deepEqual(Object.keys(registry).sort((a, b) => a.localeCompare(b)), ["bubble", "combo", "doughnut", "radar", "stock"]);
   assert.equal(Object.hasOwn(registry, "constructor"), false);
 });

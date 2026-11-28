@@ -2,7 +2,7 @@
   "use strict";
 
   // 혼합 chart (PD-402): the first series is drawn as columns and the others as lines over the same category axis and one value
-  // scale, the layout of Excel's default combo (묶은 세로 막대형 - 꺾은선형). The geometry is that of the column and line plots
+  // scale, the layout of the default combo of the spreadsheet program (묶은 세로 막대형 - 꺾은선형). The geometry is that of the column and line plots
   // of `sheet-chart-svg.js` (a band per category, the column centered in 60% of it, the line through the band centers); the value
   // scale takes every series, so the lines and the columns read against the same axis. The file form is a `c:barChart` with the
   // first series and a `c:lineChart` with the rest (`chart_kinds.rs`).

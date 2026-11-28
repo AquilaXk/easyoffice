@@ -4,7 +4,7 @@
 //! reference writers named for this work (PptxGenJS, python-pptx) write no guides, so there is no source to take; (2) the
 //! deck settings (`DeckSettings`) and the part helpers of the PPTX package already carry the other deck-wide parts, so the
 //! guides join them; (3) the element names and attributes follow ECMA-376 Part 1 19.2.1.15 (`p:guide`, `orient` `horz` or
-//! `vert` with `vert` the default, `pos` in 1/8 point, which is what PowerPoint writes: the center guides of a 10 in x 7.5 in
+//! `vert` with `vert` the default, `pos` in 1/8 point, which is what the Korean presentation program writes: the center guides of a 10 in x 7.5 in
 //! slide are `pos="2880"` and `pos="2160"`) and 19.2.1.16 (`p:guideLst` inside `p:cSldViewPr`, whose `showGuides` attribute is
 //! the 안내선 check box). Nothing is copied. Guides are capped in number and position; a part past a limit is refused.
 

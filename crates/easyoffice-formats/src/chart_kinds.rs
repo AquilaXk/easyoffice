@@ -10,7 +10,7 @@
 //! `radarStyle`, `varyColors`, `ser`, `axId`; `CT_BubbleChart`: `varyColors`, `ser`, `bubbleScale`, `showNegBubbles`, `axId`;
 //! `CT_StockChart`: `ser`, `hiLowLines`, `upDownBars`, `axId`; `CT_DoughnutChart`: `varyColors`, `ser`, `firstSliceAng`,
 //! `holeSize`), the same order rust_xlsxwriter writes. Open, high, low and close of a stock chart are its four series in that
-//! order (three series are high, low and close), the layout Excel's own stock chart types read.
+//! order (three series are high, low and close), the layout the stock chart types of the Korean spreadsheet program read.
 
 use crate::ooxml_presentation::{AX_ID_CAT, AX_ID_VAL};
 use crate::sheet_chart::ChartKind;
