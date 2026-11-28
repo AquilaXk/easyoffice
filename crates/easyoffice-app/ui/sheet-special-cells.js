@@ -65,13 +65,15 @@
     return done.sort((a, b) => a.r1 - b.r1 || a.c1 - b.c1);
   }
 
-  // The runs `[first, last]` of `from..to` whose rows or columns `hidden` does not hide.
-  function shownRuns(from, to, hidden) {
+  // The runs `[first, last]` of `from..to` whose rows or columns `hidden` does not hide; `null` as soon as there are more than
+  // `max` of them (the caller would refuse the result anyway).
+  function shownRuns(from, to, hidden, max) {
     const runs = [];
     for (let i = from; i <= to; i += 1) {
       if (hidden(i)) continue;
       const last = runs[runs.length - 1];
       if (last && last[1] === i - 1) last[1] = i;
+      else if (runs.length >= max) return null;
       else runs.push([i, i]);
     }
     return runs;
@@ -130,12 +132,14 @@
     }
     if (kind === "visible") {
       // The shown rows and columns of each rectangle: runs of rows and runs of columns cross into rectangles.
+      // The walk stops at the used range (a selection of whole rows or columns would walk a million lines), a count of runs
+      // past the bound ends it, and the product is checked before it is made.
       const ranges = [];
       for (const r of area) {
-        const rows = shownRuns(r.r1, r.r2, view.rowHidden);
-        const cols = shownRuns(r.c1, r.c2, view.colHidden);
+        const rows = shownRuns(r.r1, Math.min(r.r2, Math.max(r.r1, used.r2)), view.rowHidden, MAX_RANGES);
+        const cols = rows && shownRuns(r.c1, Math.min(r.c2, Math.max(r.c1, used.c2)), view.colHidden, MAX_RANGES);
+        if (!rows || !cols || ranges.length + rows.length * cols.length > MAX_RANGES) return { error: "ranges" };
         for (const [r1, r2] of rows) for (const [c1, c2] of cols) ranges.push({ r1, c1, r2, c2 });
-        if (ranges.length > MAX_RANGES) return { error: "ranges", count: ranges.length };
       }
       return { ranges };
     }

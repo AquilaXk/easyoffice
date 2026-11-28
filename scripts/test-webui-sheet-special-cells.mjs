@@ -84,13 +84,32 @@ test("notes come from the notes of the sheet even on empty cells, and an array i
 });
 
 test("the shown cells skip the hidden rows and columns of the selection", () => {
-  const view = viewOf(SHEET, { hiddenRows: [3], hiddenCols: [2] });
+  const view = viewOf({ ...SHEET, "4,3": { value: "z" } }, { hiddenRows: [3], hiddenCols: [2] });
   assert.deepEqual(special.findSpecial(view, { kind: "visible", scope: [{ r1: 1, c1: 1, r2: 4, c2: 3 }] }).ranges, [
     { r1: 1, c1: 1, r2: 2, c2: 1 },
     { r1: 1, c1: 3, r2: 2, c2: 3 },
     { r1: 4, c1: 1, r2: 4, c2: 1 },
     { r1: 4, c1: 3, r2: 4, c2: 3 },
   ]);
+});
+
+test("the shown cells of a whole-sheet selection stop at the used range and refuse before the product of runs is made", () => {
+  // 4000 used rows with every other one hidden, 40 used columns with every other one hidden: 2000 x 20 runs cross to 40000 ranges.
+  const cells = {};
+  for (let row = 1; row <= 4000; row += 1) cells[row + ",1"] = { value: "r" };
+  cells["1,40"] = { value: "c" };
+  const hiddenRows = new Set(Array.from({ length: 2000 }, (_, i) => i * 2 + 2));
+  const hiddenCols = new Set(Array.from({ length: 20 }, (_, i) => i * 2 + 2));
+  const view = { ...viewOf(cells), rowHidden: (row) => hiddenRows.has(row), colHidden: (col) => hiddenCols.has(col) };
+  let walked = 0;
+  const counting = { ...view, rowHidden: (row) => (walked += 1, view.rowHidden(row)), colHidden: (col) => (walked += 1, view.colHidden(col)) };
+  const started = Date.now();
+  const found = special.findSpecial(counting, { kind: "visible", scope: [{ r1: 1, c1: 1, r2: MAX_ROWS, c2: MAX_COLS }] });
+  assert.equal(found.error, "ranges");
+  assert.ok(walked <= 4100, "only the used lines were looked at, not a million: " + walked);
+  assert.ok(Date.now() - started < 1000);
+  // a few runs are fine: nothing hidden is one rectangle of the used range
+  assert.deepEqual(special.findSpecial(viewOf(SHEET), { kind: "visible", scope: [{ r1: 1, c1: 1, r2: MAX_ROWS, c2: MAX_COLS }] }).ranges, [{ r1: 1, c1: 1, r2: 5, c2: 2 }]);
 });
 
 test("a result that needs more ranges than the selection holds is refused, and so is a scope that is too large", () => {
@@ -101,7 +120,5 @@ test("a result that needs more ranges than the selection holds is refused, and s
   assert.equal(found.count, 100);
   const wide = viewOf({ "1,1": { value: "a" }, [MAX_ROWS + ",1"]: { value: "b" } });
   assert.equal(special.findSpecial(wide, { kind: "blanks" }).error, "scope", "a million empty cells are not walked");
-  const hiddenEveryOther = Array.from({ length: 300 }, (_, i) => i * 2 + 2);
-  assert.equal(special.findSpecial(viewOf(SHEET, { hiddenRows: hiddenEveryOther }), { kind: "visible", scope: [{ r1: 1, c1: 1, r2: 600, c2: 1 }] }).error, "ranges");
   assert.equal(special.findSpecial(viewOf(SHEET), { kind: "nope" }).error, "kind");
 });
