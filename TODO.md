@@ -7,7 +7,6 @@
 - [ ] 슬라이드: 전환 이름 덮기·벗기기·무작위 선·확대/축소(검색으로 확인하지 못함)와 효과 옵션 가로·세로를 한국어판 화면에서 확인(PD-398, QA 필요)
 - [ ] 시트: `데이터 통합`(허용 라이선스 원본 없음, 찾아야 함), 차트 종류 확장(`ChartKind`를 슬라이드와 함께 넓히고 `c:doughnutChart`·`c:bubbleChart`·`c:stockChart` 왕복), 스파크라인(`x14:sparklineGroups` 왕복과 셀 안 미니 차트), 새 셀 스타일과 XLSX `cellStyles` 왕복(`StyleKey`에 이름 번호 필드, PD-400)
 - [ ] 시트 QA 확인: 셀 스타일 묶음 제목(`제목 및 표제`·`데이터 및 모델`·`주제 셀 스타일`·`숫자 서식`)과 스타일 이름, 문서 창 `대/소문자 바꾸기` 항목 이름(지원 문서는 `문장 대/소문자`·`각 Word 대문자로 표시`), `목표값 찾기 상태` 대화상자 문구(PD-400)
-- [ ] 릴리스: Linux 잡의 실행 파일 검사 경로(`target/release/EasyOffice`)를 첫 릴리스에서 확인(PD-400)
 - [ ] 문서 창: 그림의 임의 위치(`wp:positionH`·`V` 오프셋)와 표 칸 안 그림의 배치·자르기·회전(PD-395)
 - [ ] 문서 창: 새 메뉴 항목의 macOS 네이티브 메뉴 항목. `native_menu/items.rs`와 `layout/bars.rs`가 줄 수 상한이라 한글 창처럼(`items_hwp.rs`·`layout/hwp.rs`, PD-396) 표를 나누고 `scripts/test-support/word-web-only.mjs`를 비운다(PD-395)
 - [ ] 한글 창: `파일 ▸ 미리 보기`(한글용 `buildPreview`를 `getPrintPages`로 만들어 미리 보기 창에 연결)와 `문서 정보`(원본 없음), `쪽 ▸ 쪽 번호 매기기`(고정 rhwp 커밋을 `setPageNumberPosition`이 있는 커밋으로 올리고 WASM을 다시 빌드한 뒤 대화상자), `구역 나누기`(WASM API 없음)(PD-396)
