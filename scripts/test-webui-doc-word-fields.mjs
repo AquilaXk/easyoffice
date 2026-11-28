@@ -217,3 +217,82 @@ test("the caption flag, the section break and the header rows of an opened docum
   assert.equal(model.table({ data: {} }, { headerRows: 2 }).data.eoHeaderRows, "2");
   assert.equal(model.table({ data: {} }, { headerRows: -1 }).data.eoHeaderRows, undefined);
 });
+
+const marker = (h, kind, name) => {
+  const el = h.document.createElement("span");
+  el.dataset[kind === "start" ? "eoBookmarkStart" : "eoBookmarkEnd"] = name;
+  return el;
+};
+const refField = (h, name) => {
+  const el = h.document.createElement("span");
+  el.dataset.eoFieldCode = `REF ${name} \\h`;
+  el.textContent = "x";
+  return el;
+};
+
+test("nested references do not grow with the depth, and a result is cut at 4,096 characters", async () => {
+  const h = await createRunHarness([p("a")]);
+  const para = h.editor.firstChild;
+  para.insertBefore(marker(h, "start", "b0"), para.firstChild);
+  para.appendChild(marker(h, "end", "b0"));
+  for (let i = 1; i <= 20; i += 1) {
+    const next = h.document.createElement("p");
+    next.appendChild(marker(h, "start", "b" + i));
+    next.appendChild(refField(h, "b" + (i - 1)));
+    next.appendChild(refField(h, "b" + (i - 1)));
+    next.appendChild(marker(h, "end", "b" + i));
+    h.editor.appendChild(next);
+  }
+  const started = Date.now();
+  api(h).updateFields(h.editor);
+  const last = h.editor.lastChild.querySelectorAll("[data-eo-field-code]")[1];
+  assert.equal(last.textContent, "", "a reference does not carry the result of the references inside the text it names");
+  assert.ok(Date.now() - started < 1000);
+  const long = h.document.createElement("p");
+  long.appendChild(marker(h, "start", "긴글"));
+  long.appendChild(h.document.createTextNode("가".repeat(10000)));
+  long.appendChild(marker(h, "end", "긴글"));
+  h.editor.appendChild(long);
+  assert.equal(api(h).bookmarkText(h.editor, "긴글").length, 4096);
+});
+
+test("the page accepts the bookmark names the engine accepts, combining marks and letter numbers included", async () => {
+  const h = await createRunHarness([p("a")]);
+  const model = h.host.__EASYOFFICE_DOC_WORD_MODEL__;
+  for (const name of ["책ͅ", "Ⅳ장", "_표1", "가".repeat(40)]) assert.equal(model.isBookmarkName(name), true, name);
+  for (const name of ["1장", "가".repeat(41), "_Toc1", "_GoBack", "a b", ""]) assert.equal(model.isBookmarkName(name), false, name);
+});
+
+test("a caption number inside a bookmark is part of what a reference to it shows", async () => {
+  const h = await createRunHarness([p("그림 ")]);
+  const para = h.editor.firstChild;
+  para.insertBefore(marker(h, "start", "_Ref1"), para.firstChild);
+  const seq = h.document.createElement("span");
+  seq.dataset.eoFieldCode = "SEQ 그림";
+  seq.textContent = "9";
+  para.appendChild(seq);
+  para.appendChild(marker(h, "end", "_Ref1"));
+  const ref = refField(h, "_Ref1");
+  para.appendChild(ref);
+  api(h).updateFields(h.editor);
+  assert.equal(ref.textContent, "그림 1");
+});
+
+test("many references are resolved from one pass over the document", async () => {
+  const h = await createRunHarness([p("본문")]);
+  const para = h.editor.firstChild;
+  for (let i = 0; i < 400; i += 1) {
+    para.appendChild(marker(h, "start", "m" + i));
+    para.appendChild(h.document.createTextNode("글" + i));
+    para.appendChild(marker(h, "end", "m" + i));
+  }
+  const refs = [];
+  for (let i = 0; i < 400; i += 1) {
+    refs.push(refField(h, "m" + i));
+    para.appendChild(refs[i]);
+  }
+  const started = Date.now();
+  assert.equal(api(h).updateFields(h.editor), 400);
+  assert.ok(Date.now() - started < 1000);
+  assert.deepEqual([refs[0].textContent, refs[399].textContent], ["글0", "글399"]);
+});

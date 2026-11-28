@@ -14,7 +14,9 @@
 
   const FIELD_CLASS = "eo-field-code";
   const SECTION_BREAKS = ["nextPage", "continuous", "evenPage", "oddPage"];
-  const NAME_RE = /^[\p{L}_][\p{L}\p{N}_]{0,39}$/u;
+  // The same names as `safe_bookmark_name` in the engine (Rust `char::is_alphabetic` and `is_alphanumeric`: the Alphabetic
+  // property, which holds the combining marks that are part of a letter, and the numbers), so a name the page accepts is saved.
+  const NAME_RE = /^[\p{Alphabetic}_][\p{Alphabetic}\p{N}_]{0,39}$/u;
   const MAX_FIELD_CODE = 256;
 
   const el = (tag, attrs, data, children) => ({ t: "el", tag, attrs: attrs || {}, data: data || {}, style: {}, children: children || [] });

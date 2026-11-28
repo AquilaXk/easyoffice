@@ -14,6 +14,7 @@
   const DEFAULT_PICTURE = { DATE: "yyyy-MM-dd", TIME: "AM/PM h:mm" };
   const MAX_FIELDS = 5000;
   const MAX_SEQ_LABELS = 64;
+  const MAX_REF_TEXT = 4096;
   const MSG_MISSING_BOOKMARK = "오류! 책갈피가 정의되어 있지 않습니다.";
 
   // ---- the date and time pictures
@@ -64,61 +65,85 @@
   const fieldsOf = (root) => Array.from(root.querySelectorAll("[data-eo-field-code]")).slice(0, MAX_FIELDS);
   const markers = (root) => Array.from(root.querySelectorAll("[data-eo-bookmark-start], [data-eo-bookmark-end]"));
 
-  // The text between a bookmark's markers, in document order; null when the bookmark is not there.
-  function bookmarkText(root, name) {
-    let open = false;
-    let found = false;
-    let text = "";
-    const walk = (node) => {
+  const targetOf = (code) => String(code).trim().split(/\s+/)[1] ?? "";
+  const isRefField = (node) => typeof node.dataset?.eoFieldCode === "string" && verbOf(node.dataset.eoFieldCode) === "REF";
+
+  // The text between the markers of each bookmark in `wanted` (a Set of names), in document order, in one pass over `root`:
+  // a name that is not there is not in the result. The result of another `REF` field is skipped (it would make nested
+  // references grow with every level), each text stops at `MAX_REF_TEXT` characters, and the pass ends when every wanted
+  // bookmark is closed.
+  function bookmarkTexts(root, wanted) {
+    const texts = new Map();
+    const open = new Set();
+    const filling = new Set();
+    let remaining = wanted.size;
+    const stack = [root];
+    while (stack.length > 0 && remaining > 0) {
+      const node = stack.pop();
       if (node.nodeType === 3) {
-        if (open) text += String(node.nodeValue || "");
-        return;
+        const value = String(node.nodeValue || "");
+        if (value) {
+          for (const name of filling) {
+            const next = (texts.get(name) + value).slice(0, MAX_REF_TEXT);
+            texts.set(name, next);
+            if (next.length >= MAX_REF_TEXT) filling.delete(name);
+          }
+        }
+        continue;
       }
-      if (node.nodeType !== 1) return;
-      if (node.dataset?.eoBookmarkStart === name) {
-        open = true;
-        found = true;
-        return;
+      if (node.nodeType !== 1 || isRefField(node)) continue;
+      const start = node.dataset?.eoBookmarkStart;
+      const end = node.dataset?.eoBookmarkEnd;
+      if (start !== undefined && wanted.has(start) && !texts.has(start)) {
+        texts.set(start, "");
+        open.add(start);
+        filling.add(start);
       }
-      if (node.dataset?.eoBookmarkEnd === name) {
-        open = false;
-        return;
+      if (end !== undefined && open.delete(end)) {
+        filling.delete(end);
+        remaining -= 1;
       }
-      for (const child of node.childNodes || []) walk(child);
-    };
-    walk(root);
-    return found ? text : null;
+      const kids = node.childNodes || [];
+      for (let i = kids.length - 1; i >= 0; i -= 1) stack.push(kids[i]);
+    }
+    return texts;
   }
 
-  // The result a field shows now: the date or time as its picture says, the next number of a `SEQ` label (`counters`), the text of
-  // the bookmark a `REF` names.
-  function fieldResult(root, code, counters, now) {
+  // The text between a bookmark's markers, in document order; null when the bookmark is not there.
+  const bookmarkText = (root, name) => bookmarkTexts(root, new Set([name])).get(name) ?? null;
+
+  // The result a field shows now: the date or time as its picture says, the next number of a `SEQ` label (`counters`).
+  function fieldResult(code, counters, now) {
     const verb = verbOf(code);
     if (verb === "DATE" || verb === "TIME") return formatPicture(pictureOf(code) ?? DEFAULT_PICTURE[verb], now);
-    const target = String(code).trim().split(/\s+/)[1] ?? "";
-    if (verb === "SEQ") {
-      if (!counters.has(target) && counters.size >= MAX_SEQ_LABELS) return null;
-      counters.set(target, (counters.get(target) ?? 0) + 1);
-      return String(counters.get(target));
-    }
-    return bookmarkText(root, target) ?? MSG_MISSING_BOOKMARK;
+    const target = targetOf(code);
+    if (!counters.has(target) && counters.size >= MAX_SEQ_LABELS) return null;
+    counters.set(target, (counters.get(target) ?? 0) + 1);
+    return String(counters.get(target));
   }
 
-  // 필드 업데이트: every field of the editor shows its result again. Numbers first, then the references to the text that holds them.
+  // 필드 업데이트: every field of the editor shows its result again. Numbers first, then the references to the text that holds
+  // them (read once for all `REF` fields).
   function updateFields(root, now = new Date()) {
     const counters = new Map();
     let changed = 0;
-    const fields = fieldsOf(root);
-    for (const verbs of [["DATE", "TIME", "SEQ"], ["REF"]]) {
-      for (const field of fields) {
-        const code = field.dataset.eoFieldCode;
-        if (!verbs.includes(verbOf(code))) continue;
-        const result = fieldResult(root, code, counters, now);
-        if (result !== null && field.textContent !== result) {
-          field.textContent = result;
-          changed += 1;
-        }
+    const show = (field, result) => {
+      if (result !== null && field.textContent !== result) {
+        field.textContent = result;
+        changed += 1;
       }
+    };
+    const fields = fieldsOf(root);
+    const refs = [];
+    for (const field of fields) {
+      const code = field.dataset.eoFieldCode;
+      const verb = verbOf(code);
+      if (verb === "REF") refs.push(field);
+      else if (verb === "DATE" || verb === "TIME" || verb === "SEQ") show(field, fieldResult(code, counters, now));
+    }
+    if (refs.length > 0) {
+      const texts = bookmarkTexts(root, new Set(refs.map((field) => targetOf(field.dataset.eoFieldCode))));
+      for (const field of refs) show(field, texts.get(targetOf(field.dataset.eoFieldCode)) ?? MSG_MISSING_BOOKMARK);
     }
     return changed;
   }
