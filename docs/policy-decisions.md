@@ -6856,3 +6856,13 @@
 - **Trade-offs** 패널만 둥근 모서리라 앱의 다른 창과 모양이 다르다(QA 결정). 진행 단계는 도구 조회 호출만 담는다(모델 내부 추론은 응답에 담겨 온 경우만).
 - **Verified by** `scripts/test-webui-copilot-panel-ui-pd388.mjs`, `scripts/test-webui-design-rules-pd265.mjs`, WebKit `scripts/webkit-dom/run.mjs`.
 - **Revisit when** 첨부 기능이 생길 때(`+` 메뉴), 모델 응답에 단계별 진행 정보가 생길 때.
+
+## PD-389 — 글자 화살표 목록을 한 곳만 남기고, 레이아웃 단계에 문서·시트·슬라이드·PDF·BASE 대화상자 24개를 더한다 (2026-11-28)
+
+- **Decision** `KNOWN_GLYPH_ARROWS`는 8곳에서 1곳(`copilot-ext-ops.js`, 코파일럿 작업 범위)으로 줄었다. 변환기 화살표는 `ui/icons.js`의 `arrow-right`, 인쇄 미리보기 쪽 이동은 `chevron-left`·`chevron-right`, BASE 그룹 줄 접힘 표시는 `chevron-right`·`chevron-down`으로 바꿨다. 상태 줄 글(`열기 완료`, 성능 측정)의 `→`는 쉼표·`최적화`로 고쳤다. 정렬·하이퍼링크 높이 불일치(`dialog-known.mjs`)와 리터럴 px 목록(`KNOWN_SIZE_VIOLATIONS`)은 앞선 PD(378·384)에서 이미 비어 있었다.
+- **레이아웃 단계** 문서(하이퍼링크·표 속성·셀 테두리·셀 배경·그림 크기), 시트(이름 정의·선택 영역에서 이름 만들기·시트 이동/복사·조건 필터·표 만들기·슬라이서·새 표 스타일·그림), 슬라이드(마스터 레이아웃·도형·표·차트·그림), PDF(형광펜·밑줄 주석·페이지 분할·병합·문서 구조·개인정보 지우기), BASE(필드 추가·필드 설정)를 더했다. 선택이 필요한 대화상자는 단계 안에서 붙여넣은 표·그림, 만든 표로 연다. 슬라이드 대화상자는 더블클릭·리본이 쓰는 열기 함수를, PDF 분할·병합은 파일 없이 `showModal()`을 쓴다.
+- **고친 위반** `sheet-table-swatch-cell`·`-text`는 `sheet-table-sample-cell`·`-bar`로, BASE 필드 대화상자의 `base-dlg-input`·`base-dlg-select`·`base-danger-btn`은 `base-dlg-wide-text`·`base-dlg-wide-pick`·`base-danger-action`으로 바꿨고 필드 대화상자의 선택 상자에서 `sb-select`를 뺐다. 필드 대화상자의 전후 스크린샷은 바이트까지 같다.
+- **Why** 대화상자마다 잠근 양식(24px 컨트롤, 키트 클래스)을 실제 브라우저에서 검사한다.
+- **Trade-offs** BASE 가져오기 대화상자(파일을 고른 뒤 열림), 파일이 필요한 슬라이드·PDF 대화상자, 피벗·차트 하위 대화상자는 아직 검사하지 않는다.
+- **Verified by** `scripts/test-design-guard.mjs`, 전체 WebKit 묶음(`scripts/webkit-dom/run.mjs`).
+- **Revisit when** 남은 대화상자를 열 방법이 생길 때, 코파일럿 작업이 끝나 `copilot-ext-ops.js`의 `→`를 바꿀 때.
