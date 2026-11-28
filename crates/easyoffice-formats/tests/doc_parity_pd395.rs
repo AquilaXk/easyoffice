@@ -626,18 +626,24 @@ fn a_save_to_a_format_without_them_counts_the_word_style_items_it_leaves_out() {
     ]);
     doc.page_frame.watermark = Some("초안".to_string());
     doc.page_frame.line_numbers = Some(RichLineNumbers::DEFAULT);
-    // a field, a section break, a table with header rows, a watermark and line numbers
+    let turned = RichImageLayout {
+        rotation_degrees: 90,
+        ..Default::default()
+    };
+    doc.blocks.extend(image_doc(turned).blocks);
+    // a field, a section break, a table with header rows, a watermark, line numbers and a turned picture
     for format in [
         DocumentFormat::Odt,
         DocumentFormat::Rtf,
         DocumentFormat::Hwpx,
     ] {
         let loss = easyoffice_formats::doc_save_loss(&doc, format);
-        assert_eq!(loss.word_features, 5, "{format:?}");
+        assert_eq!(loss.word_features, 6, "{format:?}");
         assert!(loss
             .warnings("ODT")
             .iter()
-            .any(|w| w.contains("필드·책갈피·구역 나누기·줄 번호·워터마크·표 머리글 행 5곳")));
+            .any(|w| w
+                .contains("필드·책갈피·구역 나누기·줄 번호·워터마크·표 머리글 행·그림 배치 6곳")));
     }
     assert_eq!(
         easyoffice_formats::doc_save_loss(&doc, DocumentFormat::Docx).word_features,

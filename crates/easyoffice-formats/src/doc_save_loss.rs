@@ -11,7 +11,8 @@ pub struct DocSaveLoss {
     pub revisions: usize,
     pub first_page_frames: usize,
     /// The Word-style items of PD-395 that only DOCX writes: the fields (date, time, cross reference, caption number), the
-    /// bookmarks, the section breaks, the line numbers, the watermark and the repeated table header rows.
+    /// bookmarks, the section breaks, the line numbers, the watermark, the repeated table header rows and the wrap, crop or
+    /// rotation of a picture.
     pub word_features: usize,
 }
 
@@ -36,7 +37,7 @@ impl DocSaveLoss {
         }
         if self.word_features > 0 {
             out.push(format!(
-                "{label} 저장에서 빠진 필드·책갈피·구역 나누기·줄 번호·워터마크·표 머리글 행 {}곳",
+                "{label} 저장에서 빠진 필드·책갈피·구역 나누기·줄 번호·워터마크·표 머리글 행·그림 배치 {}곳",
                 self.word_features
             ));
         }
@@ -58,7 +59,7 @@ fn word_features(doc: &RichDocument) -> usize {
                         .count()
             }
             RichBlock::Table(t) => usize::from(t.header_rows > 0),
-            RichBlock::Image(_) => 0,
+            RichBlock::Image(image) => usize::from(!image.layout().is_default()),
         })
         .sum();
     in_text
