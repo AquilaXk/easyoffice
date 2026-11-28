@@ -18,7 +18,7 @@ const read = (rel) => readText(fileURLToPath(new URL(rel, REPO)));
 const KINDS = ["DOC", "PAGES", "HWP", "SHEET", "SLIDE", "PDF", "BASE", "BOARD", "START", "CONV"];
 const TITLES = {
   DOC: ["파일", "편집", "보기", "삽입", "서식", "레이아웃", "표", "도구", "도움말"],
-  PAGES: ["파일", "편집", "보기", "삽입", "포맷", "표", "도구", "도움말"],
+  PAGES: ["파일", "편집", "삽입", "포맷", "정렬", "보기", "도구", "도움말"],
   HWP: ["파일", "편집", "보기", "입력", "서식", "쪽", "표", "도구", "도움말"],
   SHEET: ["파일", "편집", "보기", "삽입", "서식", "수식", "데이터", "도구", "도움말"],
   SLIDE: ["파일", "편집", "보기", "삽입", "서식", "슬라이드", "슬라이드 쇼", "도구", "도움말"],
@@ -179,11 +179,11 @@ test("keyboard navigation between menus skips the menus of other kinds", async (
 
 // ---- the native bar has the same menus per kind ---------------------------------------------------
 
-const TOKENS = { S: "-", NEW_DOCS: "@new-docs", EXPORT_DOC: "@export-doc", EXPORT_HWP: "@export-hwp", EXPORT_SHEET: "@export-sheet", EXPORT_SLIDE: "@export-slide", EXPORT_BASE: "@export-base", EXPORT_BOARD: "@export-board", EXPORT_PDF: "@export-pdf", THEME: "@theme", NUMFMT: "@numfmt", ALIGN: "@align", SLIDE_ALIGN: "@slide-align", BORDER: "@border", CF: "@cf", USE_IN_FORMULA: "@name-use", CALC_OPTIONS: "@calc-options", SHEET_ROW: "@sheet-row", SHEET_COL: "@sheet-col", SHEET_TAB: "@sheet-tab", SHEET_FREEZE: "@sheet-freeze", HWP_TOOLBOX: "@hwp-toolbox", HWP_OBJECT: "@hwp-object", HWP_CAPTION: "@hwp-caption", HWP_ROTATE: "@hwp-rotate", HWP_HEADER_FOOTER: "@hwp-header-footer", HWP_CELL_BORDER: "@hwp-cell-border", HWP_MANUSCRIPT: "@hwp-manuscript", PASTE: "@paste", SELECT_ALL: "@select-all", SERVICES: "@services", HIDE: "@hide", HIDE_OTHERS: "@hide-others", SHOW_ALL: "@show-all", MINIMIZE: "@minimize", CLOSE_WINDOW: "@close-window", QUIT_ID: "app:quit" };
+const TOKENS = { S: "-", NEW_DOCS: "@new-docs", EXPORT_DOC: "@export-doc", EXPORT_HWP: "@export-hwp", EXPORT_SHEET: "@export-sheet", EXPORT_SLIDE: "@export-slide", EXPORT_BASE: "@export-base", EXPORT_BOARD: "@export-board", EXPORT_PDF: "@export-pdf", THEME: "@theme", NUMFMT: "@numfmt", ALIGN: "@align", SLIDE_ALIGN: "@slide-align", BORDER: "@border", CF: "@cf", USE_IN_FORMULA: "@name-use", CALC_OPTIONS: "@calc-options", SHEET_ROW: "@sheet-row", SHEET_COL: "@sheet-col", SHEET_TAB: "@sheet-tab", SHEET_FREEZE: "@sheet-freeze", HWP_TOOLBOX: "@hwp-toolbox", HWP_OBJECT: "@hwp-object", HWP_CAPTION: "@hwp-caption", HWP_ROTATE: "@hwp-rotate", HWP_HEADER_FOOTER: "@hwp-header-footer", HWP_CELL_BORDER: "@hwp-cell-border", HWP_MANUSCRIPT: "@hwp-manuscript", PAGES_TABLE: "@pages-table", PAGES_CASE: "@pages-case", PAGES_WRAP: "@pages-wrap", PASTE: "@paste", SELECT_ALL: "@select-all", SERVICES: "@services", HIDE: "@hide", HIDE_OTHERS: "@hide-others", SHOW_ALL: "@show-all", MINIMIZE: "@minimize", CLOSE_WINDOW: "@close-window", QUIT_ID: "app:quit" };
 
 function readRustLayoutSources() {
   let src = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
-  for (const part of ["bars.rs", "hwp.rs"]) {
+  for (const part of ["bars.rs", "hwp.rs", "pages.rs"]) {
     try {
       src += "\n" + read(`crates/easyoffice-desktop/src/native_menu/layout/${part}`);
     } catch {}

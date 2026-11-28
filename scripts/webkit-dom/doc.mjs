@@ -408,4 +408,25 @@ export const docSteps = [
     assert.ok(runs.some((r) => r.bookmarkStart === "본문표시") && runs.some((r) => r.bookmarkEnd === "본문표시"), JSON.stringify(runs));
     assert.ok(runs.some((r) => r.fieldCode?.startsWith("DATE")), "the date is a field of the payload");
   }],
+
+  // The Pages window (PD-399): the menus stand in the reference app's order on the real layout, and 하이라이트 and 대문자 act on the
+  // real selection through the menu items the page shows.
+  ["the Pages window lays its menus out in the reference order and its 하이라이트 and 대문자 items format the selection", async (page) => {
+    await typeFirstParagraph(page, "가나다");
+    await page.evaluate(() => {
+      document.getElementById("doc-editor").dataset.eoDocFlavor = "pages";
+      window.__EASYOFFICE_ACTIVATE_MODULE__("DOC");
+    });
+    const menus = await page.$$eval(".studio-menubar > .menu-item", (items) =>
+      items.filter((el) => el.offsetParent !== null).map((el) => ({ title: el.querySelector(".menu-title").textContent, left: el.getBoundingClientRect().left })));
+    assert.deepEqual(menus.map((m) => m.title), ["파일", "편집", "삽입", "포맷", "정렬", "보기", "도구", "도움말"]);
+    assert.ok(menus.every((m, i) => i === 0 || m.left > menus[i - 1].left), "left to right in that order");
+    await page.evaluate(() => getSelection().selectAllChildren(document.querySelector("#doc-editor p")));
+    await page.evaluate(() => document.querySelector('.md-item[data-kinds="PAGES"][data-studio-menu-cmd="home-highlight"]').click());
+    const runsOf = () => page.evaluate(() => window.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(document.getElementById("doc-editor"))[0].runs);
+    assert.ok((await runsOf()).some((r) => r.highlight), "하이라이트");
+    await page.evaluate(() => getSelection().selectAllChildren(document.querySelector("#doc-editor p")));
+    await page.evaluate(() => document.querySelector('.md-item[data-studio-menu-cmd="text-case-small"]').click());
+    assert.ok((await runsOf()).every((r) => (r.textFx & 2) !== 0), "작은 대문자");
+  }],
 ];

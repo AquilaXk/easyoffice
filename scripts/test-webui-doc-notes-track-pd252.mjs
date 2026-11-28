@@ -59,9 +59,10 @@ test("verbatim Korean labels, sprite cell, native menu parity, and zero fake pla
   assert.equal(rejectAllMenu.querySelector(".md-label")?.textContent, "모든 변경 내용 거부");
 
   const commentMenus = document.querySelectorAll('.md-item[data-studio-menu-cmd="review-comment"]');
-  assert.equal(commentMenus.length, 2);
+  // The 도구 menu of the Pages window names it 주석 추가 (PD-399).
+  assert.equal(commentMenus.length, 3);
   for (const item of commentMenus) {
-    assert.equal(item.querySelector(".md-label")?.textContent, "새 메모");
+    assert.equal(item.querySelector(".md-label")?.textContent, item.dataset.kinds === "PAGES" ? "주석 추가" : "새 메모");
   }
   assert.ok(!read("crates/easyoffice-app/ui/index.html").includes("검토 메모 스레드"));
   assert.ok(!read("crates/easyoffice-app/ui/ribbon-catalog.js").includes("검토 메모 스레드"));

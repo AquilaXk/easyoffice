@@ -2,14 +2,15 @@ use super::*;
 
 mod contracts;
 mod hwp;
+mod pages;
 
 const MODIFIERS: &[&str] = &["CmdOrCtrl", "Ctrl", "Alt", "Shift"];
 /// The keys that are the Control key itself on macOS, because the Command key of the same letter is a system key
 /// (Cmd+H hides the app, Cmd+G finds the next match): replace and the spreadsheet's 이동.
 const CONTROL_ACCELERATORS: [&str; 2] = ["Ctrl+H", "Ctrl+G"];
 const GROUPS: &[&str] = &[
-    "app", "file", "edit", "view", "insert", "format", "page", "slide", "sheet", "table", "tool",
-    "help",
+    "app", "file", "edit", "view", "insert", "format", "arrange", "page", "slide", "sheet",
+    "table", "tool", "help",
 ];
 
 #[test]
@@ -218,7 +219,7 @@ fn each_kind_has_the_menus_of_its_window_in_order() {
     assert_eq!(
         titles_of(MenuKind::Pages),
         bar(
-            &["파일", "편집", "보기", "삽입", "포맷", "표", "도구"],
+            &["파일", "편집", "삽입", "포맷", "정렬", "보기", "도구"],
             &tail
         )
     );
@@ -386,8 +387,8 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
         MenuKind::Conv,
     ] {
         not_in(kind, &doc_only);
-        // 쪽 나누기 is in the document's bar and in the Hangul editor's (where it is the editor's own command).
-        if kind != MenuKind::Hwp {
+        // 쪽 나누기 is in the document's bar, the Pages window's and the Hangul editor's (where it is the editor's own command).
+        if !matches!(kind, MenuKind::Hwp | MenuKind::Pages) {
             not_in(kind, &["page:break"]);
         }
     }

@@ -137,7 +137,7 @@ test("PD-361: START and CONV keep a minimal 5-menu chrome and clear docFlavor ac
   await flushAsyncTurns(16);
   const app = h.document.getElementById("app");
   assert.equal(app.dataset.docFlavor, "pages");
-  assert.deepEqual(visibleMenus(h.document), ["파일", "편집", "보기", "삽입", "포맷", "표", "도구", "도움말"]);
+  assert.deepEqual(visibleMenus(h.document), ["파일", "편집", "삽입", "포맷", "정렬", "보기", "도구", "도움말"]);
   assert.equal(h.document.getElementById("pages-inspector").hidden, false);
 
   // The toolbar's 문서 button opens the document sidebar in place of the format sidebar; its button again closes it.
@@ -465,7 +465,8 @@ test("Official Korean terminology separation holds across DOC, PAGES, SHEET, SLI
   assert.deepEqual([...doc.querySelectorAll("#slide-layout-select option")].map((o) => o.textContent), ["제목 슬라이드", "제목 및 내용", "구역 머리글", "콘텐츠 2개", "빈 화면"]);
   switchModule(doc, "DOC");
   await flushAsyncTurns(6);
-  assert.deepEqual([...doc.querySelectorAll('#menu-bar [data-menu="format"] > .menu-dropdown > .md-sub')].filter((el) => !el.hidden), []);
+  // The editor still holds the .pages document, so the window is the Pages one: its 포맷 menu has the 대문자 and 표 submenus (PD-399) and no slide one.
+  assert.deepEqual([...doc.querySelectorAll('#menu-bar [data-menu="format"] > .menu-dropdown > .md-sub')].filter((el) => !el.hidden).map((el) => el.querySelector(".md-label").textContent), ["대문자", "표"]);
 });
 
 // The Pages format sidebar follows the product's own guide: the toolbar's 포맷 and 문서 buttons each open a sidebar, the format sidebar

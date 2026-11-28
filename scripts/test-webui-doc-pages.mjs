@@ -350,7 +350,7 @@ test("a page break mark reaches the save payload, comes back from an opened file
 
 test("the 레이아웃 menu of a DOC document has 페이지 나누기 with Ctrl+Enter, and it runs the page break of the editor; other windows do not show it", async () => {
   const h = await createWorkspaceHarness();
-  const item = h.document.querySelector('.md-item[data-studio-menu-cmd="doc-mod-page-break"]');
+  const item = h.document.querySelector('.md-item[data-studio-menu-cmd="doc-mod-page-break"][data-kinds="DOC"]');
   assert.equal(item.dataset.kinds, "DOC");
   assert.equal(item.querySelector(".md-label").textContent, "페이지 나누기");
   assert.equal(item.querySelector(".md-shortcut").textContent, "Ctrl+Enter");
