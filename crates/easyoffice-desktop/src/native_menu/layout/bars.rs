@@ -12,8 +12,8 @@ use super::{
 use super::{
     menu, MenuKind, MenuSpec, ALIGN, APP, BORDER, CALC_OPTIONS, CF, EXPORT_BASE, EXPORT_BOARD,
     EXPORT_DOC, EXPORT_PDF, EXPORT_SHEET, EXPORT_SLIDE, HELP, NEW_DOCS, NUMFMT, PASTE, S,
-    SELECT_ALL, SHEET_COL, SHEET_FREEZE, SHEET_ROW, SHEET_TAB, SLIDE_ALIGN, THEME, USE_IN_FORMULA,
-    WINDOW,
+    SELECT_ALL, SHEET_CLEAR, SHEET_COL, SHEET_FREEZE, SHEET_ROW, SHEET_TAB, SLIDE_ALIGN, THEME,
+    USE_IN_FORMULA, WINDOW,
 };
 
 const FILE_WORKSPACE: MenuSpec = menu(
@@ -166,6 +166,7 @@ const EDIT_SHEET: MenuSpec = menu(
         "edit:find",
         "edit:replace",
         "edit:goto",
+        SHEET_CLEAR,
     ],
 );
 const EDIT_PDF: MenuSpec = menu(
@@ -396,6 +397,8 @@ const FORMAT_SHEET: MenuSpec = menu(
         SHEET_TAB,
         S,
         "format:cell-format",
+        "sheet:format-painter",
+        "sheet:format-paste",
     ],
 );
 
@@ -461,6 +464,8 @@ const FORMULA_SHEET: MenuSpec = menu(
         CALC_OPTIONS,
         "sheet:calc-now",
         "sheet:calc-sheet",
+        S,
+        "sheet:view-formulas",
     ],
 );
 const DATA_SHEET: MenuSpec = menu(
@@ -719,7 +724,7 @@ pub fn table_ids(kind: MenuKind) -> Vec<&'static str> {
                 }
                 BORDER => ids.extend(BORDER_LINES.iter().filter(|line| **line != SEPARATOR)),
                 CF => ids.extend(cf_ids()),
-                SHEET_ROW | SHEET_COL | SHEET_TAB | SHEET_FREEZE => {
+                SHEET_ROW | SHEET_COL | SHEET_TAB | SHEET_FREEZE | SHEET_CLEAR => {
                     let sub = sheet_submenu(line).expect("a sheet submenu token");
                     ids.extend(sub.lines.iter().filter(|id| **id != SEPARATOR));
                 }

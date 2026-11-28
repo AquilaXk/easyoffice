@@ -399,6 +399,11 @@
     { keys: "Ctrl+1", action: "sheet-cell-format", module: "SHEET", external: true },
     { keys: "Ctrl+Shift+L", action: "sheet-filter-toggle", module: "SHEET", external: true },
     { keys: "Alt+=", action: "data-autosum", module: "SHEET", external: true },
+    // 서식 복사 and 서식 붙여넣기 of the sheet window (sheet-shortcuts.js, PD-400); Ctrl+Shift+C is a browser key, so the desktop shell only.
+    { keys: "Ctrl+Shift+C", action: "sheet-format-painter", module: "SHEET", desktopOnly: true, external: true },
+    { keys: "Ctrl+Shift+V", action: "sheet-format-paste", module: "SHEET", external: true },
+    // 수식 표시 is Ctrl+` (the Control key on a Mac); sheet-shortcuts.js handles it (PD-400).
+    { keys: "Ctrl+`", action: "sheet-view-formulas", module: "SHEET", external: true },
     // Slide module only. `module` gates the binding to the active module (every other module keeps
     // the browser default, e.g. F5 reload); `bareKey` keeps keys out of text fields; `scope`
     // requires focus inside the given selector. F5 is browser-reserved, so it is only taken over

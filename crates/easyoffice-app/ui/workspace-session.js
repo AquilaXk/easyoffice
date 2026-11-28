@@ -65,7 +65,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     "btn-toggle-doc-grid": "doc-grid",
   };
   const sharedCatalog = host.__EASYOFFICE_RIBBON_CATALOG__;
-  if (sharedCatalog && Array.isArray(sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS) && !sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS.some((b) => b.keys === "Ctrl+Shift+K")) {
+  if (sharedCatalog && Array.isArray(sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS) && !sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS.some((b) => b.action === "copilot-toggle")) {
     sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS = Object.freeze([
       ...sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS,
       { keys: "Ctrl+Shift+K", action: "copilot-toggle", modules: ["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"], notPages: true },

@@ -83,6 +83,7 @@ test("the 수식 menu has 이름 정의 and 이름 관리, and both dialogs use 
     "수동",
     "지금 계산",
     "시트 계산",
+    "수식 표시",
   ]);
   for (const id of ["sheet-names-dialog", "sheet-name-edit-dialog", "sheet-name-paste-dialog"]) {
     const dialog = t.document.getElementById(id);

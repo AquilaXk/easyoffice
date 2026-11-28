@@ -457,6 +457,9 @@
       runCommand,
       pasteText: (text, range) => pasteBlock(blockOf(text), range),
       pasteSpecial,
+      // 서식 복사 (PD-400): the cells of a range as a block, and a block pasted as formats only (the 붙여넣기 > 서식 path).
+      copyFormats: (range) => snapshotOf(range),
+      pasteFormats: (snap, range) => pasteBlock(snap, range, { mode: "formats" }),
     };
   }
 

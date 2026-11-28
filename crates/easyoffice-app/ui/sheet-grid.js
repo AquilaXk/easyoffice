@@ -306,12 +306,13 @@
       const value = entry?.value ?? "";
       const formula = entry?.formula || "";
       td._nf = entry?.style?.numFmt || "";
+      // The formula is on the cell before its text is drawn: 수식 표시 draws the formula in place of the value.
+      if (formula) td.dataset.formula = formula;
+      else delete td.dataset.formula;
       if (!keepText) {
         td._ct = formula ? "" : (entry?.t || "");
         setDisplayValue(td, value);
       }
-      if (formula) td.dataset.formula = formula;
-      else delete td.dataset.formula;
       // A cell an array filled (PD-217) keeps the address of the formula that made it.
       if (entry?.spillOf) td.dataset.spillOf = entry.spillOf; else delete td.dataset.spillOf;
       host.__EASYOFFICE_SHEET_LINK__?.paint(td, entry?.link, entry);
@@ -687,6 +688,14 @@
       }
     }
 
+    // 수식 표시 was switched: the cells with a formula show the formula or the value again; a cell being edited keeps its text.
+    function repaintFormulas() {
+      seedDomMaps();
+      for (const td of tdByPacked.values()) {
+        if (td.dataset.formula && td.dataset.editMode === undefined) setDisplayValue(td, readTdValue(td));
+      }
+    }
+
     // A column of another width shows its formatted numbers in full or as hash marks again.
     function repaintNumFmtColumn(c) {
       seedDomMaps();
@@ -827,7 +836,7 @@
       mergesIn: (r1, c1, r2, c2) => layoutApi?.mergesIn(getSheetName(), r1, c1, r2, c2) ?? [],
       rowHidden: (r) => Boolean(layoutApi?.rowHidden(getSheetName(), r)),
       colHidden: (c) => Boolean(layoutApi?.colHidden(getSheetName(), c)),
-      getAllWidths, replaceAllWidths, repaintFx, repaintNumFmt, renderWindow, refreshCells, syncRowFit,
+      getAllWidths, replaceAllWidths, repaintFx, repaintNumFmt, repaintFormulas, renderWindow, refreshCells, syncRowFit,
       ensureVisible, visibleRowSpan, frozenCounts, getTdAt, getTdByRef, forEachMaterializedTd,
       paintSelectionRange, paintTd, setDisplayValue, readTdValue, install, getView: () => view,
     };

@@ -946,6 +946,8 @@
       bindTd, bindSheetCellEvents, updateSelection, refreshChrome, paintSelection, focusAnchor, commitIfEditing, endEdit,
       getRange, getRanges, clearExtras, clearSelectionContents: () => (clip.clearRanges ? clip.clearRanges(getRanges()) : clip.clearRange(getRange())),
       openPasteSpecial: () => pasteUi.open(),
+      copyFormats: (range) => clip.copyFormats(range),
+      pasteFormats: (snap, range) => clip.pasteFormats(snap, range),
       selectAxis, selectRange, selectRanges, restoreSelection, runClipboardCommand, shiftFormula: clip.shiftFormula, getSelection: () => ({ ...sel }),
       handleBarKey: (ev) => { if (!shortcuts?.handleBarKey(ev)) point.barKey(ev); },
       holdsTabPress: point.holdsTabPress, detachForSwitch: point.detach, afterSheetSwitch: point.afterSwitch, insertFormulaName: point.insertName,

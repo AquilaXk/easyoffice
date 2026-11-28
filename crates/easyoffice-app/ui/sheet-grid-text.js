@@ -131,12 +131,21 @@
   // common red is the theme's negative color.
   const SECTION_RED = "#ff0000";
 
+  // 수식 > 수식 표시 (Ctrl+`, PD-400): a cell with a formula shows the formula text in place of the value, without the number
+  // format. The value stays in `data-raw`, so `readTdValue` (and with it the model, undo and the clipboard) still reads it.
+  let showFormulas = false;
+  const setShowFormulas = (on) => {
+    showFormulas = on === true;
+  };
+  const formulaShown = (td) => showFormulas && Boolean(td.dataset?.formula) && td.dataset.editMode === undefined;
+
   function setDisplayValue(td, value) {
     const raw = String(value ?? "");
     const nf = td._nf;
     const textTyped = td._ct === "s" || nf === "@";
-    const formatted = nf ? host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__?.shown(nf, raw, td._ct) : null;
-    let shown = formatted ? formatted.t : textTyped ? raw : formatGeneral(raw);
+    const asFormula = formulaShown(td);
+    const formatted = nf && !asFormula ? host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__?.shown(nf, raw, td._ct) : null;
+    let shown = asFormula ? td.dataset.formula : formatted ? formatted.t : textTyped ? raw : formatGeneral(raw);
     if (formatted && !textTyped && isNumericText(raw)) shown = fitToCell(td, shown);
     if (td.textContent !== shown) td.textContent = shown;
     if (td.dataset?.rot) host.__EASYOFFICE_SHEET_LOOK__?.syncRotSpan?.(td);
@@ -150,7 +159,7 @@
       if (td.dataset.raw !== raw) td.dataset.raw = raw;
       if (td.dataset.display !== shown) td.dataset.display = shown;
     }
-    td.classList.toggle("num", !textTyped && isNumericText(raw));
+    td.classList.toggle("num", !textTyped && !asFormula && isNumericText(raw));
     const color = formatted?.c || "";
     if (color || td._nfColor) {
       td._nfColor = color;
@@ -169,5 +178,6 @@
 
   host.__EASYOFFICE_SHEET_GRID_TEXT__ = {
     isNumericText, formatGeneral, cloneSheetStore, measureWrapped, measureLine, setColumnWidthLookup, setDisplayValue, readTdValue,
+    setShowFormulas, showsFormulas: () => showFormulas,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

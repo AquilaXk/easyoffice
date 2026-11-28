@@ -120,6 +120,16 @@
               <div class="md-item" data-kinds="DOC SLIDE" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">바꾸기</span><span class="md-shortcut">⌃H</span></div>
               <div class="md-item" data-kinds="SHEET BASE" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">찾기 및 바꾸기</span><span class="md-shortcut">⌃H</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="goto" role="menuitem" tabindex="-1"><span class="md-label">이동…</span><span class="md-shortcut">⌃G</span></div>
+              <div class="md-sub" data-kinds="SHEET" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">지우기</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="지우기">
+                  <div class="md-item" data-sheet-act="clear-all" role="menuitem" tabindex="-1"><span class="md-label">모두 지우기</span></div>
+                  <div class="md-item" data-sheet-act="clear-formats" role="menuitem" tabindex="-1"><span class="md-label">서식 지우기</span></div>
+                  <div class="md-item" data-sheet-act="clear-contents" role="menuitem" tabindex="-1"><span class="md-label">내용 지우기</span><span class="md-shortcut">Delete</span></div>
+                  <div class="md-item" data-sheet-act="clear-notes" role="menuitem" tabindex="-1"><span class="md-label">메모 지우기</span></div>
+                  <div class="md-item" data-sheet-act="clear-links" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크 지우기</span></div>
+                </div>
+              </div>
               <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">찾기 및 대치</span><span class="md-shortcut">⌃H</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">찾아 바꾸기</span><span class="md-shortcut">Ctrl+F2</span></div>
               <div class="md-item" data-studio-menu-cmd="palette" role="menuitem" tabindex="-1"><span class="md-label">명령 검색</span><span class="md-shortcut">Ctrl+/</span></div>
@@ -558,6 +568,8 @@
               </div>
               <div class="md-sep" data-kinds="SHEET"></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-numfmt="dialog" role="menuitem" tabindex="-1"><span class="md-label">셀 서식…</span><span class="md-shortcut">Ctrl+1</span></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="format-painter" role="menuitem" tabindex="-1"><span class="md-label">서식 복사</span><span class="md-shortcut">Ctrl+Shift+C</span></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="format-paste" role="menuitem" tabindex="-1"><span class="md-label">서식 붙여넣기</span><span class="md-shortcut">Ctrl+Shift+V</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="arrange" data-kinds="PAGES">
@@ -732,6 +744,8 @@
               </div>
               <div class="md-item" data-sheet-act="calc-now" role="menuitem" tabindex="-1"><span class="md-label">지금 계산</span><span class="md-shortcut">F9</span></div>
               <div class="md-item" data-sheet-act="calc-sheet" role="menuitem" tabindex="-1"><span class="md-label">시트 계산</span><span class="md-shortcut">Shift+F9</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-sheet-act="view-formulas" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="md-icon"></span><span class="md-label">수식 표시</span><span class="md-shortcut" data-shortcut-mac="⌃`">Ctrl+`</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="data" data-kinds="SHEET">
@@ -890,6 +904,10 @@
           <button type="button" class="tb-btn" data-hf-action="toggle-first" aria-pressed="false" title="첫 페이지를 다르게 지정" aria-label="첫 페이지를 다르게 지정"><span class="tb-icon-text" aria-hidden="true">1</span><span class="tb-label">첫 페이지를<br/>다르게 지정</span></button>
           <button type="button" class="tb-btn" data-hf-action="toggle-even-odd" aria-pressed="false" title="짝수와 홀수 페이지를 다르게 지정" aria-label="짝수와 홀수 페이지를 다르게 지정"><span class="tb-icon-text" aria-hidden="true">½</span><span class="tb-label">짝수와 홀수 페이지를<br/>다르게 지정</span></button>
           <button type="button" class="tb-btn" data-hf-action="toggle-zones" aria-pressed="false" title="3열 분할" aria-label="3열 분할"><span class="tb-icon-svg" data-icon="columns-3" aria-hidden="true"></span><span class="tb-label">3열 분할</span></button>
+        </div>
+        <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
+        <div class="tb-group" data-kinds="SHEET">
+          <button type="button" class="tb-btn" data-sheet-act="format-painter" aria-pressed="false" title="서식 복사 (Ctrl+Shift+C)" aria-label="서식 복사"><span class="tb-icon-svg" data-icon="paintbrush" aria-hidden="true"></span><span class="tb-label">서식<br/>복사</span></button>
         </div>
         <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
         <div class="tb-group" data-kinds="SHEET">
@@ -4134,6 +4152,8 @@
     <script src="./sheet-pick-list.js"></script>
     <script src="./sheet-subtotal.js"></script>
     <script src="./sheet-subtotal-ui.js"></script>
+    <script src="./sheet-clear-ui.js"></script>
+    <script src="./sheet-format-painter.js"></script>
     <script src="./sheet-structure.js"></script>
     <script src="./sheet-cell-write.js"></script>
     <script src="./sheet-view-live.js"></script>

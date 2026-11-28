@@ -5,6 +5,8 @@ const HWP_ITEMS = fileURLToPath(new URL("../../crates/easyoffice-desktop/src/nat
 
 const PAGES_ITEMS = fileURLToPath(new URL("../../crates/easyoffice-desktop/src/native_menu/items_pages.rs", import.meta.url));
 
+const SHEET_ITEMS = fileURLToPath(new URL("../../crates/easyoffice-desktop/src/native_menu/items_sheet.rs", import.meta.url));
+
 // The item table of crates/easyoffice-desktop/src/native_menu/items.rs (`BASE_ITEMS`) as source text, with the spreadsheet
 // macros written out: `sa!("id", "label", "act")` (or with braces) is `item("id", "label", None, "sheet-act:act")`, and
 // `cf!("label", "action")` is `item("format:cf-action", "label", None, "sheet-cf:action")`. The Hangul editor's items
@@ -19,7 +21,10 @@ export function itemTable(source) {
   const pages = fs.readFileSync(PAGES_ITEMS, "utf8");
   const pagesStart = pages.indexOf("pub const PAGES_ITEMS");
   const pagesTable = pages.slice(pagesStart, pages.indexOf("];", pagesStart));
-  return (table + "\n" + hwpTable + "\n" + pagesTable)
+  const sheet = fs.readFileSync(SHEET_ITEMS, "utf8");
+  const sheetStart = sheet.indexOf("pub const SHEET_ITEMS");
+  const sheetTable = sheet.slice(sheetStart, sheet.indexOf("];", sheetStart));
+  return (table + "\n" + hwpTable + "\n" + pagesTable + "\n" + sheetTable)
     .replace(/sa!\s*[({]\s*("[^"]+"),\s*("[^"]+"),\s*"([^"]+)",?\s*[)}]/g, 'item($1, $2, None, "sheet-act:$3")')
     .replace(/sl!\s*[({]\s*("[^"]+"),\s*("[^"]+"),\s*"([^"]+)",?\s*[)}]/g, 'item($1, $2, None, "slide-act:$3")')
     .replace(/sc!\s*[({]\s*("[^"]+"),\s*("[^"]+"),\s*"([^"]+)",?\s*[)}]/g, 'item($1, $2, None, "studio-cmd:$3")')

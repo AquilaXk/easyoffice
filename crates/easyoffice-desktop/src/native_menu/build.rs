@@ -10,9 +10,9 @@ use super::layout::{
     CALC_OPTIONS_LINES, CF, CF_LINES, CLOSE_WINDOW, EXPORT_BASE, EXPORT_BASE_LINES, EXPORT_BOARD,
     EXPORT_BOARD_LINES, EXPORT_DOC, EXPORT_DOC_LINES, EXPORT_PDF, EXPORT_PDF_LINES, EXPORT_SHEET,
     EXPORT_SHEET_LINES, EXPORT_SLIDE, EXPORT_SLIDE_LINES, HIDE, HIDE_OTHERS, MINIMIZE, NEW_DOCS,
-    NEW_DOC_IDS, NUMFMT, NUMFMT_LINES, PASTE, SELECT_ALL, SEPARATOR, SERVICES, SHEET_COL,
-    SHEET_FREEZE, SHEET_ROW, SHEET_TAB, SHOW_ALL, SLIDE_ALIGN, SLIDE_ALIGN_LINES, THEME, THEME_IDS,
-    USE_IN_FORMULA, USE_IN_FORMULA_LINES,
+    NEW_DOC_IDS, NUMFMT, NUMFMT_LINES, PASTE, SELECT_ALL, SEPARATOR, SERVICES, SHEET_CLEAR,
+    SHEET_COL, SHEET_FREEZE, SHEET_ROW, SHEET_TAB, SHOW_ALL, SLIDE_ALIGN, SLIDE_ALIGN_LINES, THEME,
+    THEME_IDS, USE_IN_FORMULA, USE_IN_FORMULA_LINES,
 };
 use super::{check, custom, is_check_item, label_for, quit_item, spec, QUIT_ID};
 
@@ -63,7 +63,7 @@ fn submenu<R: Runtime>(
             SLIDE_ALIGN => builder.item(&nested(app, kind, "맞춤", &SLIDE_ALIGN_LINES)?),
             BORDER => builder.item(&nested(app, kind, "테두리", &BORDER_LINES)?),
             CF => builder.item(&nested(app, kind, "조건부 서식", &CF_LINES)?),
-            SHEET_ROW | SHEET_COL | SHEET_TAB | SHEET_FREEZE => {
+            SHEET_ROW | SHEET_COL | SHEET_TAB | SHEET_FREEZE | SHEET_CLEAR => {
                 let sub = layout::sheet_submenu(line).expect("a sheet submenu token");
                 builder.item(&nested(app, kind, sub.title, sub.lines)?)
             }

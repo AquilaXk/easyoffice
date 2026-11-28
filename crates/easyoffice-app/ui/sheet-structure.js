@@ -118,6 +118,10 @@
     const textColumnsUi = host.__EASYOFFICE_CREATE_SHEET_TEXT_COLUMNS__?.({ ...deps, kit, say }) ?? null;
     // 데이터 > 개요 > 부분합 (PD-391).
     const subtotalUi = host.__EASYOFFICE_CREATE_SHEET_SUBTOTAL_UI__?.({ ...deps, kit, say, editAxis: (...args) => editAxis(...args) }) ?? null;
+    // 서식 복사: the brush, 서식 > 서식 복사 and 서식 붙여넣기, Ctrl+Shift+C and Ctrl+Shift+V (PD-400).
+    const painter = host.__EASYOFFICE_CREATE_SHEET_FORMAT_PAINTER__?.({ ...deps, say }) ?? null;
+    // 편집 > 지우기 (PD-400).
+    const clearUi = host.__EASYOFFICE_CREATE_SHEET_CLEAR_UI__?.({ ...deps, say, getNoteUi: () => noteUi }) ?? null;
     const pickList = host.__EASYOFFICE_CREATE_SHEET_PICK_LIST__?.({ ...deps, say }) ?? null;
     const contextMenu = host.__EASYOFFICE_CREATE_SHEET_CONTEXT_MENU__?.({
       ...deps,
@@ -574,6 +578,8 @@
       ...(viewOptions?.actions || {}),
       ...(gotoUi?.actions || {}),
       ...(subtotalUi?.actions || {}),
+      ...(clearUi?.actions || {}),
+      ...(painter?.actions || {}),
       "tab-add": () => tabs.insert(null),
       "tab-color": () => Promise.resolve(tabMenu.openColor(getActiveSheetName())),
       ...tabs.actions,
@@ -763,6 +769,7 @@
       rowResize.bind();
       sizeDialogs?.ensureBound();
       textColumnsUi?.ensureBound();
+      painter?.bind();
       contextMenu?.bind();
       pickList?.bind();
       host.__EASYOFFICE_ON_MENUS_CLOSED__?.(document, () => closeMenu(false));

@@ -25,6 +25,9 @@
   function createSheetViewOptions({ document, grid, getActiveSheetName }) {
     let formulaBarShown = readFormulaBar();
     const headingsHidden = new Set();
+    // 수식 > 수식 표시 (Ctrl+`, PD-400) belongs to a sheet like the headings; the cells draw it (`sheet-grid-text.js`).
+    const formulasShown = new Set();
+    const gridText = host.__EASYOFFICE_SHEET_GRID_TEXT__;
 
     function say(text) {
       const fb = document.getElementById("status-command-feedback");
@@ -43,6 +46,21 @@
       grid.setHeadersShown(headings);
       setChecked("view-formula-bar", formulaBarShown);
       setChecked("view-headings", headings);
+      const formulas = formulasShown.has(getActiveSheetName());
+      setChecked("view-formulas", formulas);
+      if (gridText && gridText.showsFormulas() !== formulas) {
+        gridText.setShowFormulas(formulas);
+        grid.repaintFormulas();
+      }
+    }
+
+    function toggleFormulas() {
+      const name = getActiveSheetName();
+      if (formulasShown.has(name)) formulasShown.delete(name);
+      else formulasShown.add(name);
+      refresh();
+      say(formulasShown.has(name) ? "수식 표시" : "수식 표시 해제");
+      return Promise.resolve(true);
     }
 
     function toggleFormulaBar() {
@@ -62,7 +80,7 @@
       return Promise.resolve(true);
     }
 
-    return { actions: { "view-formula-bar": toggleFormulaBar, "view-headings": toggleHeadings }, refresh };
+    return { actions: { "view-formula-bar": toggleFormulaBar, "view-headings": toggleHeadings, "view-formulas": toggleFormulas }, refresh };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_VIEW_OPTIONS__ = createSheetViewOptions;

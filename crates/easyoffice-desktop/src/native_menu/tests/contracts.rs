@@ -25,6 +25,8 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
             layout::SHEET_TAB,
             s,
             "format:cell-format",
+            "sheet:format-painter",
+            "sheet:format-paste",
         ]
     );
     let labels: Vec<&str> = layout::NUMFMT_LINES

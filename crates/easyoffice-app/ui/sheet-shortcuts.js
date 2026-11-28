@@ -296,6 +296,20 @@
         selectAxisSpan("row", rg.r1, rg.r2);
         return true;
       }
+      // 수식 표시: Ctrl+` (the Control key on a Mac too, as ⌘` switches windows; PD-400).
+      if (ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.shiftKey && code === "Backquote") {
+        ev.preventDefault();
+        ev.stopPropagation?.();
+        runStructureAct?.("view-formulas");
+        return true;
+      }
+      // 서식 복사 and 서식 붙여넣기: Ctrl+Shift+C and Ctrl+Shift+V, ⌘⇧C and ⌘⇧V on a Mac (PD-400).
+      if (mod && ev.shiftKey && (code === "KeyC" || code === "KeyV")) {
+        ev.preventDefault();
+        ev.stopPropagation?.();
+        runStructureAct?.(code === "KeyC" ? "format-painter" : "format-paste");
+        return true;
+      }
       if (mod && ev.shiftKey && code === "KeyL") {
         ev.preventDefault();
         ev.stopPropagation?.();

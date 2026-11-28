@@ -163,6 +163,23 @@
       return true;
     }
 
+    // 지우기 > 메모 지우기 (PD-400): the notes of the cells inside `ranges` ({ r1, c1, r2, c2 }), as one undo step. False when none.
+    async function deleteNotesIn(ranges) {
+      const sheet = getActiveSheetName();
+      if (isProtected(sheet, true)) return false;
+      const current = layoutApi.notesOf(sheet);
+      const inside = (note) => {
+        const at = host.__EASYOFFICE_SHEET_REFS__.parseRef(note.ref);
+        return Boolean(at) && ranges.some((rg) => at.row >= rg.r1 && at.row <= rg.r2 && at.col >= rg.c1 && at.col <= rg.c2);
+      };
+      const next = current.filter((note) => !inside(note));
+      if (next.length === current.length) return false;
+      hoveredRef = "";
+      await commitNotesMutation(sheet, next);
+      focusAnchor?.();
+      return true;
+    }
+
     async function toggleSingleNote(targetRef = "") {
       const sheet = getActiveSheetName();
       if (isProtected(sheet, true)) return false;
@@ -366,6 +383,7 @@
       actions,
       openNoteDialog,
       deleteNoteAt,
+      deleteNotesIn,
       toggleSingleNote,
       toggleAllNotes,
       refreshMenu,

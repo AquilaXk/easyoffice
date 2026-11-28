@@ -44,17 +44,22 @@ mod build;
 mod items;
 mod items_hwp;
 mod items_pages;
+mod items_sheet;
 mod layout;
 pub use layout::MenuKind;
 
-/// The whole table: the items of every window kind, then the ones only the Hangul editor runs, then the Pages window's.
+/// The whole table: the items of every window kind, then the ones only the Hangul editor runs, then the Pages window's, then the
+/// spreadsheet's later ones.
 pub const ITEMS: &[MenuItemSpec] = &join::<ITEM_COUNT>(&[
     items::BASE_ITEMS,
     items_hwp::HWP_ITEMS,
     items_pages::PAGES_ITEMS,
+    items_sheet::SHEET_ITEMS,
 ]);
-const ITEM_COUNT: usize =
-    items::BASE_ITEMS.len() + items_hwp::HWP_ITEMS.len() + items_pages::PAGES_ITEMS.len();
+const ITEM_COUNT: usize = items::BASE_ITEMS.len()
+    + items_hwp::HWP_ITEMS.len()
+    + items_pages::PAGES_ITEMS.len()
+    + items_sheet::SHEET_ITEMS.len();
 
 /// The tables one after the other (a constant, so the table stays a static slice).
 const fn join<const N: usize>(parts: &[&[MenuItemSpec]]) -> [MenuItemSpec; N] {
