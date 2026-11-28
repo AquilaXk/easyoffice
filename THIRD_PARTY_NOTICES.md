@@ -764,7 +764,7 @@ SOFTWARE.
 
 Source: https://github.com/lucide-icons/lucide (`icons/chevron-down.svg`, `icons/chevron-up.svg`, Copyright (c) 2026 Lucide Icons and Contributors).
 Nothing is vendored or linked at runtime. The path data of the two chevrons (`m6 9 6 6 6-6`, `m18 15-6-6-6 6`, 24x24 grid, stroke 2, round caps and joins) is embedded as the mask images `--chevron-down-mask` and `--chevron-up-mask` in `crates/easyoffice-app/ui/toolbar.css` (PD-377) and draws every drop-down arrow and the stacked buttons of the number fields. Both icons are among the Lucide icons derived from Feather, so the MIT license below applies to them as well as the ISC license.
-The copilot panel (PD-387) adds the path data of `thumbs-up`, `thumbs-down`, `rotate-ccw`, `arrow-up` and the three dots of `ellipsis-vertical` (`icons/thumbs-up.svg`, `icons/thumbs-down.svg`, `icons/rotate-ccw.svg`, `icons/arrow-up.svg`, `icons/ellipsis-vertical.svg`) to the icon set `crates/easyoffice-app/ui/icons.js`, drawn as inline stroke SVG on the 24x24 grid. The `stop` square there is a plain shape of this app.
+The copilot panel (PD-388) adds the path data of `thumbs-up`, `thumbs-down`, `rotate-ccw`, `arrow-up` and the three dots of `ellipsis-vertical` (`icons/thumbs-up.svg`, `icons/thumbs-down.svg`, `icons/rotate-ccw.svg`, `icons/arrow-up.svg`, `icons/ellipsis-vertical.svg`) to the icon set `crates/easyoffice-app/ui/icons.js`, drawn as inline stroke SVG on the 24x24 grid. The `stop` square there is a plain shape of this app.
 
 ```
 ISC License
@@ -10733,7 +10733,7 @@ SOFTWARE.
 
 ---
 
-## Copilot panel chat screen (assistant-ui, MIT; `PD-387`)
+## Copilot panel chat screen (assistant-ui, MIT; `PD-388`)
 
 Source: https://github.com/assistant-ui/assistant-ui (`packages/tw-shimmer/src/index.css` lines 1-30, the `shimmer` utility and its `tw-shimmer` keyframes; Copyright (c) 2026 AgentbaseAI Inc.). Nothing is vendored or linked at runtime.
 What is taken is the pattern: waiting text drawn as a moving band of light text over muted text (a linear gradient clipped to the glyphs, its `background-position` animated). It is ported to the plain rule `.eo-copilot-shimmer` in `crates/easyoffice-app/ui/copilot.css` and noted in the header of `crates/easyoffice-app/ui/copilot-thread-view.js`. Changed to fit: no Tailwind utility, no `@property` angle or track math, the colors are the `--ui-text-muted` and `--ui-text` tokens, one duration token (`--copilot-shimmer-duration`), and the animation is off under `prefers-reduced-motion`. The bubble, the folded step line and the row under each message are written fresh as DOM and CSS of this app.
@@ -10762,7 +10762,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Copilot panel input, mode menu and feedback (`PD-387`)
+## Copilot panel input, mode menu and feedback (`PD-388`)
 
 Nothing here is vendored or linked at runtime. Each part is a short port into plain JavaScript, with the source named in the header of the file.
 

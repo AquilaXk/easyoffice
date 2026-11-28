@@ -6853,5 +6853,5 @@
 - **디자인 가드** `copilot.css`의 그러데이션 금지 규칙(`test-webui-design-rules-pd265.mjs`)에 `.eo-copilot-shimmer` 한 곳만 예외를 둔다. 크기 위반 목록은 늘리지 않았다.
 - **Why** 답변·진행·메시지 동작을 한 화면에서 읽히게 하고, 입력 도구를 입력창 한 곳에 모은다.
 - **Trade-offs** 패널만 둥근 모서리라 앱의 다른 창과 모양이 다르다(QA 결정). 진행 단계는 도구 조회 호출만 담는다(모델 내부 추론은 응답에 담겨 온 경우만).
-- **Verified by** `scripts/test-webui-copilot-panel-ui-pd387.mjs`, `scripts/test-webui-design-rules-pd265.mjs`, WebKit `scripts/webkit-dom/run.mjs`.
+- **Verified by** `scripts/test-webui-copilot-panel-ui-pd388.mjs`, `scripts/test-webui-design-rules-pd265.mjs`, WebKit `scripts/webkit-dom/run.mjs`.
 - **Revisit when** 첨부 기능이 생길 때(`+` 메뉴), 모델 응답에 단계별 진행 정보가 생길 때.

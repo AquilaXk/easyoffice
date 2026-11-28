@@ -10,13 +10,13 @@ const UI = (name) => readText(fileURLToPath(new URL("../crates/easyoffice-app/ui
 const stripComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, "");
 const declarations = (css, property) => [...stripComments(css).matchAll(new RegExp("(?:^|[;{\\s])" + property + "\\s*:\\s*([^;}]+)", "g"))].map((m) => m[1].trim());
 
-// copilot.css: the rounded corners of the panel's bubble, composer card, chips and send button are the PD-387 exception, one token each.
+// copilot.css: the rounded corners of the panel's bubble, composer card, chips and send button are the PD-388 exception, one token each.
 const RADIUS_OF = {
   "base.css": ["0", "var(--radius-sm)"],
   "board.css": ["0"],
   "copilot.css": ["0", "var(--radius-sm)", "var(--radius-md)", "var(--copilot-bubble-radius)", "var(--copilot-composer-radius)", "var(--copilot-chip-radius)", "var(--copilot-send-radius)"],
 };
-// The one gradient of the panel is the shimmer of the waiting line (a moving band of light text over muted text, PD-387).
+// The one gradient of the panel is the shimmer of the waiting line (a moving band of light text over muted text, PD-388).
 const SHIMMER_RULE = /\.eo-copilot-shimmer\s*\{[^}]*\}/;
 const SHADOW_OF = { "base.css": [], "board.css": [], "copilot.css": ["var(--shadow-dropdown)"] };
 

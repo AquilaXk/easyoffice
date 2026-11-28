@@ -208,7 +208,7 @@
   --menu-footer-gap: 1px;                         /* 메뉴 아래 줄 항목 사이 틈(코파일럿 모델 메뉴) */
   --menu-hint-padding: 1px var(--space-2);        /* 메뉴 항목 힌트 칩 안쪽 여백 */
   --textarea-min-height: 32px;                    /* 코파일럿 입력 칸의 최소 높이(한 줄 + 위아래 여백 4px씩) */
-  /* 코파일럿 패널(PD-387): 둥근 모서리는 이 패널의 말풍선·입력 카드·칩·전송 단추에만 둔 예외다. 앱의 다른 컨트롤은 2px 각진 모서리 그대로 */
+  /* 코파일럿 패널(PD-388): 둥근 모서리는 이 패널의 말풍선·입력 카드·칩·전송 단추에만 둔 예외다. 앱의 다른 컨트롤은 2px 각진 모서리 그대로 */
   --copilot-bubble-radius: 14px;                  /* 사용자 말풍선 */
   --copilot-bubble-padding: var(--space-5) var(--space-6);
   --copilot-composer-radius: 16px;                /* 입력 카드 */

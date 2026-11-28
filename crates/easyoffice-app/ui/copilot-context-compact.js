@@ -269,7 +269,7 @@
   }
 
   /**
-   * 직전 답변의 평가 한 줄(`copilot-feedback.js` `feedbackNote`)을 질문 끝에 붙인다(PD-387). 캐시되는 접두와 대화 이력에는 넣지 않고
+   * 직전 답변의 평가 한 줄(`copilot-feedback.js` `feedbackNote`)을 질문 끝에 붙인다(PD-388). 캐시되는 접두와 대화 이력에는 넣지 않고
    * 이번 질문에만 실으므로 압축·퇴출 규칙과 prompt cache 접두가 그대로다. 합친 글이 `maxBytes`(UTF-8)를 넘지 않게 질문 쪽을 줄인다.
    */
   function withFeedbackNote(prompt, note, maxBytes) {

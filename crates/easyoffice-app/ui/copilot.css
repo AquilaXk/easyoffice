@@ -307,7 +307,7 @@
   align-items: flex-end;
 }
 
-/* 사용자 메시지: 오른쪽 정렬 둥근 말풍선(PD-387) */
+/* 사용자 메시지: 오른쪽 정렬 둥근 말풍선(PD-388) */
 .eo-copilot-msg--user {
   max-width: 92%;
   padding: var(--copilot-bubble-padding);

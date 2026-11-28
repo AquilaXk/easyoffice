@@ -220,7 +220,7 @@ export const copilotDocSteps = [
     await page.click(PANEL_MODEL);
     await page.click('#copilot-model-menu button[data-quick-kind="ollama"]');
 
-    // 텍스트 예측은 ⋮ 메뉴의 켜기/끄기 항목이다(PD-387).
+    // 텍스트 예측은 ⋮ 메뉴의 켜기/끄기 항목이다(PD-388).
     await page.click("#btn-copilot-more");
     assert.equal((await page.textContent("#btn-copilot-ghost")).trim(), "텍스트 예측");
     await page.click("#btn-copilot-ghost");

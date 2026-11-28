@@ -5,7 +5,7 @@ import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { REDUCED_MOTION } from "./test-support/copilot-accept.mjs";
 
-// PD-387: the copilot panel as a chat screen. The conversation title and the menu in the header, the user's bubble, the
+// PD-388: the copilot panel as a chat screen. The conversation title and the menu in the header, the user's bubble, the
 // answer as plain text under a folded "N초 동안 작업" line, the small row under each message, and the composer card.
 
 async function open({ run }) {
