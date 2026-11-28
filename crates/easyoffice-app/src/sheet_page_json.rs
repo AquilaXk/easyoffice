@@ -260,22 +260,27 @@ pub(crate) fn moved_page_json(
     page.title_rows = on_axis(page.title_rows, easyoffice_sheet::Axis::Row);
     page.title_cols = on_axis(page.title_cols, easyoffice_sheet::Axis::Col);
     // A break sits before a line: it moves with the line and goes with it when the line is deleted. A column-bounded edit
-    // leaves the breaks of whole lines alone.
-    let moved = |breaks: &[u32], axis| -> Vec<u32> {
+    // leaves the breaks of whole lines alone. A break that lands on the first line (the lines above it were deleted) or past the
+    // sheet is no break: the page reads its own output again, and only lines 2 and after are accepted.
+    let moved = |breaks: &[u32], axis, limit: u32| -> Vec<u32> {
         if edit.axis != axis {
             return breaks.to_vec();
         }
-        breaks
+        let mut out: Vec<u32> = breaks
             .iter()
             .filter_map(|&b| {
                 easyoffice_sheet::shift_runs(&[(b, b)], edit)
                     .first()
                     .map(|run| run.0)
             })
-            .collect()
+            .filter(|&b| (1..limit).contains(&b))
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
     };
-    page.row_breaks = moved(&page.row_breaks, easyoffice_sheet::Axis::Row);
-    page.col_breaks = moved(&page.col_breaks, easyoffice_sheet::Axis::Col);
+    page.row_breaks = moved(&page.row_breaks, easyoffice_sheet::Axis::Row, ROWS);
+    page.col_breaks = moved(&page.col_breaks, easyoffice_sheet::Axis::Col, COLS);
     Ok(page_json(page))
 }
 
@@ -414,6 +419,29 @@ mod tests {
             moved(Axis::Col, EditKind::Insert, 0, 1),
             r#"{"rowBreaks":[11,21],"colBreaks":[6]}"#
         );
+    }
+
+    #[test]
+    fn a_break_that_reaches_the_first_line_goes_so_the_answer_can_be_read_again() {
+        use easyoffice_sheet::{Axis, AxisEdit, EditKind};
+        // rowBreaks [3] (before row 3), rows 1 and 2 deleted: the break would be before row 1
+        let page = StrictJsonValue::parse(r#"{"rowBreaks":[3,9],"colBreaks":[3]}"#).unwrap();
+        let moved = |axis, kind, at, count| {
+            moved_page_json(&page, &AxisEdit::new(axis, kind, at, count).unwrap()).unwrap()
+        };
+        let rows = moved(Axis::Row, EditKind::Delete, 0, 2);
+        assert_eq!(rows, r#"{"rowBreaks":[7],"colBreaks":[3]}"#);
+        let cols = moved(Axis::Col, EditKind::Delete, 0, 2);
+        assert_eq!(cols, r#"{"rowBreaks":[3,9]}"#);
+        // what the edit answers is accepted by the next read
+        for text in [rows, cols] {
+            let json = StrictJsonValue::parse(&format!("{{\"page\":{text}}}")).unwrap();
+            let mut styling = SheetStyling::default();
+            assert!(
+                parse_page(json.as_object().unwrap(), &mut styling).is_ok(),
+                "{text}"
+            );
+        }
     }
 
     #[test]

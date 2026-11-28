@@ -9,8 +9,7 @@ use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_balanced_elements, write_col_letters,
 };
 use crate::sheet_page::{
-    clean_breaks, MAX_FIT_PAGES, MAX_MARGIN_MILS, MAX_PAGE_BREAKS, MAX_PAPER_CODE, MAX_TITLE_COLS,
-    MAX_TITLE_ROWS,
+    clean_breaks, MAX_FIT_PAGES, MAX_MARGIN_MILS, MAX_PAPER_CODE, MAX_TITLE_COLS, MAX_TITLE_ROWS,
 };
 use crate::sheet_page::{inches_to_mils, mils_text, PageMargins, PageScale, SheetPage};
 use crate::xml_stream::{Attrs, XmlEvent};
@@ -18,6 +17,8 @@ use crate::{CellBox, OoxmlCodec, SheetStyling, XmlSanitizer};
 
 const PRINT_AREA: &str = "_xlnm.Print_Area";
 const PRINT_TITLES: &str = "_xlnm.Print_Titles";
+/// Break entries one list is read up to before it is sorted and cut to the model's bound (bounds the memory of a hostile file).
+const MAX_RAW_BREAKS: usize = 65_536;
 const LAST_ROW: u32 = OoxmlCodec::MAX_XLSX_ROWS - 1;
 const LAST_COL: u32 = OoxmlCodec::MAX_XLSX_COLS - 1;
 
@@ -137,11 +138,19 @@ impl PageScan {
                     .get("id")
                     .as_deref()
                     .and_then(|v| v.trim().parse::<u32>().ok());
+                // The bound counts what is kept: ids outside the sheet are dropped first, so a run of them cannot crowd out the
+                // real ones, and the memory is bounded by `MAX_RAW_BREAKS` (the list is sorted, deduplicated and cut when done).
                 match (self.in_breaks, id) {
-                    (Some(true), Some(id)) if self.page.row_breaks.len() < MAX_PAGE_BREAKS => {
+                    (Some(true), Some(id))
+                        if (1..=LAST_ROW).contains(&id)
+                            && self.page.row_breaks.len() < MAX_RAW_BREAKS =>
+                    {
                         self.page.row_breaks.push(id);
                     }
-                    (Some(false), Some(id)) if self.page.col_breaks.len() < MAX_PAGE_BREAKS => {
+                    (Some(false), Some(id))
+                        if (1..=LAST_COL).contains(&id)
+                            && self.page.col_breaks.len() < MAX_RAW_BREAKS =>
+                    {
                         self.page.col_breaks.push(id);
                     }
                     _ => {}

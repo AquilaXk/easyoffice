@@ -133,6 +133,13 @@ fn only_the_breaks_a_user_set_are_read_and_a_hostile_list_is_bounded() {
     let page = read(&replace_part(&bytes, "xl/worksheets/sheet1.xml", &hostile)).remove(0);
     assert!(page.row_breaks.len() <= easyoffice_formats::MAX_PAGE_BREAKS);
     assert!(page.within_bounds(1_048_576, 16_384));
+    // ids outside the sheet come first and must not crowd out the valid ones that follow
+    let outside: String = (0..3000)
+        .map(|i| format!("<brk id=\"{}\" man=\"1\"/>", 2_000_000 + i))
+        .collect();
+    let crowded = format!("<?xml version=\"1.0\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData/><rowBreaks>{outside}<brk id=\"7\" man=\"1\"/><brk id=\"0\" man=\"1\"/></rowBreaks></worksheet>");
+    let page = read(&replace_part(&bytes, "xl/worksheets/sheet1.xml", &crowded)).remove(0);
+    assert_eq!(page.row_breaks, vec![7]);
 }
 
 #[test]
