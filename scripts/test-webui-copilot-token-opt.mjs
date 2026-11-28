@@ -568,6 +568,7 @@ test("regression fixes: live UI chunk eviction across 9 turns, <del> active span
   const readLoopEnv = {};
   loadUiModule(UI("copilot-text.js"), readLoopEnv);
   loadUiModule(UI("copilot-context-compact.js"), readLoopEnv);
+  loadUiModule(UI("copilot-step-labels.js"), readLoopEnv);
   loadUiModule(UI("copilot-agent-loop.js"), readLoopEnv);
   const readLoop = readLoopEnv.__EASYOFFICE_CREATE_COPILOT_AGENT_LOOP__({
     invokeIpc: async (_cmd, payload) => {

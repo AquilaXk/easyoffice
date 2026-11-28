@@ -66,6 +66,24 @@ test("relativeTime reads in Korean from the clock: 지금, 분, 시간, 일", ()
   assert.equal(relativeTime(now - 3 * 86_400_000, now), "3일 전");
 });
 
+test("step labels name the read in Korean with numbers and ranges only, and fall back for an unknown tool", () => {
+  const env = {};
+  loadUiModule(fileURLToPath(new URL("../crates/easyoffice-app/ui/copilot-step-labels.js", import.meta.url)), env);
+  const { describeToolCall, FALLBACK } = env.__EASYOFFICE_COPILOT_STEP_LABELS__;
+  assert.equal(describeToolCall({ name: "read_doc_blocks", startIndex: 0, endIndex: 2 }), "문단 1~3 읽음");
+  assert.equal(describeToolCall({ name: "read_doc_blocks", startIndex: 4, count: 3 }), "문단 5~7 읽음");
+  assert.equal(describeToolCall({ name: "read_hwp_paragraphs", startIndex: 9, endIndex: 9 }), "문단 10 읽음");
+  assert.equal(describeToolCall({ name: "read_sheet_range", range: "a1:c10", sheet: "비밀 시트" }), "A1:C10 범위 읽음");
+  assert.equal(describeToolCall({ name: "read_sheet_range", range: "주민번호 열" }), "시트 범위 읽음", "a range that is not cells is not echoed");
+  assert.equal(describeToolCall({ name: "read_base_records", offset: 0, limit: 20 }), "레코드 1~20 읽음");
+  const secret = describeToolCall({ name: "find_sheet_cells", query: "홍길동 010-1234-5678" });
+  assert.equal(secret, "시트에서 셀 찾음");
+  assert.equal(describeToolCall({ name: "search_pdf_pages", query: "계약서" }), "PDF 쪽 검색");
+  assert.equal(describeToolCall({ name: "something_new", query: "x" }), FALLBACK);
+  assert.equal(FALLBACK, "문서 내용 확인");
+  assert.equal(describeToolCall(null), FALLBACK);
+});
+
 test("a turn shows the title, a right-side bubble row, a folded work line and the rows under each message", async () => {
   const { document, userClick, send, runs, copied } = await open({ run: toolThenAnswer });
   assert.equal(document.getElementById("copilot-title").textContent, "새 대화");
@@ -88,7 +106,8 @@ test("a turn shows the title, a right-side bubble row, a folded work line and th
   userClick(toggle);
   assert.equal(toggle.getAttribute("aria-expanded"), "true");
   assert.equal(panel.hidden, false);
-  assert.match(panel.textContent, /read_doc_blocks\(start=0,count=3\)/);
+  assert.match(panel.textContent, /문단 1~3 읽음/);
+  assert.doesNotMatch(panel.textContent, /read_doc_blocks/, "no internal tool name in the steps");
 
   const meta = rows[1].querySelector(".eo-copilot-meta");
   const [copy, up, down] = meta.querySelectorAll(".eo-copilot-meta-btn");
