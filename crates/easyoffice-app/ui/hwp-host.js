@@ -19,8 +19,9 @@
     invoke: ["absent", "rejected", "no-answer", "allowed"],
   });
   const PROTOCOL_VERSION = 1;
+  // `target-navigation-v1`: the editor refuses `focusTarget` (the Copilot's jump to a paragraph and its pointer) unless the client names it.
   const CAPABILITIES = [
-    "transferable-array-buffer", "document-state-v1", "document-change-events-v1", "notify-saved-v1",
+    "transferable-array-buffer", "document-state-v1", "document-change-events-v1", "notify-saved-v1", "target-navigation-v1",
   ];
   const LONG_METHODS = new Set(["ready", "loadFile", "createBlankDocument", "exportHwp", "exportHwpx", "verifyBytes"]);
   const SHORT_TIMEOUT_MS = 15000;

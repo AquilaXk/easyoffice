@@ -553,6 +553,14 @@ function applyRangeReplaceStep(
   };
 }
 
+// `splitParagraph` takes the editor's cursor offset, which counts every inline control (table, picture) as one place besides the
+// text. A split at the text length alone lands before a control that ends the paragraph and carries it into the new paragraph.
+// `getControlTextPositions` has one entry per control, so the text length plus that count reaches the end whatever the controls are
+// (the split clamps what is past it).
+function paragraphEndOffset(wasm: CopilotWasmSource, sec: number, para: number): number {
+  return wasm.getParagraphLength(sec, para) + wasm.getControlTextPositions(sec, para).length;
+}
+
 // 아래에 삽입: 문단 `index`의 글과 서식은 그대로 두고, 그 바로 아래에 줄마다 새 문단을 넣는다.
 function applyInsertAfterStep(wasm: CopilotWasmSource, index: number, rawTexts: string[]): CopilotCursorPosition {
   const { coords } = buildFlatParagraphTable(wasm);
@@ -562,16 +570,14 @@ function applyInsertAfterStep(wasm: CopilotWasmSource, index: number, rawTexts: 
   const lines = splitTextLines(rawTexts, '삽입 문단 줄 수가 허용 상한을 초과했습니다.');
   const sec = coords[index].section;
   let curPara = coords[index].paragraph;
-  let curLen = wasm.getParagraphLength(sec, curPara);
   for (const line of lines) {
-    wasm.splitParagraph(sec, curPara, curLen);
+    wasm.splitParagraph(sec, curPara, paragraphEndOffset(wasm, sec, curPara));
     curPara += 1;
     if (line.length > 0) {
       wasm.insertText(sec, curPara, 0, line);
     }
-    curLen = wasm.getParagraphLength(sec, curPara);
   }
-  return { sectionIndex: sec, paragraphIndex: curPara, charOffset: curLen };
+  return { sectionIndex: sec, paragraphIndex: curPara, charOffset: wasm.getParagraphLength(sec, curPara) };
 }
 
 function applyAppendStep(wasm: CopilotWasmSource, rawTexts: string[]): CopilotCursorPosition {
@@ -599,7 +605,7 @@ function applyAppendStep(wasm: CopilotWasmSource, rawTexts: string[]): CopilotCu
   }
 
   for (let i = startIdx; i < lines.length; i += 1) {
-    wasm.splitParagraph(lastSec, curPara, curLen);
+    wasm.splitParagraph(lastSec, curPara, paragraphEndOffset(wasm, lastSec, curPara));
     curPara += 1;
     if (lines[i].length > 0) {
       wasm.insertText(lastSec, curPara, 0, lines[i]);

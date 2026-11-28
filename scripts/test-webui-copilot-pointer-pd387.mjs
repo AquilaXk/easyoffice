@@ -91,7 +91,7 @@ test("a PDF answer that cites a page takes the pointer there and leaves the docu
 
 const PARAGRAPHS = ["첫째", "둘째", "셋째"];
 
-async function extOpsWithEditor(caret) {
+async function extOpsWithEditor(caret, focus = { focused: true, page: 1 }) {
   const h = await open({ module: "DOC", run: () => answer([]) });
   const calls = [];
   const frame = { getBoundingClientRect: () => ({ left: 100, top: 50, right: 900, bottom: 650, width: 800, height: 600 }) };
@@ -104,7 +104,7 @@ async function extOpsWithEditor(caret) {
     call: async (method, params) => {
       calls.push([method, params]);
       if (method === "getCaretRect") return caret;
-      if (method === "focusTarget") return { focused: true, page: 1 };
+      if (method === "focusTarget") return focus;
       return {
         documentGeneration: 1,
         pageCount: 1,
@@ -137,6 +137,12 @@ test("the paragraph rect is empty when the editor shows no caret or does not kno
   assert.equal(known.calls.length, 0, "an unknown paragraph asks the editor nothing");
 });
 
+test("a jump the editor refuses gives no rect: the caret would still be where it was before", async () => {
+  const refused = await extOpsWithEditor({ visible: true, left: 30, top: 70, width: 2, height: 18 }, { focused: false, page: 1 });
+  assert.equal(await refused.ops.hwpParagraphRect(1), null);
+  assert.deepEqual(refused.calls.map(([method]) => method), ["focusTarget"], "the stale caret is not even read");
+});
+
 test("the board frames of a graph are the ones the apply lays out, below the nodes that are there", async () => {
   const h = await open({ module: "BOARD", run: () => answer([]) });
   const ops = h.host.__EASYOFFICE_CREATE_COPILOT_EXT_OPS__({ document: h.document });
@@ -165,6 +171,14 @@ test("the editor answers the caret query from the caret element only and the rou
   assert.match(read("main.ts"), /async getCaretRect\(\) \{\s+await initPromise;\s+return readCaretRect\(document\);/);
   const { EMBED_CAPABILITIES } = await import("../apps/hwp-studio/src/embed/protocol.ts");
   assert.ok(EMBED_CAPABILITIES.includes("caret-rect-v1"));
+});
+
+test("the shell names target-navigation-v1, without which the editor refuses every focusTarget (found in a real WebKit run)", async () => {
+  const fs = await import("node:fs");
+  const host = fs.readFileSync(new URL("../crates/easyoffice-app/ui/hwp-host.js", import.meta.url), "utf8");
+  assert.match(host, /const CAPABILITIES = \[[^\]]*"target-navigation-v1"[^\]]*\]/);
+  const { EMBED_CAPABILITIES } = await import("../apps/hwp-studio/src/embed/protocol.ts");
+  assert.ok(EMBED_CAPABILITIES.includes("target-navigation-v1"), "the editor offers it");
 });
 
 test("a PDF answer that cites no page draws no pointer", async () => {

@@ -369,6 +369,7 @@
       return true;
     }
 
+    // Resolves to the editor's `{ focused, page }`: the editor refuses (`focused: false`) a paragraph it has no caret place for.
     const focusHwpParagraph = (hwp, entry) => hwp.call("focusTarget", {
       target: {
         kind: "body_paragraph",
@@ -407,7 +408,8 @@
       const snap = cachedHwpSnapshot;
       const entry = snap?.byIndex?.get(index === "end" ? (snap.totalParagraphs || 0) - 1 : index);
       if (!entry) return null;
-      await focusHwpParagraph(hwp, entry);
+      // A refused jump leaves the caret where it was: that is not this paragraph's place.
+      if ((await focusHwpParagraph(hwp, entry))?.focused !== true) return null;
       const caret = await hwp.call("getCaretRect", {});
       if (!caret?.visible) return null;
       const origin = frame.getBoundingClientRect();

@@ -86,7 +86,7 @@ async function runStep(browser, { baseUrl, captureDir, module, name, body }) {
   const started = Date.now();
   try {
     await page.goto(`${baseUrl}/?module=${module}&win=webkit-dom`);
-    await page.waitForSelector({ SHEET: "#pane-sheet td[data-cell]", BASE: "#pane-base .base-grid-table", BOARD: "#board-viewport", SLIDE: "#slide-thumb-list .slide-thumb", PDF: "#pane-pdf" }[module] || "#doc-editor");
+    await page.waitForSelector({ SHEET: "#pane-sheet td[data-cell]", HWP: "#hwp-frame", BASE: "#pane-base .base-grid-table", BOARD: "#board-viewport", SLIDE: "#slide-thumb-list .slide-thumb", PDF: "#pane-pdf" }[module] || "#doc-editor");
     await body(page);
     console.log(`ok   ${module.toLowerCase()}: ${name} (${Date.now() - started} ms)`);
     return true;
