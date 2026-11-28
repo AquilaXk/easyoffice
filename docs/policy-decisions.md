@@ -6900,3 +6900,12 @@
   - 상태 표시줄 집계 라벨은 `평균: 값` 꼴이다(공식 화면 표기).
 - **Verified by** `scripts/test-webui-sheet-{goto,special-cells,subtotal,page-breaks,context-submenus,structure}.mjs`, `scripts/test-webui-{menu-kinds,find-replace,no-explanations}.mjs`, `native_menu` 단위 시험, `sheet_page_roundtrip`·`sheet_page_json` 시험, 전체 WebKit 묶음.
 - **Revisit when** 빠른 채우기 의존성을 정할 때, 실제 한국어판과 부분합 함수 이름·접근 키를 대조할 때, 네이티브 체크 항목 동기화(`MenuView`)를 넓힐 때.
+
+## PD-393 — 기능 범위 기준을 오픈소스 오피스 공통 기능으로 정하고 `docs/office-parity.md`를 구현 순서의 기준으로 둔다 (2026-11-28)
+
+- **Decision (QA 요청)** 문서·시트·슬라이드의 기능 범위 목표는 별이 많은 오픈소스 오피스 제품 4종 중 3종 이상이 가진 사용자 기능이다(슬라이드는 해당 제품이 3종). 기능 단위는 명령·대화상자·동작이다. 기준표와 완성도(있음 1, 일부 0.5, 제외는 분모에서 뺌)는 `docs/office-parity.md`가 정본이다.
+  - 제외: 매크로·VBA, 클라우드 공동 편집(채팅·멘션·메모 답글·계정), 외부 데이터 연결, 네트워크 함수(PD-318). 표에 `제외(사유)`로 남기고 점수에서 뺀다.
+  - 한글(HWP)·PDF·BASE·BOARD는 이 표에 넣지 않는다.
+- **구현 판단** 문서 작업이라 코드·의존성 변경이 없다. 제품별 근거 링크는 로컬 파일에만 두고 문서에는 기준 수만 적는다.
+- **Trade-offs** 상태는 메뉴·대화상자 점검으로 적었다. 같은 이름의 하위 동작은 깊이를 다 보지 않아 `일부`로 둔 항목이 있다. 기능을 고치는 커밋이 표를 같이 고친다.
+- **Revisit when** 기준 제품 목록을 바꿀 때, 제외 항목을 다시 넣을 때.
