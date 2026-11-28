@@ -9,7 +9,7 @@
  *     file digests: the deb is built from the same template, so its already checked entry must hash the same.
  *     (The payload is not unpacked: `rpm2cpio` exits without a message on the Tauri-built rpm on the runner.)
  * Every package must carry the binary, a `.desktop` file, THIRD_PARTY_NOTICES.md (MIT notice condition) and
- * the PDF export font with its license (`pdf-fonts/`, PD-114);
+ * the license of the PDF export font (`pdf-fonts/`, PD-114; the face is the editor's woff2, PD-397);
  * the `.desktop` file must be in the Office menu category, pass the opened files to the app and list the
  * MIME type of every document format the app registers.
  *
@@ -151,7 +151,10 @@ export function checkPayload(paths) {
   if (!files.some((file) => file.endsWith(`/${NOTICES_FILE}`))) problems.push(`the package must contain ${NOTICES_FILE}`);
   if (!files.some((file) => file.endsWith(".desktop"))) problems.push("the package must contain a .desktop file");
   for (const font of PDF_FONT_FILES) {
-    if (!files.some((file) => file.endsWith(`/${font}`))) problems.push(`the package must contain ${font} (PDF export font)`);
+    if (!files.some((file) => file.endsWith(`/${font}`))) problems.push(`the package must contain ${font} (PDF export font license)`);
+  }
+  if (files.some((file) => file.endsWith("/pdf-fonts/NotoSansKR-Regular.ttf"))) {
+    problems.push("the package must not contain pdf-fonts/NotoSansKR-Regular.ttf (the face is the editor's woff2, PD-397)");
   }
   return problems;
 }

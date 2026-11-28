@@ -406,7 +406,7 @@ pub async fn pdf_export_start(
         let target = match picked {
             Some(path) => ExportTarget::File(path),
             None => ExportTarget::Check {
-                bundled_font: crate::pdf_fonts::has_face_from(&fonts, &font_dirs),
+                bundled_font: crate::pdf_font_face::has_face(&fonts),
             },
         };
         ExportJob::new(target, PdfAssembler::new(&fonts, true))

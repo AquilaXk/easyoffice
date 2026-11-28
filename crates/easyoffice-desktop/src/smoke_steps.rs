@@ -86,9 +86,9 @@ fn scratch_dir(tag: &str) -> Result<PathBuf, String> {
 /// answers as if it had been saved, without a dialog and without writing a file. `has_text` says
 /// that a page held text.
 ///
-/// `bundled_font` says the font database holds the face the installer ships in `pdf-fonts/`: a
-/// shell that cannot find it would drop Korean text on a machine without a Korean font (PD-114),
-/// and a runner that has system fonts would not show it.
+/// `bundled_font` says the font database holds the face the shell decodes from the editor's own
+/// woff2 (`pdf_font_face.rs`): a shell that cannot find it would drop Korean text on a machine
+/// without a Korean font (PD-114, PD-397), and a runner that has system fonts would not show it.
 pub fn verify_pdf(
     pages: usize,
     has_text: bool,
@@ -96,7 +96,9 @@ pub fn verify_pdf(
     bundled_font: bool,
 ) -> Result<PdfFinish, String> {
     if !bundled_font {
-        return Err("설치본의 PDF 번들 글꼴(pdf-fonts)을 찾지 못했습니다.".to_string());
+        return Err(
+            "설치본의 PDF 번들 글꼴(Noto Sans KR woff2)을 불러오지 못했습니다.".to_string(),
+        );
     }
     let check = pdf_export::verify_exported_pdf(pdf, pages, has_text)?;
     if let Some(warning) = check.warning {
@@ -599,7 +601,7 @@ mod tests {
     fn the_pdf_branch_answers_like_a_save_and_names_what_is_wrong() {
         assert!(verify_pdf(1, true, b"not a pdf", true).is_err());
         let missing = verify_pdf(1, true, &minimal_pdf(1), false).unwrap_err();
-        assert!(missing.contains("pdf-fonts"), "{missing}");
+        assert!(missing.contains("Noto Sans KR"), "{missing}");
         let outcome = verify_pdf(1, true, &minimal_pdf(1), true).expect("valid");
         assert_eq!(
             serde_json::to_string(&outcome).unwrap(),

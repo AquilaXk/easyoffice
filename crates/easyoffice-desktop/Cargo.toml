@@ -33,6 +33,10 @@ zip = { workspace = true }
 svg2pdf = { version = "0.13", default-features = false, features = ["text"] }
 usvg = { version = "0.45", default-features = false, features = ["text"] }
 fontdb = "0.23"
+# PD-397: the bundled PDF face is the editor's own Noto Sans KR woff2, decoded in memory (pure Rust; its
+# brotli reader `brotli-decompressor` and `bytes` are already in the graph, and the woff1 path that would pull
+# `flate2` in for it is off).
+wuff = { version = "=0.2.10", default-features = false, features = ["brotli"] }
 # PD-132: the first page of a saved Hangul document drawn to a small PNG for the file's preview
 # picture. Both crates are already in the graph through svg2pdf (same versions). `raster-images`
 # (gif, image-webp, zune-jpeg) is on: the vendored svg2pdf's `filters` feature, which rhwp's default

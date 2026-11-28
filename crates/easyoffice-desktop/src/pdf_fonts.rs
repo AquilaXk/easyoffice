@@ -1,7 +1,8 @@
 //! Fonts for the searchable PDF export (PD-101, PD-114).
 //!
 //! * [`shared_font_db`] builds the font database once per process: the bundled Noto Sans KR
-//!   Regular (OFL) first, then the system fonts. The bundled face is what keeps Korean text from
+//!   Regular (OFL; the editor's woff2 decoded in memory, `pdf_font_face.rs`, PD-397) first, then
+//!   the font folders and the system fonts. The bundled face is what keeps Korean text from
 //!   disappearing on a machine without any Korean font (a Linux container, a CI runner); the
 //!   generic `serif`/`sans-serif`/`monospace` families map to it, as in the reference app.
 //! * [`fallback_selector`] picks the face that draws a character the requested face lacks. It is
@@ -39,22 +40,15 @@ pub fn shared_font_db(font_dirs: &[PathBuf]) -> Arc<Database> {
 
 fn build_font_db(font_dirs: &[PathBuf]) -> Database {
     let mut db = Database::new();
+    if let Some(bundled) = crate::pdf_font_face::source() {
+        db.load_font_source(bundled);
+    }
     for dir in font_dirs {
         db.load_fonts_dir(dir);
     }
     db.load_system_fonts();
     set_generic_families(&mut db);
     with_mapped_faces(&db)
-}
-
-/// Whether the database holds a face loaded from one of `dirs` (the bundled font folder).
-pub fn has_face_from(db: &Database, dirs: &[PathBuf]) -> bool {
-    db.faces().any(|face| match &face.source {
-        Source::File(path) | Source::SharedFile(path, _) => {
-            dirs.iter().any(|dir| path.starts_with(dir))
-        }
-        Source::Binary(_) => false,
-    })
 }
 
 fn is_immutable_font_path(path: &Path) -> bool {
@@ -305,21 +299,6 @@ pub(crate) mod tests {
         assert_eq!(coverage.get(130), Some(false));
         assert_eq!(coverage.get(4), None, "a neighbour is not probed");
         assert_eq!(coverage.get(1_000_000), None, "beyond the words is unknown");
-    }
-
-    #[test]
-    fn a_face_from_the_bundled_folder_is_recognised_and_other_folders_are_not() {
-        let Some(dir) = bundled_font_dir() else {
-            return;
-        };
-        let Some(db) = bundled_only_db() else { return };
-        assert!(has_face_from(&db, &[dir]));
-        assert!(!has_face_from(&db, &[PathBuf::from("/nonexistent")]));
-        assert!(!has_face_from(&db, &[]));
-        assert!(!has_face_from(
-            &Database::new(),
-            &[bundled_font_dir().expect("dir")]
-        ));
     }
 
     #[test]

@@ -71,16 +71,15 @@ test("the desktop entry must carry the category, the file field code and every M
   assert.match(checkDesktopEntry("Name=EasyOffice\n").join("\n"), /\[Desktop Entry\]/);
 });
 
-test("the payload must hold the binary, a desktop file, the third-party notices and the PDF export font", () => {
+test("the payload must hold the binary, a desktop file, the third-party notices and the PDF export font's license", () => {
   const fonts = PDF_FONT_FILES.map((font) => `./usr/lib/EasyOffice/${font}`);
   const good = ["./usr/bin/EasyOffice", "./usr/lib/EasyOffice/THIRD_PARTY_NOTICES.md", "./usr/share/applications/EasyOffice.desktop", ...fonts];
   assert.deepEqual(checkPayload(good), []);
   const problems = checkPayload(["./usr/bin/EasyOffice"]).join("\n");
   assert.match(problems, /THIRD_PARTY_NOTICES\.md/);
   assert.match(problems, /\.desktop/);
-  assert.match(problems, /pdf-fonts\/NotoSansKR-Regular\.ttf/);
   assert.match(problems, /pdf-fonts\/NotoSansKR-OFL\.txt/);
-  assert.match(checkPayload(good.slice(0, 4)).join("\n"), /pdf-fonts\/NotoSansKR-OFL\.txt/);
+  assert.match(checkPayload(good.slice(0, 3)).join("\n"), /pdf-fonts\/NotoSansKR-OFL\.txt/);
 });
 
 test("an rpm must be built for the architecture and require the runtime libraries", () => {

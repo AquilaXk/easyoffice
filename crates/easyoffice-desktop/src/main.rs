@@ -59,6 +59,7 @@ mod pdf_edit_wire;
 mod pdf_edit_worker;
 mod pdf_export;
 mod pdf_first_page;
+mod pdf_font_face;
 mod pdf_font_fallbacks;
 mod pdf_font_select;
 mod pdf_fonts;
@@ -447,12 +448,29 @@ pub(crate) fn has_app_origin(url: &tauri::Url, windows: bool) -> bool {
     url.scheme() == scheme && url.host_str() == Some(host) && url.port().is_none()
 }
 
+/// Takes the editor's Noto Sans KR woff2 out of the assets embedded in the executable as the PDF
+/// export's bundled face (PD-397). A shell without it still exports (system fonts), and the smoke
+/// run fails on it (`smoke_steps::verify_pdf`).
+fn register_bundled_pdf_face(context: &tauri::Context<tauri::Wry>) {
+    let key = tauri::utils::assets::AssetKey::from(pdf_font_face::FACE_ASSET);
+    let registered = context
+        .assets()
+        .get(&key)
+        .ok_or_else(|| format!("{}이(가) 내장 자산에 없습니다.", pdf_font_face::FACE_ASSET))
+        .and_then(|woff2| pdf_font_face::register(&woff2));
+    if let Err(err) = registered {
+        eprintln!("PDF 번들 글꼴: {err}");
+    }
+}
+
 fn main() {
     // The PDF worker process (PD-170): the shell's own binary, started by the shell with its
     // standard input and output connected to it. It must not start anything of the shell.
     if std::env::args().nth(1).as_deref() == Some(pdf_edit_wire::WORKER_ARG) {
         std::process::exit(pdf_edit_worker::run());
     }
+    let context = tauri::generate_context!();
+    register_bundled_pdf_face(&context);
     if let Some(code) = page_screenshot::maybe_run_cli() {
         std::process::exit(code);
     }
@@ -550,7 +568,7 @@ fn main() {
             }
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("EasyOffice desktop shell failed to start");
     // The Dock's 종료, AppleScript `quit` and a shutdown go through the quit queue (PD-189). A failure
     // is loud: the app still runs, but a terminate would skip the save prompts.

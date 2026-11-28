@@ -281,12 +281,13 @@ jobs:
             exit 1
           fi
 
-      - name: Verify the third-party notices and the PDF export font are inside the app
+      - name: Verify the third-party notices and the PDF export font's license are inside the app
         run: |
           RES="target/$TARGET/release/bundle/macos/EasyOffice.app/Contents/Resources"
           test -f "$RES/THIRD_PARTY_NOTICES.md"
-          test -f "$RES/pdf-fonts/NotoSansKR-Regular.ttf"
           test -f "$RES/pdf-fonts/NotoSansKR-OFL.txt"
+          # The face is the editor's woff2 inside the executable (PD-397): no second font file ships.
+          test ! -e "$RES/pdf-fonts/NotoSansKR-Regular.ttf"
 
       - name: Stage the macOS .dmg and the signed updater archive under their fixed names
         run: node scripts/release-assets.mjs stage "$PLATFORM" dist
@@ -349,13 +350,15 @@ jobs:
           }
 
       # 7-Zip lists the files inside an NSIS installer without running it.
-      - name: Verify the third-party notices and the PDF export font are inside the installer
+      - name: Verify the third-party notices and the PDF export font's license are inside the installer
         shell: bash
         run: |
           LISTING="$(7z l target/release/bundle/nsis/EasyOffice_*_x64-setup.exe)"
-          for file in THIRD_PARTY_NOTICES.md NotoSansKR-Regular.ttf NotoSansKR-OFL.txt; do
+          for file in THIRD_PARTY_NOTICES.md NotoSansKR-OFL.txt; do
             grep -qF "$file" <<<"$LISTING" || { echo "$file is missing from the NSIS installer"; exit 1; }
           done
+          # The face is the editor's woff2 inside the executable (PD-397): no second font file ships.
+          ! grep -qF "NotoSansKR-Regular.ttf" <<<"$LISTING" || { echo "NotoSansKR-Regular.ttf must not ship (PD-397)"; exit 1; }
 
       - name: Stage the Windows installer and its signature under their fixed names
         shell: bash

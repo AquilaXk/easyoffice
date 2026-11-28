@@ -9796,6 +9796,10 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
+## Desktop shell woff2 decoder (PD-397)
+
+The desktop shell (`crates/easyoffice-desktop`, not the engine crates) depends on `wuff` 0.2.10 (`MIT`, Copyright (c) Nico Burns, <https://github.com/nicoburns/wuff>), a pure Rust WOFF and WOFF2 decoder, used unmodified from crates.io with its `brotli` feature only. It decodes the Noto Sans KR woff2 of the editor bundle into the face the PDF export falls back to (`crates/easyoffice-desktop/src/pdf_font_face.rs`), so the installer no longer carries a second copy of that font as a TTF. `wuff` is a port of the woff2 reference decoder of Google (`MIT`, Copyright 2013-2015 Google Inc.), whose notice stays in the source files of the crate. Its two dependencies, `brotli-decompressor` (`BSD-3-Clause/MIT`, already in the closure through `hayro`) and `bytes` (`MIT`, already in the closure through `tauri`), are used at the versions the lock file already held. No code of `wuff` was copied into this repository; the license text travels in its source package.
+
 ## Reference app (code adapted)
 
 The reference app (MIT, reference commit `80888af`, v0.4.5) is the model for the EasyOffice window UI (PD-098) and for the build and verification patterns of the `apps/hwp-studio` overlay (pinned upstream checkout, Vite alias overlay with an override manifest, vendored WebAssembly with provenance, font policy). Where the reference app code is ported, the TypeScript is rewritten as plain JavaScript or the CSS is copied with its tokens renamed, each ported file starts with a header naming its reference app source, and the file is listed here first:

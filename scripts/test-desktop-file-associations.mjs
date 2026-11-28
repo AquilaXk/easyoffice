@@ -123,14 +123,19 @@ test("a missing MIME type on a file association is reported", () => {
   assert.match(problems, /'\.pdf' must declare mimeType application\/pdf/);
 });
 
-test("the PDF export font and its license must be shipped as bundle resources", () => {
+test("the PDF export font's license must be shipped as a bundle resource, and no second copy of the font", () => {
   const conf = load();
   for (const installed of PDF_FONT_FILES) {
     assert.ok(Object.values(conf.bundle.resources).includes(installed), installed);
   }
-  const key = Object.keys(conf.bundle.resources).find((source) => source.endsWith("NotoSansKR-Regular.ttf"));
+  assert.deepEqual(
+    Object.values(conf.bundle.resources).filter((installed) => /\.(ttf|otf|woff2?)$/i.test(installed)),
+    [],
+    "the face comes from the editor's woff2 (PD-397)",
+  );
+  const key = Object.keys(conf.bundle.resources).find((source) => source.endsWith("NotoSansKR-OFL.txt"));
   delete conf.bundle.resources[key];
-  assert.match(checkDesktopBundleConfig(conf).join("\n"), /bundle\.resources must ship 'pdf-fonts\/NotoSansKR-Regular\.ttf'/);
+  assert.match(checkDesktopBundleConfig(conf).join("\n"), /bundle\.resources must ship 'pdf-fonts\/NotoSansKR-OFL\.txt'/);
 });
 
 test("the third-party notice file must be shipped as a bundle resource", () => {

@@ -85,11 +85,12 @@ export const NOTICES_FILE = "THIRD_PARTY_NOTICES.md";
 const NOTICES_SOURCE = `../../${NOTICES_FILE}`;
 
 /**
- * The PDF export fonts every package must carry (PD-114): the bundled Korean face and its license, as
- * installed paths under the resource folder and where the config reads them from (the rhwp checkout).
+ * The PDF export font files every package must carry: the license of the bundled Korean face, as an installed path
+ * under the resource folder and where the config reads it from. The face itself is the editor's woff2, decoded from
+ * the executable's own assets (PD-397), so no font file is shipped beside the license (it was a TTF, PD-114).
  */
-export const PDF_FONT_FILES = ["pdf-fonts/NotoSansKR-Regular.ttf", "pdf-fonts/NotoSansKR-OFL.txt"];
-const PDF_FONT_SOURCE_DIR = "../../third_party/rhwp/ttfs/opensource/";
+export const PDF_FONT_FILES = ["pdf-fonts/NotoSansKR-OFL.txt"];
+const PDF_FONT_SOURCE_DIR = "../../assets/fonts/licenses/";
 
 /** The XDG menu category the `.desktop` file must carry (Tauri maps `bundle.category` Productivity to it). */
 export const LINUX_DESKTOP_CATEGORY = "Office";
