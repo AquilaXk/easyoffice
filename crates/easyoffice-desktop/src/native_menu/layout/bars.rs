@@ -2,15 +2,16 @@
 
 #[cfg(test)]
 use super::{
-    cf_submenu, ALIGN_LINES, BORDER_LINES, CALC_OPTIONS_LINES, CF_LINES, EXPORT_BASE_LINES,
-    EXPORT_BOARD_LINES, EXPORT_DOC_LINES, EXPORT_PDF_LINES, EXPORT_SHEET_LINES, EXPORT_SLIDE_LINES,
-    NEW_DOC_IDS, NUMFMT_LINES, QUIT_ID, SEPARATOR, SLIDE_ALIGN_LINES, THEME_IDS,
-    USE_IN_FORMULA_LINES,
+    cf_submenu, sheet_submenu, ALIGN_LINES, BORDER_LINES, CALC_OPTIONS_LINES, CF_LINES,
+    EXPORT_BASE_LINES, EXPORT_BOARD_LINES, EXPORT_DOC_LINES, EXPORT_PDF_LINES, EXPORT_SHEET_LINES,
+    EXPORT_SLIDE_LINES, NEW_DOC_IDS, NUMFMT_LINES, QUIT_ID, SEPARATOR, SLIDE_ALIGN_LINES,
+    THEME_IDS, USE_IN_FORMULA_LINES,
 };
 use super::{
     menu, MenuKind, MenuSpec, ALIGN, APP, BORDER, CALC_OPTIONS, CF, EXPORT_BASE, EXPORT_BOARD,
     EXPORT_DOC, EXPORT_PDF, EXPORT_SHEET, EXPORT_SLIDE, HELP, NEW_DOCS, NUMFMT, PASTE, S,
-    SELECT_ALL, SLIDE_ALIGN, THEME, USE_IN_FORMULA, WINDOW,
+    SELECT_ALL, SHEET_COL, SHEET_FREEZE, SHEET_ROW, SHEET_TAB, SLIDE_ALIGN, THEME, USE_IN_FORMULA,
+    WINDOW,
 };
 
 const FILE_HWP: MenuSpec = menu(
@@ -312,6 +313,28 @@ const VIEW_PLAIN: MenuSpec = menu(
         "view:toolbar-labels",
     ],
 );
+/// The spreadsheet's 보기 menu: the plain view menu with 틀 고정 after the zoom group.
+const VIEW_SHEET: MenuSpec = menu(
+    "보기",
+    &[
+        "view:zoom-in",
+        "view:zoom-out",
+        "view:zoom-100",
+        S,
+        "view:zoom-fit-page",
+        "view:zoom-fit-width",
+        S,
+        SHEET_FREEZE,
+        S,
+        "view:split",
+        "view:outline",
+        S,
+        THEME,
+        "view:theme-toggle",
+        S,
+        "view:toolbar-labels",
+    ],
+);
 const VIEW_WORKSPACE: MenuSpec = menu(
     "보기",
     &[
@@ -377,6 +400,10 @@ const INSERT_PAGES: MenuSpec = menu(
 const INSERT_SHEET: MenuSpec = menu(
     "삽입",
     &[
+        "sheet:row-insert-above",
+        "sheet:col-insert-left",
+        "sheet:tab-insert",
+        S,
         "table:insert",
         "sheet:insert-picture",
         "insert:shape",
@@ -497,13 +524,14 @@ const FORMAT_SHEET: MenuSpec = menu(
         NUMFMT,
         ALIGN,
         "format:wrap",
+        "sheet:merge",
+        "sheet:unmerge",
         BORDER,
         CF,
         S,
-        "format:row-height",
-        "format:row-autofit",
-        "format:col-width",
-        "format:col-autofit",
+        SHEET_ROW,
+        SHEET_COL,
+        SHEET_TAB,
         S,
         "format:cell-format",
     ],
@@ -536,35 +564,6 @@ const PAGE_DOC: MenuSpec = menu(
     ],
 );
 const PAGE_PDF: MenuSpec = menu("쪽", &["tool:pdf-rotate", "tool:pdf-splitmerge"]);
-const SHEET_SHEET: MenuSpec = menu(
-    "시트",
-    &[
-        "sheet:freeze-first-row",
-        "sheet:freeze-first-col",
-        "table:sheet-freeze",
-        "sheet:freeze-clear",
-        S,
-        "sheet:row-insert-above",
-        "sheet:row-insert-below",
-        "sheet:col-insert-left",
-        "sheet:col-insert-right",
-        "sheet:row-delete",
-        "sheet:col-delete",
-        S,
-        "sheet:hide",
-        "sheet:unhide",
-        S,
-        "sheet:merge",
-        "sheet:unmerge",
-        S,
-        "sheet:tab-insert",
-        "sheet:tab-delete",
-        "sheet:tab-rename",
-        "sheet:tab-move-copy",
-        "sheet:tab-hide",
-        "sheet:tab-unhide",
-    ],
-);
 const SLIDE_SLIDE: MenuSpec = menu(
     "슬라이드",
     &[
@@ -817,14 +816,13 @@ const HWP: [&MenuSpec; 11] = [
     &WINDOW,
     &HELP,
 ];
-const SHEET: [&MenuSpec; 12] = [
+const SHEET: [&MenuSpec; 11] = [
     &APP,
     &FILE_SHEET,
     &EDIT_SHEET,
-    &VIEW_PLAIN,
+    &VIEW_SHEET,
     &INSERT_SHEET,
     &FORMAT_SHEET,
-    &SHEET_SHEET,
     &FORMULA_SHEET,
     &DATA_SHEET,
     &TOOL_SHEET,
@@ -957,6 +955,10 @@ pub fn table_ids(kind: MenuKind) -> Vec<&'static str> {
                 }
                 BORDER => ids.extend(BORDER_LINES.iter().filter(|line| **line != SEPARATOR)),
                 CF => ids.extend(cf_ids()),
+                SHEET_ROW | SHEET_COL | SHEET_TAB | SHEET_FREEZE => {
+                    let sub = sheet_submenu(line).expect("a sheet submenu token");
+                    ids.extend(sub.lines.iter().filter(|id| **id != SEPARATOR));
+                }
                 USE_IN_FORMULA => ids.extend(USE_IN_FORMULA_LINES),
                 CALC_OPTIONS => ids.extend(CALC_OPTIONS_LINES),
                 QUIT_ID => {}

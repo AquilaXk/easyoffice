@@ -15,13 +15,14 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
             layout::NUMFMT,
             layout::ALIGN,
             "format:wrap",
+            "sheet:merge",
+            "sheet:unmerge",
             layout::BORDER,
             layout::CF,
             s,
-            "format:row-height",
-            "format:row-autofit",
-            "format:col-width",
-            "format:col-autofit",
+            layout::SHEET_ROW,
+            layout::SHEET_COL,
+            layout::SHEET_TAB,
             s,
             "format:cell-format",
         ]
@@ -87,39 +88,66 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
             "테두리 색…",
         ]
     );
-    let sheet: Vec<&str> = lines_of(MenuKind::Sheet, "시트")
-        .iter()
-        .map(|id| if *id == s { s } else { spec(id).label })
-        .collect();
+    // The row, column and sheet commands sit in the 서식 submenus, the inserts in 삽입 and the freeze items in 보기.
+    let labels_of = |token: &str| -> Vec<&str> {
+        layout::sheet_submenu(token)
+            .unwrap()
+            .lines
+            .iter()
+            .map(|id| if *id == s { s } else { spec(id).label })
+            .collect()
+    };
     assert_eq!(
-        sheet,
+        labels_of(layout::SHEET_ROW),
         [
-            "첫 행 고정",
-            "첫 열 고정",
-            "틀 고정",
-            "틀 고정 취소",
+            "행 높이…",
+            "행 높이 자동 맞춤",
             s,
-            "행 위에 삽입",
-            "행 아래에 삽입",
-            "열 왼쪽에 삽입",
-            "열 오른쪽에 삽입",
-            "행 삭제",
-            "열 삭제",
+            "행 숨기기",
+            "행 숨기기 취소",
             s,
-            "숨기기",
-            "숨기기 취소",
-            s,
-            "셀 병합",
-            "병합 해제",
-            s,
-            "시트 삽입",
-            "시트 삭제",
-            "시트 이름 바꾸기",
-            "시트 이동/복사…",
-            "시트 숨기기",
-            "시트 숨기기 취소…",
+            "시트 행 삭제",
         ]
     );
+    assert_eq!(
+        labels_of(layout::SHEET_COL),
+        [
+            "열 너비…",
+            "열 너비 자동 맞춤",
+            s,
+            "열 숨기기",
+            "열 숨기기 취소",
+            s,
+            "시트 열 삭제",
+        ]
+    );
+    assert_eq!(
+        labels_of(layout::SHEET_TAB),
+        [
+            "시트 이름 바꾸기",
+            "시트 이동/복사…",
+            "탭 색…",
+            s,
+            "시트 숨기기",
+            "시트 숨기기 취소…",
+            s,
+            "시트 삭제",
+        ]
+    );
+    assert_eq!(
+        labels_of(layout::SHEET_FREEZE),
+        ["틀 고정", "첫 행 고정", "첫 열 고정", "틀 고정 취소"]
+    );
+    assert_eq!(
+        &lines_of(MenuKind::Sheet, "삽입")[..4],
+        [
+            "sheet:row-insert-above",
+            "sheet:col-insert-left",
+            "sheet:tab-insert",
+            s
+        ]
+    );
+    assert!(lines_of(MenuKind::Sheet, "보기").contains(&layout::SHEET_FREEZE));
     for kind in [
         MenuKind::Doc,
         MenuKind::Hwp,

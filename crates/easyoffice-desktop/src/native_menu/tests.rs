@@ -228,7 +228,6 @@ fn each_kind_has_the_menus_of_its_window_in_order() {
                 "보기",
                 "삽입",
                 "서식",
-                "시트",
                 "수식",
                 "데이터",
                 "도구"
@@ -613,7 +612,8 @@ fn the_spreadsheet_keeps_sort_filter_style_data_tools_in_data_and_the_frame_in_s
             assert!(!layout::table_ids(kind).contains(&id), "{kind:?} {id}");
         }
     }
-    assert!(lines_of(MenuKind::Sheet, "시트").contains(&"table:sheet-freeze"));
+    let freeze = layout::sheet_submenu(layout::SHEET_FREEZE).unwrap();
+    assert!(freeze.lines.contains(&"table:sheet-freeze"));
     let insert = lines_of(MenuKind::Sheet, "삽입");
     assert!(insert.contains(&"table:fn-browser") && insert.contains(&"table:autosum"));
     let pdf_annotations = lines_of(MenuKind::Pdf, "주석");

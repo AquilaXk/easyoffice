@@ -19,7 +19,7 @@ const TITLES = {
   DOC: ["파일", "편집", "보기", "삽입", "서식", "레이아웃", "표", "도구", "도움말"],
   PAGES: ["파일", "편집", "보기", "삽입", "포맷", "표", "도구", "도움말"],
   HWP: ["파일", "편집", "보기", "입력", "서식", "쪽", "표", "도구", "도움말"],
-  SHEET: ["파일", "편집", "보기", "삽입", "서식", "시트", "수식", "데이터", "도구", "도움말"],
+  SHEET: ["파일", "편집", "보기", "삽입", "서식", "수식", "데이터", "도구", "도움말"],
   SLIDE: ["파일", "편집", "보기", "삽입", "서식", "슬라이드", "슬라이드 쇼", "도구", "도움말"],
   PDF: ["파일", "편집", "보기", "주석", "쪽", "도구", "도움말"],
   BASE: ["파일", "편집", "보기", "도구", "도움말"],
@@ -89,11 +89,12 @@ test("a window shows only the items that mean something in it", async () => {
   }
 });
 
-test("the spreadsheet puts sorting, validation, pivot and conditional formats in 데이터 and the frame in 시트", async () => {
+test("the spreadsheet puts sorting, validation, pivot and conditional formats in 데이터 and the frozen panes in 보기", async () => {
   const { document } = await open("SHEET");
   await flushAsyncTurns(10);
   assert.deepEqual(commandsOf(document, "데이터"), ["data-sort", "data-validation", "sheet-mod-pivot", "sheet-mod-condfmt"]);
-  assert.deepEqual(commandsOf(document, "시트"), ["sheet-mod-freeze"]);
+  assert.ok(commandsOf(document, "보기").includes("sheet-mod-freeze"));
+  assert.equal(shownMenus(document).some((m) => m.querySelector(".menu-title").textContent === "시트"), false, "the spreadsheet has no 시트 menu of its own");
   assert.deepEqual(commandsOf(document, "삽입").slice(-2), ["data-fn-browser", "data-autosum"]);
 });
 
@@ -161,7 +162,7 @@ test("keyboard navigation between menus skips the menus of other kinds", async (
 
 // ---- the native bar has the same menus per kind ---------------------------------------------------
 
-const TOKENS = { S: "-", NEW_DOCS: "@new-docs", EXPORT_DOC: "@export-doc", EXPORT_HWP: "@export-hwp", EXPORT_SHEET: "@export-sheet", EXPORT_SLIDE: "@export-slide", EXPORT_BASE: "@export-base", EXPORT_BOARD: "@export-board", EXPORT_PDF: "@export-pdf", THEME: "@theme", NUMFMT: "@numfmt", ALIGN: "@align", SLIDE_ALIGN: "@slide-align", BORDER: "@border", CF: "@cf", USE_IN_FORMULA: "@name-use", CALC_OPTIONS: "@calc-options", PASTE: "@paste", SELECT_ALL: "@select-all", SERVICES: "@services", HIDE: "@hide", HIDE_OTHERS: "@hide-others", SHOW_ALL: "@show-all", MINIMIZE: "@minimize", CLOSE_WINDOW: "@close-window", QUIT_ID: "app:quit" };
+const TOKENS = { S: "-", NEW_DOCS: "@new-docs", EXPORT_DOC: "@export-doc", EXPORT_HWP: "@export-hwp", EXPORT_SHEET: "@export-sheet", EXPORT_SLIDE: "@export-slide", EXPORT_BASE: "@export-base", EXPORT_BOARD: "@export-board", EXPORT_PDF: "@export-pdf", THEME: "@theme", NUMFMT: "@numfmt", ALIGN: "@align", SLIDE_ALIGN: "@slide-align", BORDER: "@border", CF: "@cf", USE_IN_FORMULA: "@name-use", CALC_OPTIONS: "@calc-options", SHEET_ROW: "@sheet-row", SHEET_COL: "@sheet-col", SHEET_TAB: "@sheet-tab", SHEET_FREEZE: "@sheet-freeze", PASTE: "@paste", SELECT_ALL: "@select-all", SERVICES: "@services", HIDE: "@hide", HIDE_OTHERS: "@hide-others", SHOW_ALL: "@show-all", MINIMIZE: "@minimize", CLOSE_WINDOW: "@close-window", QUIT_ID: "app:quit" };
 
 function readRustLayoutSources() {
   let src = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
@@ -214,7 +215,7 @@ const EDIT_GROUP = new Set(["studio-cmd:studio-undo", "studio-cmd:studio-redo", 
 const PAGE_OWN = { "studio-save": "studio-save", "studio-save-as": "file-save-as", find: "find", replace: "replace", print: "print" };
 
 const nativeActions = (kind, items) =>
-  new Set(rustLayout()[kind].flatMap((menu) => menu.lines).map((id) => items.get(id)).filter((a) => a && (a.startsWith("studio-cmd:") || ["find", "replace", "print", "studio-save"].includes(a))).filter((a) => !EDIT_GROUP.has(a)));
+  new Set(rustLayout()[kind].flatMap((menu) => menu.lines).flatMap((id) => cfSubmenus().get(id)?.lines ?? [id]).map((id) => items.get(id)).filter((a) => a && (a.startsWith("studio-cmd:") || ["find", "replace", "print", "studio-save"].includes(a))).filter((a) => !EDIT_GROUP.has(a)));
 
 test("the native bars list the same menus as the page for every kind", () => {
   const layout = rustLayout();
@@ -276,11 +277,12 @@ const pageRows = (container) => {
     });
 };
 
-// The submenus of the 조건부 서식 menu (`CfSubmenu` of layout.rs) by the token the menu lists them with.
+// The submenus a menu names by a token (`TokenSubmenu` of layout.rs: the 조건부 서식 ones and the sheet 행, 열, 시트 and 틀 고정 ones) by that token.
 function cfSubmenus() {
   const src = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
   const lines = (text) => text.split(",").map((t) => t.trim()).filter(Boolean).map((t) => (t === "SEPARATOR" ? "-" : t.slice(1, -1)));
-  return new Map([...src.matchAll(/CfSubmenu \{\s*token: "([^"]+)",\s*title: "([^"]+)",\s*lines: &\[([\s\S]*?)\],\s*\}/g)].map((m) => [m[1], { title: m[2], lines: lines(m[3]) }]));
+  const tokenOf = (t) => (t.startsWith('"') ? t.slice(1, -1) : TOKENS[t] ?? assert.fail(`unknown token ${t}`));
+  return new Map([...src.matchAll(/TokenSubmenu \{\s*token: ("[^"]+"|\w+),\s*title: "([^"]+)",\s*lines: &\[([\s\S]*?)\],\s*\}/g)].map((m) => [tokenOf(m[1]), { title: m[2], lines: lines(m[3]) }]));
 }
 
 function nativeRows(menu) {
@@ -292,17 +294,19 @@ function nativeRows(menu) {
       return sub ? `${sub.title} > ${rowsOf(sub.lines).join(" | ")}` : labels.get(line) ?? line;
     });
   return menu.lines.map((line) => {
+    const named = cf.get(line);
+    if (named) return `${named.title} > ${rowsOf(named.lines).join(" | ")}`;
     const submenu = { "@numfmt": ["표시 형식", "NUMFMT"], "@align": ["맞춤", "ALIGN"], "@border": ["테두리", "BORDER"], "@cf": ["조건부 서식", "CF"], "@name-use": ["수식에서 사용", "USE_IN_FORMULA"], "@calc-options": ["계산 옵션", "CALC_OPTIONS"] }[line];
     if (submenu) return `${submenu[0]} > ${rowsOf(submenuLines(submenu[1])).join(" | ")}`;
     return labels.get(line) ?? line;
   });
 }
 
-test("the spreadsheet's native 서식, 시트 and 수식 menus list the page's items in the page's order with its separators", async () => {
+test("the spreadsheet's native 서식 and 수식 menus list the page's items in the page's order with its separators", async () => {
   const { document } = await open("SHEET");
   await flushAsyncTurns(10);
   const native = rustLayout().SHEET;
-  for (const title of ["서식", "시트", "수식"]) {
+  for (const title of ["서식", "수식"]) {
     const pageMenu = shownMenus(document).find((m) => m.querySelector(".menu-title").textContent === title);
     const rows = pageRows(pageMenu.querySelector(":scope > .menu-dropdown"));
     const expected = nativeRows(native.find((menu) => menu.title === title));

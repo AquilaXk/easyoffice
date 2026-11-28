@@ -10,8 +10,8 @@ use super::layout::{
     CALC_OPTIONS_LINES, CF, CF_LINES, CLOSE_WINDOW, EXPORT_BASE, EXPORT_BASE_LINES, EXPORT_BOARD,
     EXPORT_BOARD_LINES, EXPORT_DOC, EXPORT_DOC_LINES, EXPORT_PDF, EXPORT_PDF_LINES, EXPORT_SHEET,
     EXPORT_SHEET_LINES, EXPORT_SLIDE, EXPORT_SLIDE_LINES, HIDE, HIDE_OTHERS, MINIMIZE, NEW_DOCS,
-    NEW_DOC_IDS, NUMFMT, NUMFMT_LINES, PASTE, SELECT_ALL, SEPARATOR, SERVICES, SHOW_ALL,
-    SLIDE_ALIGN, SLIDE_ALIGN_LINES, THEME, THEME_IDS, USE_IN_FORMULA, USE_IN_FORMULA_LINES,
+    NEW_DOC_IDS, NUMFMT, NUMFMT_LINES, PASTE, SELECT_ALL, SEPARATOR, SERVICES, SHEET_COL,
+    SHEET_FREEZE, SHEET_ROW, SHEET_TAB, SHOW_ALL, SLIDE_ALIGN, SLIDE_ALIGN_LINES, THEME, THEME_IDS, USE_IN_FORMULA, USE_IN_FORMULA_LINES,
 };
 use super::{check, custom, is_check_item, label_for, quit_item, spec, QUIT_ID};
 
@@ -25,7 +25,7 @@ fn nested<R: Runtime>(
     for id in lines {
         builder = if *id == SEPARATOR {
             builder.separator()
-        } else if let Some(sub) = layout::cf_submenu(id) {
+        } else if let Some(sub) = layout::cf_submenu(id).or_else(|| layout::sheet_submenu(id)) {
             builder.item(&nested(app, kind, sub.title, sub.lines)?)
         } else if is_check_item(id) {
             builder.item(&check(app, kind, spec(id))?)
@@ -58,6 +58,10 @@ fn submenu<R: Runtime>(
             SLIDE_ALIGN => builder.item(&nested(app, kind, "맞춤", &SLIDE_ALIGN_LINES)?),
             BORDER => builder.item(&nested(app, kind, "테두리", &BORDER_LINES)?),
             CF => builder.item(&nested(app, kind, "조건부 서식", &CF_LINES)?),
+            SHEET_ROW | SHEET_COL | SHEET_TAB | SHEET_FREEZE => {
+                let sub = layout::sheet_submenu(line).expect("a sheet submenu token");
+                builder.item(&nested(app, kind, sub.title, sub.lines)?)
+            }
             USE_IN_FORMULA => {
                 builder.item(&nested(app, kind, "수식에서 사용", &USE_IN_FORMULA_LINES)?)
             }

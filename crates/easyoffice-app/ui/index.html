@@ -127,6 +127,16 @@
               <div class="md-item" data-kinds="PAGES HWP SHEET SLIDE PDF" data-studio-menu-cmd="zoom-fit-width" role="menuitem" tabindex="-1"><span class="md-label">폭 맞춤</span></div>
               <div class="md-item" data-kinds="DOC PAGES SHEET SLIDE PDF BASE BOARD START CONV" data-studio-menu-cmd="view-zoom" role="menuitem" tabindex="-1"><span class="md-label">100%</span><span class="md-shortcut">Ctrl+0</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="view-zoom" role="menuitem" tabindex="-1"><span class="md-label">실제 크기</span><span class="md-shortcut">Ctrl+0</span></div>
+              <div class="md-sep" data-kinds="SHEET"></div>
+              <div class="md-sub" data-kinds="SHEET" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">틀 고정</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="틀 고정">
+                  <div class="md-item" data-studio-menu-cmd="sheet-mod-freeze" role="menuitem" tabindex="-1"><span class="md-label">틀 고정</span></div>
+                  <div class="md-item" data-sheet-act="freeze-first-row" role="menuitem" tabindex="-1"><span class="md-label">첫 행 고정</span></div>
+                  <div class="md-item" data-sheet-act="freeze-first-col" role="menuitem" tabindex="-1"><span class="md-label">첫 열 고정</span></div>
+                  <div class="md-item" data-sheet-act="freeze-clear" role="menuitem" tabindex="-1"><span class="md-label">틀 고정 취소</span></div>
+                </div>
+              </div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="DOC PAGES SHEET SLIDE PDF" data-studio-menu-cmd="view-split" role="menuitem" tabindex="-1"><span class="md-label">창 나누기</span></div>
               <div class="md-item" data-kinds="DOC PAGES SHEET SLIDE PDF" data-studio-menu-cmd="view-outline" role="menuitem" tabindex="-1"><span class="md-label">문서 개요…</span></div>
@@ -180,6 +190,10 @@
           <div class="menu-item" data-menu="insert-object" data-kinds="SHEET SLIDE">
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="insert">삽입</button>
             <div class="menu-dropdown" role="menu">
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="row-insert-above" role="menuitem" tabindex="-1"><span class="md-label">시트 행 삽입</span></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="col-insert-left" role="menuitem" tabindex="-1"><span class="md-label">시트 열 삽입</span></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="tab-insert" role="menuitem" tabindex="-1"><span class="md-label">시트 삽입</span></div>
+              <div class="md-sep"></div>
               <div class="md-item" data-kinds="SLIDE" data-slide-act="insert-textbox" role="menuitem" tabindex="-1"><span class="md-label">텍스트 상자</span></div>
               <div class="md-item" data-studio-menu-cmd="insert-table" role="menuitem" tabindex="-1"><span class="md-label">표 삽입</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="insert-picture" role="menuitem" tabindex="-1"><span class="md-label">그림</span></div>
@@ -286,6 +300,8 @@
                 </div>
               </div>
               <div class="md-item" data-kinds="SHEET" data-sheet-look="wrap" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="md-label">텍스트 줄 바꿈</span></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="merge" role="menuitem" tabindex="-1"><span class="md-label">셀 병합</span></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="unmerge" role="menuitem" tabindex="-1"><span class="md-label">병합 해제</span></div>
               <div class="md-sub" data-kinds="SHEET" role="menuitem" aria-haspopup="menu" tabindex="-1">
                 <span class="md-label">테두리</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
                 <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="테두리">
@@ -373,10 +389,43 @@
                 </div>
               </div>
               <div class="md-sep" data-kinds="SHEET"></div>
-              <div class="md-item" data-kinds="SHEET" data-sheet-act="row-height" role="menuitem" tabindex="-1"><span class="md-label">행 높이…</span></div>
-              <div class="md-item" data-kinds="SHEET" data-sheet-act="row-autofit" role="menuitem" tabindex="-1"><span class="md-label">행 높이 자동 맞춤</span></div>
-              <div class="md-item" data-kinds="SHEET" data-sheet-act="col-width" role="menuitem" tabindex="-1"><span class="md-label">열 너비…</span></div>
-              <div class="md-item" data-kinds="SHEET" data-sheet-act="col-autofit" role="menuitem" tabindex="-1"><span class="md-label">열 너비 자동 맞춤</span></div>
+              <div class="md-sub" data-kinds="SHEET" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">행</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="행">
+                  <div class="md-item" data-sheet-act="row-height" role="menuitem" tabindex="-1"><span class="md-label">행 높이…</span></div>
+                  <div class="md-item" data-sheet-act="row-autofit" role="menuitem" tabindex="-1"><span class="md-label">행 높이 자동 맞춤</span></div>
+                  <div class="md-sep"></div>
+                  <div class="md-item" data-sheet-act="row-hide" role="menuitem" tabindex="-1"><span class="md-label">행 숨기기</span></div>
+                  <div class="md-item" data-sheet-act="row-unhide" role="menuitem" tabindex="-1"><span class="md-label">행 숨기기 취소</span></div>
+                  <div class="md-sep"></div>
+                  <div class="md-item" data-sheet-act="row-delete" role="menuitem" tabindex="-1"><span class="md-label">시트 행 삭제</span></div>
+                </div>
+              </div>
+              <div class="md-sub" data-kinds="SHEET" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">열</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="열">
+                  <div class="md-item" data-sheet-act="col-width" role="menuitem" tabindex="-1"><span class="md-label">열 너비…</span></div>
+                  <div class="md-item" data-sheet-act="col-autofit" role="menuitem" tabindex="-1"><span class="md-label">열 너비 자동 맞춤</span></div>
+                  <div class="md-sep"></div>
+                  <div class="md-item" data-sheet-act="col-hide" role="menuitem" tabindex="-1"><span class="md-label">열 숨기기</span></div>
+                  <div class="md-item" data-sheet-act="col-unhide" role="menuitem" tabindex="-1"><span class="md-label">열 숨기기 취소</span></div>
+                  <div class="md-sep"></div>
+                  <div class="md-item" data-sheet-act="col-delete" role="menuitem" tabindex="-1"><span class="md-label">시트 열 삭제</span></div>
+                </div>
+              </div>
+              <div class="md-sub" data-kinds="SHEET" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">시트</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="시트">
+                  <div class="md-item" data-sheet-act="tab-rename" role="menuitem" tabindex="-1"><span class="md-label">시트 이름 바꾸기</span></div>
+                  <div class="md-item" data-sheet-act="tab-move-copy" role="menuitem" tabindex="-1"><span class="md-label">시트 이동/복사…</span></div>
+                  <div class="md-item" data-sheet-act="tab-color" role="menuitem" tabindex="-1"><span class="md-label">탭 색…</span></div>
+                  <div class="md-sep"></div>
+                  <div class="md-item" data-sheet-act="tab-hide" role="menuitem" tabindex="-1"><span class="md-label">시트 숨기기</span></div>
+                  <div class="md-item" data-sheet-act="tab-unhide" role="menuitem" tabindex="-1"><span class="md-label">시트 숨기기 취소…</span></div>
+                  <div class="md-sep"></div>
+                  <div class="md-item" data-sheet-act="tab-delete" role="menuitem" tabindex="-1"><span class="md-label">시트 삭제</span></div>
+                </div>
+              </div>
               <div class="md-sep" data-kinds="SHEET"></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-numfmt="dialog" role="menuitem" tabindex="-1"><span class="md-label">셀 서식…</span><span class="md-shortcut">Ctrl+1</span></div>
             </div>
@@ -401,35 +450,6 @@
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="hwp-mod-manuscript" role="menuitem" tabindex="-1"><span class="md-label">200자 원고지 매수 검산</span></div>
               <div class="md-item" data-kinds="PDF" data-studio-menu-cmd="pdf-mod-rotate" role="menuitem" tabindex="-1"><span class="md-label">페이지 90° 회전</span></div>
               <div class="md-item" data-kinds="PDF" data-studio-menu-cmd="pdf-mod-splitmerge" role="menuitem" tabindex="-1"><span class="md-label">페이지 분할·병합</span></div>
-            </div>
-          </div>
-          <div class="menu-item" data-menu="sheet" data-kinds="SHEET">
-            <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="layout">시트</button>
-            <div class="menu-dropdown" role="menu">
-              <div class="md-item" data-sheet-act="freeze-first-row" role="menuitem" tabindex="-1"><span class="md-label">첫 행 고정</span></div>
-              <div class="md-item" data-sheet-act="freeze-first-col" role="menuitem" tabindex="-1"><span class="md-label">첫 열 고정</span></div>
-              <div class="md-item" data-studio-menu-cmd="sheet-mod-freeze" role="menuitem" tabindex="-1"><span class="md-label">틀 고정</span></div>
-              <div class="md-item" data-sheet-act="freeze-clear" role="menuitem" tabindex="-1"><span class="md-label">틀 고정 취소</span></div>
-              <div class="md-sep"></div>
-              <div class="md-item" data-sheet-act="row-insert-above" role="menuitem" tabindex="-1"><span class="md-label">행 위에 삽입</span></div>
-              <div class="md-item" data-sheet-act="row-insert-below" role="menuitem" tabindex="-1"><span class="md-label">행 아래에 삽입</span></div>
-              <div class="md-item" data-sheet-act="col-insert-left" role="menuitem" tabindex="-1"><span class="md-label">열 왼쪽에 삽입</span></div>
-              <div class="md-item" data-sheet-act="col-insert-right" role="menuitem" tabindex="-1"><span class="md-label">열 오른쪽에 삽입</span></div>
-              <div class="md-item" data-sheet-act="row-delete" role="menuitem" tabindex="-1"><span class="md-label">행 삭제</span></div>
-              <div class="md-item" data-sheet-act="col-delete" role="menuitem" tabindex="-1"><span class="md-label">열 삭제</span></div>
-              <div class="md-sep"></div>
-              <div class="md-item" data-sheet-act="hide" role="menuitem" tabindex="-1"><span class="md-label">숨기기</span></div>
-              <div class="md-item" data-sheet-act="unhide" role="menuitem" tabindex="-1"><span class="md-label">숨기기 취소</span></div>
-              <div class="md-sep"></div>
-              <div class="md-item" data-sheet-act="merge" role="menuitem" tabindex="-1"><span class="md-label">셀 병합</span></div>
-              <div class="md-item" data-sheet-act="unmerge" role="menuitem" tabindex="-1"><span class="md-label">병합 해제</span></div>
-              <div class="md-sep"></div>
-              <div class="md-item" data-sheet-act="tab-insert" role="menuitem" tabindex="-1"><span class="md-label">시트 삽입</span></div>
-              <div class="md-item" data-sheet-act="tab-delete" role="menuitem" tabindex="-1"><span class="md-label">시트 삭제</span></div>
-              <div class="md-item" data-sheet-act="tab-rename" role="menuitem" tabindex="-1"><span class="md-label">시트 이름 바꾸기</span></div>
-              <div class="md-item" data-sheet-act="tab-move-copy" role="menuitem" tabindex="-1"><span class="md-label">시트 이동/복사…</span></div>
-              <div class="md-item" data-sheet-act="tab-hide" role="menuitem" tabindex="-1"><span class="md-label">시트 숨기기</span></div>
-              <div class="md-item" data-sheet-act="tab-unhide" role="menuitem" tabindex="-1"><span class="md-label">시트 숨기기 취소…</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="slide" data-kinds="SLIDE">

@@ -183,7 +183,18 @@
       host.addEventListener?.("blur", closeMenu);
     }
 
-    return { bind, closeMenu };
+    // 서식 > 시트 > 탭 색: the palette of the tab menu, opened at the tab of `sheet`.
+    function openColor(sheet) {
+      const tab = tabOf(sheet);
+      if (!tab || !getTabs().can(sheet).tabColor) return false;
+      const box = tab.getBoundingClientRect();
+      openMenu(tab, box.left, box.top);
+      openSub();
+      subItems()[0]?.focus();
+      return true;
+    }
+
+    return { bind, closeMenu, openColor };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_TAB_MENU__ = createSheetTabMenu;

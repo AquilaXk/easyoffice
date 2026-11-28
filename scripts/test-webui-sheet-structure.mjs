@@ -208,6 +208,39 @@ test("the formula bar, name box and aggregate follow the selected cell after str
   assert.doesNotMatch(agg(), /1,200/);
 });
 
+test("the 서식 menu's 행 and 열 submenus hide and unhide the axis they name, whatever the selection", async () => {
+  const { document, host, userClick } = await openWithEngine();
+  const act = async (name) => {
+    userClick(document.querySelector(`.md-item[data-sheet-act="${name}"]`));
+    await flushAsyncTurns(20);
+  };
+  const layout = host.__EASYOFFICE_SHEET_LAYOUT__;
+  const only = () => Object.values(layout.getAll())[0] || {};
+  const menu = (title) => [...document.querySelectorAll('.menu-item[data-menu="format"] > .menu-dropdown > .md-sub')].find((el) => el.querySelector(":scope > .md-label").textContent === title).querySelector(":scope > .md-sub-panel");
+  assert.deepEqual(
+    [...menu("행").querySelectorAll(".md-label")].map((el) => el.textContent),
+    ["행 높이…", "행 높이 자동 맞춤", "행 숨기기", "행 숨기기 취소", "시트 행 삭제"]
+  );
+  assert.deepEqual(
+    [...menu("열").querySelectorAll(".md-label")].map((el) => el.textContent),
+    ["열 너비…", "열 너비 자동 맞춤", "열 숨기기", "열 숨기기 취소", "시트 열 삭제"]
+  );
+  assert.deepEqual(
+    [...menu("시트").querySelectorAll(".md-label")].map((el) => el.textContent),
+    ["시트 이름 바꾸기", "시트 이동/복사…", "탭 색…", "시트 숨기기", "시트 숨기기 취소…", "시트 삭제"]
+  );
+  document.querySelector('#pane-sheet td[data-cell="B3"]').focus();
+  await act("col-hide");
+  assert.deepEqual(only().hiddenCols, [[2, 2]], "열 숨기기 hides the column of the cell, not its row");
+  assert.equal((only().hiddenRows || []).length, 0);
+  await act("col-unhide");
+  assert.equal((only().hiddenCols || []).length, 0);
+  await act("row-hide");
+  assert.deepEqual(only().hiddenRows, [[3, 3]], "행 숨기기 hides the row of the cell");
+  await act("row-unhide");
+  assert.equal((only().hiddenRows || []).length, 0);
+});
+
 test("a row edit sends the tables of the sheet, takes the engine's moved ones, and undo gives the old ones back (PD-224)", async () => {
   const calls = [];
   const table = (range) => ({ name: "T", range, header: true, totals: false, columns: ["a", "b"], rowStripes: true, columnStripes: false, firstColumn: false, lastColumn: false });

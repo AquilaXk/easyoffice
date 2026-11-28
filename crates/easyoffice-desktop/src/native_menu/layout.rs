@@ -97,6 +97,12 @@ pub const CF: &str = "@cf";
 pub const USE_IN_FORMULA: &str = "@name-use";
 /// The 계산 옵션 submenu of the spreadsheet's 수식 menu ([`CALC_OPTIONS_LINES`]).
 pub const CALC_OPTIONS: &str = "@calc-options";
+/// The 행, 열 and 시트 submenus of the spreadsheet's 서식 menu and the 틀 고정 submenu of its 보기 menu
+/// ([`SHEET_SUBMENUS`]).
+pub const SHEET_ROW: &str = "@sheet-row";
+pub const SHEET_COL: &str = "@sheet-col";
+pub const SHEET_TAB: &str = "@sheet-tab";
+pub const SHEET_FREEZE: &str = "@sheet-freeze";
 pub const PASTE: &str = "@paste";
 pub const SELECT_ALL: &str = "@select-all";
 pub const SERVICES: &str = "@services";
@@ -238,15 +244,15 @@ pub const CF_LINES: [&str; 9] = [
     "format:cf-manage",
 ];
 
-/// A submenu of the 조건부 서식 menu: the token its parent lists, its title and its lines.
-pub struct CfSubmenu {
+/// A submenu a menu names by a token: the token, its title and its lines.
+pub struct TokenSubmenu {
     pub token: &'static str,
     pub title: &'static str,
     pub lines: &'static [&'static str],
 }
 
-pub const CF_SUBMENUS: [CfSubmenu; 6] = [
-    CfSubmenu {
+pub const CF_SUBMENUS: [TokenSubmenu; 6] = [
+    TokenSubmenu {
         token: "@cf-highlight",
         title: "셀 강조 규칙",
         lines: &[
@@ -261,7 +267,7 @@ pub const CF_SUBMENUS: [CfSubmenu; 6] = [
             "format:cf-more-highlight",
         ],
     },
-    CfSubmenu {
+    TokenSubmenu {
         token: "@cf-top",
         title: "상위/하위 규칙",
         lines: &[
@@ -275,7 +281,7 @@ pub const CF_SUBMENUS: [CfSubmenu; 6] = [
             "format:cf-more-top",
         ],
     },
-    CfSubmenu {
+    TokenSubmenu {
         token: "@cf-bars",
         title: "데이터 막대",
         lines: &[
@@ -296,7 +302,7 @@ pub const CF_SUBMENUS: [CfSubmenu; 6] = [
             "format:cf-more-bar",
         ],
     },
-    CfSubmenu {
+    TokenSubmenu {
         token: "@cf-scales",
         title: "색조",
         lines: &[
@@ -316,7 +322,7 @@ pub const CF_SUBMENUS: [CfSubmenu; 6] = [
             "format:cf-more-scale",
         ],
     },
-    CfSubmenu {
+    TokenSubmenu {
         token: "@cf-icons",
         title: "아이콘 집합",
         lines: &[
@@ -347,7 +353,7 @@ pub const CF_SUBMENUS: [CfSubmenu; 6] = [
             "format:cf-more-icons",
         ],
     },
-    CfSubmenu {
+    TokenSubmenu {
         token: "@cf-clear",
         title: "규칙 지우기",
         lines: &[
@@ -360,8 +366,68 @@ pub const CF_SUBMENUS: [CfSubmenu; 6] = [
 ];
 
 /// The submenu a token of [`CF_LINES`] stands for.
-pub fn cf_submenu(token: &str) -> Option<&'static CfSubmenu> {
+pub fn cf_submenu(token: &str) -> Option<&'static TokenSubmenu> {
     CF_SUBMENUS.iter().find(|sub| sub.token == token)
+}
+
+/// The submenus of the spreadsheet's 서식 menu (행, 열, 시트) and 보기 menu (틀 고정), as in the spreadsheet
+/// program's menu bar: the row, column and sheet commands that the page's old 시트 menu held.
+pub const SHEET_SUBMENUS: [TokenSubmenu; 4] = [
+    TokenSubmenu {
+        token: SHEET_ROW,
+        title: "행",
+        lines: &[
+            "format:row-height",
+            "format:row-autofit",
+            SEPARATOR,
+            "sheet:row-hide",
+            "sheet:row-unhide",
+            SEPARATOR,
+            "sheet:row-delete",
+        ],
+    },
+    TokenSubmenu {
+        token: SHEET_COL,
+        title: "열",
+        lines: &[
+            "format:col-width",
+            "format:col-autofit",
+            SEPARATOR,
+            "sheet:col-hide",
+            "sheet:col-unhide",
+            SEPARATOR,
+            "sheet:col-delete",
+        ],
+    },
+    TokenSubmenu {
+        token: SHEET_TAB,
+        title: "시트",
+        lines: &[
+            "sheet:tab-rename",
+            "sheet:tab-move-copy",
+            "sheet:tab-color",
+            SEPARATOR,
+            "sheet:tab-hide",
+            "sheet:tab-unhide",
+            SEPARATOR,
+            "sheet:tab-delete",
+        ],
+    },
+    TokenSubmenu {
+        token: SHEET_FREEZE,
+        title: "틀 고정",
+        lines: &[
+            "table:sheet-freeze",
+            "sheet:freeze-first-row",
+            "sheet:freeze-first-col",
+            "sheet:freeze-clear",
+        ],
+    },
+];
+
+/// The submenu a token of [`SHEET_SUBMENUS`] stands for.
+pub fn sheet_submenu(token: &str) -> Option<&'static TokenSubmenu> {
+    SHEET_SUBMENUS.iter().find(|sub| sub.token == token)
 }
 
 /// The items of the 테마 submenu.

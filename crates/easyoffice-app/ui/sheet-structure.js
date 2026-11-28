@@ -505,6 +505,19 @@
       });
     }
 
+    const selectedAxis = () => (getSelection().axis === "col" ? "col" : "row");
+
+    function hideSelection(axis, hidden) {
+      const [first, last] = span(axis);
+      if (hidden) return setHidden(axis, first, last, true);
+      // A hidden run right before or after the selection is part of it.
+      const layout = layoutApi.get(getActiveSheetName());
+      const runs = (axis === "row" ? layout?.hiddenRows : layout?.hiddenCols) || [];
+      const before = layoutApi.runAt(runs, first - 1);
+      const after = layoutApi.runAt(runs, last + 1);
+      return setHidden(axis, before ? before[0] : first, after ? after[1] : last, false);
+    }
+
     const ACTIONS = {
       "row-insert-above": () => {
         const [first, last] = span("row");
@@ -532,21 +545,13 @@
       },
       "link-edit": () => Promise.resolve(linkUi.open()),
       "link-clear": linkUi.remove,
-      hide: () => {
-        const axis = getSelection().axis === "col" ? "col" : "row";
-        const [first, last] = span(axis);
-        return setHidden(axis, first, last, true);
-      },
-      unhide: () => {
-        const axis = getSelection().axis === "col" ? "col" : "row";
-        const [first, last] = span(axis);
-        // A hidden run right before or after the selection is part of it.
-        const layout = layoutApi.get(getActiveSheetName());
-        const runs = (axis === "row" ? layout?.hiddenRows : layout?.hiddenCols) || [];
-        const before = layoutApi.runAt(runs, first - 1);
-        const after = layoutApi.runAt(runs, last + 1);
-        return setHidden(axis, before ? before[0] : first, after ? after[1] : last, false);
-      },
+      // The header menu hides what the selected header names; the 서식 menu names the axis (행 숨기기, 열 숨기기).
+      hide: () => hideSelection(selectedAxis(), true),
+      unhide: () => hideSelection(selectedAxis(), false),
+      "row-hide": () => hideSelection("row", true),
+      "row-unhide": () => hideSelection("row", false),
+      "col-hide": () => hideSelection("col", true),
+      "col-unhide": () => hideSelection("col", false),
       merge,
       unmerge,
       ...view.actions,
@@ -559,6 +564,7 @@
       ...(mediaUi?.actions || {}),
       ...(noteUi?.actions || {}),
       "tab-add": () => tabs.insert(null),
+      "tab-color": () => Promise.resolve(tabMenu.openColor(getActiveSheetName())),
       ...tabs.actions,
       "sort-dialog": () => Promise.resolve(sortUi.open()),
       "filter-toggle": () => filter.run("filter-toggle"),
