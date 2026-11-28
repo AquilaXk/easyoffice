@@ -557,6 +557,60 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## PptxGenJS (MIT)
+
+Source: https://github.com/gitbrent/PptxGenJS (`src/gen-xml.ts`, `src/gen-objects.ts`; Copyright (c) 2015-present Brent Ely). Nothing is vendored or linked. `crates/easyoffice-formats/src/pptx_ext_write.rs` and `crates/easyoffice-app/ui/slide-fx.js` follow its unit conventions and element shapes for slide extensions: rotation and angles in 60000ths of a degree, shadow blur and distance in EMU, shadow opacity in 1000ths of a percent, `spcPct` line spacing, `p:bg`, `a:outerShdw`, `a:buChar` and `a:buAutoNum`. It has no animation writer, so the `p:timing` skeleton is written to ECMA-376 19.5 instead.
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2015-present Brent Ely
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## reveal.js (MIT)
+
+Source: https://github.com/hakimel/reveal.js (`js/controllers/fragments.js`; Copyright (c) 2011-2024 Hakim El Hattab, http://hakim.se). Nothing is vendored or linked. `crates/easyoffice-app/ui/slide-show-anim.js` follows its stepping model for animations in the slide show: one step per "next", one step taken back per "previous", an element hidden until its step. The effects are Web Animations, and the steps follow the start modes of the file formats.
+
+```
+Copyright (C) 2011-2024 Hakim El Hattab, http://hakim.se, and reveal.js contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## y-prosemirror (MIT)
 
 Source: https://github.com/yjs/y-prosemirror (commit `47a7385201bcefb55fcd5f1c8df23f48f46fa223`, Copyright (c) 2019 Kevin Jahns). Nothing is vendored or linked at runtime. The remote cursor of `src/cursor-plugin.js:25-62` (`defaultCursorBuilder`: the caret bar with a name label, `defaultSelectionBuilder`: a selection coloured with the user colour, the `maxsize` clamp of positions) and the demo styles `demo/prosemirror.html:36-68` (a caret with a 1px line on each side, the selection at 0.3 opacity) were re-expressed in `crates/easyoffice-app/ui/copilot-cursor.js` (`setSelection`, `setCaret`, `setIdle`) and `copilot.css` as overlay boxes drawn over the editor instead of decorations inside it (`PD-268`).
