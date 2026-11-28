@@ -381,6 +381,7 @@ pub(crate) fn parse_slide_deck(
         orientation,
         slides,
         elements_rejected: 0,
+        settings: crate::slide_ext_json::parse_deck_settings(entries)?,
     };
     deck.validate()?;
     Ok(deck)
@@ -604,10 +605,12 @@ pub(crate) fn write_slide_deck_decode_fields(
     table.write(out);
     let _ = write!(
         out,
-        "\"aspect\":\"{}\",\"orientation\":\"{}\",\"slides\":[",
+        "\"aspect\":\"{}\",\"orientation\":\"{}\"",
         deck.aspect.as_str(),
         deck.orientation.as_str()
     );
+    crate::slide_ext_json::write_deck_settings(out, &deck.settings, push_str);
+    out.push_str(",\"slides\":[");
     for (idx, s) in deck.slides.iter().enumerate() {
         if idx > 0 {
             out.push(',');

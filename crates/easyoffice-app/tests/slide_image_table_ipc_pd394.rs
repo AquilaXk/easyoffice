@@ -72,6 +72,7 @@ fn shared_picture_deck(img: &RichImage, logo: &RichImage) -> RichSlideDeck {
         orientation: SlideOrientation::Landscape,
         slides,
         elements_rejected: 0,
+        settings: Default::default(),
     }
 }
 

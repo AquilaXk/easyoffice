@@ -44,7 +44,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     "security-audit": [...RIBBON_MODULES, "CONV"], "bench-run": [...RIBBON_MODULES, "CONV"],
     "view-outline": [...RIBBON_MODULES, "CONV"],
     "copilot-toggle": ["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"],
-    find: ["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"], replace: ["DOC", "HWP", "SHEET", "BASE"], print: ["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"],
+    find: ["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"], replace: ["DOC", "HWP", "SHEET", "SLIDE", "BASE"], print: ["DOC", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"],
     "clip-copy": [...EDIT_MODULES, "BASE", "BOARD"], "clip-cut": [...DOC_SHEET_MODULES, "SLIDE", "BASE", "BOARD"], "clip-paste": [...DOC_SHEET_MODULES, "SLIDE", "BASE", "BOARD"],
     "mod-symbol": EDIT_MODULES,
     "home-strike": DOC_MODULES, "home-superscript": DOC_MODULES, "home-subscript": DOC_MODULES, "font-dialog": ["DOC"],

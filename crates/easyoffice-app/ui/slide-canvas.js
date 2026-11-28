@@ -23,7 +23,11 @@
   const CHART_LABELS = Object.freeze({
     column: "묶은 세로 막대형", bar: "묶은 가로 막대형", line: "꺾은선형", pie: "원형", scatter: "분산형",
   });
-  const TRANSITIONS = new Set(["none", "fade", "push", "zoom"]);
+  // The slide transitions by their file name, with the names of the Korean presentation program's 화면 전환 list.
+  const TRANSITION_LABELS = Object.freeze({
+    none: "없음", fade: "페이드", push: "밀어내기", wipe: "지우기", split: "나누기", cover: "덮기", pull: "벗기기", zoom: "확대/축소", randomBar: "무작위 선",
+  });
+  const TRANSITIONS = new Set(Object.keys(TRANSITION_LABELS));
   const ELEMENT_KINDS = new Set(["textbox", "shape", "image", "table", "chart"]);
   const ALIGNMENTS = new Set(["left", "center", "right", "justify"]);
   const CHART_LEGENDS = new Set(["right", "bottom", "top", "left", "none"]);
@@ -294,7 +298,7 @@
         ...slideExt.wire(s, elements, pictures.ref),
       };
     });
-    return { aspect, orientation, images: pictures.list(), slides };
+    return { aspect, orientation, ...slideExt.deckWire(slideDeckState[0]), images: pictures.list(), slides };
   }
 
 
@@ -318,7 +322,7 @@
         title: String(s?.title || ""), lower: Array.isArray(s?.bullets) ? s.bullets.join("\n") : String(s?.lower || ""),
         notes: String(s?.notes || ""), transition: normalizeTransition(s?.transition),
         ...createEmptySlideStyleFields(), aspect, orientation, layout: normalizeLayout(s?.layout), elements,
-        ...slideExt.hydrate(s, elements),
+        ...slideExt.hydrate(s, elements), ...slideExt.deckFields(res),
       };
     });
   }
@@ -971,7 +975,7 @@
   }
 
   host.__EASYOFFICE_SLIDE_CANVAS_CODEC__ = {
-    STAGE_SIZES, LAYOUT_LABELS, SHAPE_LABELS, CHART_LABELS,
+    STAGE_SIZES, LAYOUT_LABELS, SHAPE_LABELS, CHART_LABELS, TRANSITION_LABELS,
     stageSizeOf, normalizeLayout, normalizeTransition, normalizeHex6,
     normalizeSlideElement, serializeDeckPayload, hydrateDecodedDeck, renderStaticElementsLayer,
     buildElementDom, positionElementDom, parseImageHeader: parseImageHeaderFallback,

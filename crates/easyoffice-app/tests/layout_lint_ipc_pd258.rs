@@ -241,6 +241,7 @@ fn cli_inspect_reports_layout_lint_for_docx_and_pptx_and_enforces_cap() {
             ],
         }],
         elements_rejected: 0,
+        settings: Default::default(),
     };
     let pptx = UniversalFormatConverter::encode_rich_slides(&deck, DocumentFormat::Pptx).unwrap();
     let pptx_path = dir.join("lint-check.pptx");

@@ -10,12 +10,13 @@ use crate::odp_ext_read::{
     apply_footer_frame, parse_timeline, parse_transform, place_from_transform, scan_para,
     OdpExtStyles,
 };
+use crate::odp_transition::OdpTransition;
 use crate::pptx_ext_read::{finish_ext, ExtAccum, Member, PendingGroup};
 use crate::rich_document::normalize_hex_color;
 use crate::rich_image::safe_package_path;
 use crate::rich_slide::{
     normalize_table_rows, parse_length_pt, push_checked_slide_element, RichSlide, RichSlideDeck,
-    SlideBox, SlideElement, SlidePlaceholderRole, SlideShapeType, SlideTextAlign, SlideTransition,
+    SlideBox, SlideElement, SlidePlaceholderRole, SlideShapeType, SlideTextAlign,
     DEFAULT_SLIDE_FONT_PT, DEFAULT_SLIDE_STROKE_PT, MAX_SLIDES_PER_DECK, MAX_SLIDE_FONT_PT,
     MAX_SLIDE_STROKE_PT, MAX_SLIDE_TABLE_COLS, MAX_SLIDE_TABLE_ROWS, MIN_SLIDE_FONT_PT,
 };
@@ -88,7 +89,7 @@ fn parse_odp_rect(
 
 #[derive(Default)]
 struct OdpStyleMaps {
-    transitions: HashMap<String, SlideTransition>,
+    transitions: HashMap<String, OdpTransition>,
     graphics: HashMap<String, OdfGraphicStyle>,
     paras: HashMap<String, SlideTextAlign>,
     texts: HashMap<String, OdfTextStyle>,
@@ -98,7 +99,7 @@ struct OdpStyleMaps {
 fn collect_odp_styles(sub: &[XmlEvent<'_>], maps: &mut OdpStyleMaps) {
     let (mut cur_name, mut family) = (String::new(), String::new());
     let (mut tr, mut gs, mut al, mut ts) = (
-        SlideTransition::None,
+        OdpTransition::default(),
         OdfGraphicStyle::default(),
         SlideTextAlign::Left,
         OdfTextStyle::default(),
@@ -115,22 +116,13 @@ fn collect_odp_styles(sub: &[XmlEvent<'_>], maps: &mut OdpStyleMaps) {
                         .or_else(|| attr(attrs, "family"))
                         .map(|s| s.into_owned())
                         .unwrap_or_default();
-                    tr = SlideTransition::None;
+                    tr = OdpTransition::default();
                     gs = OdfGraphicStyle::default();
                     al = SlideTextAlign::Left;
                     ts = OdfTextStyle::default();
                 }
                 "drawing-page-properties" if family == "drawing-page" => {
-                    let t = attr(attrs, "presentation:transition-type")
-                        .or_else(|| attr(attrs, "smil:type"))
-                        .map(|v| v.to_ascii_lowercase())
-                        .unwrap_or_default();
-                    tr = match t.as_str() {
-                        "fade" => SlideTransition::Fade,
-                        "slidewipe" | "push" => SlideTransition::Push,
-                        "zoom" => SlideTransition::Zoom,
-                        _ => SlideTransition::None,
-                    };
+                    tr = OdpTransition::read(attrs);
                 }
                 "graphic-properties" if family == "graphic" => {
                     let fill_mode = attr(attrs, "draw:fill").unwrap_or_default();
@@ -789,7 +781,7 @@ pub fn unpack_odp_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> {
                         .transitions
                         .get(&page_style)
                         .copied()
-                        .unwrap_or(SlideTransition::None);
+                        .unwrap_or_default();
                     let notes = attr(&attrs_copy, "notes")
                         .map(|s| XmlSanitizer::unescape(&s))
                         .unwrap_or_default();
@@ -845,14 +837,16 @@ pub fn unpack_odp_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> {
                         String::new()
                     };
                     acc.bullets.extend(acc.loose);
-                    let ext = finish_ext(acc.x, &mut acc.els, page.hidden)?;
+                    let mut ext = finish_ext(acc.x, &mut acc.els, page.hidden)?;
+                    ext.transition_dir = transition.dir;
+                    ext.advance_after_ms = transition.advance_after_ms;
                     charge_background(&ext, &mut seen_bg, &mut total_img_b)?;
                     slides.push(RichSlide {
                         title: s_title,
                         bullets: acc.bullets,
                         notes: acc.notes,
                         layout,
-                        transition,
+                        transition: transition.kind,
                         elements: acc.els,
                         ext,
                     });
@@ -868,6 +862,7 @@ pub fn unpack_odp_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> {
         orientation,
         slides,
         elements_rejected: 0,
+        settings: Default::default(),
     };
     deck.validate()?;
     Ok(deck)

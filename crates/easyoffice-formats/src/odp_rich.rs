@@ -9,11 +9,10 @@ use crate::odp_ext_write::{
     shadow_attrs, OdpFills, FOOTER_TEXT, LOEXT_NS,
 };
 pub use crate::odp_rich_read::unpack_odp_rich;
+use crate::odp_transition::transition_attrs;
 use crate::pptx_master::{odp_layout_boxes_pt, slide_placeholder_visibility};
 use crate::rich_image_writers::MediaParts;
-use crate::rich_slide::{
-    RichSlideDeck, SlideBox, SlideElement, SlideMasterLayout, SlideTextAlign, SlideTransition,
-};
+use crate::rich_slide::{RichSlideDeck, SlideBox, SlideElement, SlideMasterLayout, SlideTextAlign};
 use crate::rich_slide_ext::{hex6, ElementFx, SlideBullet, SlideExt, SlideNode, SlideParaFmt};
 use crate::{EasyOfficeError, XmlSanitizer};
 
@@ -420,12 +419,11 @@ pub fn pack_odp_rich(deck: &RichSlideDeck) -> Result<Vec<u8>, EasyOfficeError> {
 
     for (idx, slide) in deck.slides.iter().enumerate() {
         let dp = format!("dp{}", idx + 1);
-        let tr_attrs = match slide.transition {
-            SlideTransition::None => "presentation:transition-type=\"none\"",
-            SlideTransition::Fade => "presentation:transition-type=\"fade\" smil:type=\"fade\"",
-            SlideTransition::Push => "presentation:transition-type=\"slideWipe\" smil:type=\"slideWipe\" smil:direction=\"fromLeft\"",
-            SlideTransition::Zoom => "presentation:transition-type=\"zoom\" smil:type=\"zoom\"",
-        };
+        let tr_attrs = transition_attrs(
+            slide.transition,
+            slide.ext.transition_dir,
+            slide.ext.advance_after_ms,
+        );
         let page_attrs = crate::odp_ext_write::page_attrs(&slide.ext, &mut fills, &mut media);
         let _ = write!(sg.auto_xml, "<style:style style:name=\"{dp}\" style:family=\"drawing-page\"><style:drawing-page-properties {tr_attrs}{page_attrs}/></style:style>");
         let _ = write!(

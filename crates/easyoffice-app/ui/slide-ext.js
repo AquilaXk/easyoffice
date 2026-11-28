@@ -14,6 +14,7 @@
   const STARTS = new Set(["onClick", "withPrevious", "afterPrevious"]);
   const DIRECTIONS = new Set(["left", "right", "top", "bottom"]);
   const MAX_ANIM_MS = 60000;
+  const MAX_ADVANCE_MS = 86400000; // the file engine's limit: one day
   const DEFAULT_ANIM_MS = 500;
   const MAX_FOOTER_BYTES = 1024; // the file engine's limit, counted in UTF-8 bytes
   const MAX_GROUPS = 64;
@@ -150,6 +151,12 @@
     if (footer) out.footer = footer;
     if (groups.length > 0) out.groups = groups;
     if (anims.length > 0) out.anims = anims;
+    // Transition side and show timing (PD-398): the side the effect moves toward, the wait before the show moves on by itself,
+    // and a click that does not move it on.
+    if (DIRECTIONS.has(raw?.transitionDir)) out.transitionDir = raw.transitionDir;
+    const wait = raw?.advanceAfterMs === null || raw?.advanceAfterMs === undefined || raw.advanceAfterMs === "" ? NaN : Number(raw.advanceAfterMs);
+    if (Number.isFinite(wait) && wait >= 0) out.advanceAfterMs = Math.min(MAX_ADVANCE_MS, Math.round(wait));
+    if (raw?.noClickAdvance === true) out.noClickAdvance = true;
     return out;
   }
 
@@ -284,7 +291,30 @@
     if (slide?.footer) node.appendChild(footerLayer(document, slide, index, stage));
   }
 
+  // Deck-wide settings (PD-398): the show's repeat flag, manual advance and the theme color scheme. The deck has no object of its
+  // own, so every slide carries them (as it does the aspect ratio) and the first slide's are the deck's.
+  const SCHEME_SLOTS = 12;
+  function normalizeScheme(raw) {
+    const colors = Array.isArray(raw?.colors) ? raw.colors.map((c) => hex6(c, "")) : [];
+    if (colors.length !== SCHEME_SLOTS || colors.includes("")) return null;
+    return { name: String(raw.name ?? "").replace(/[\u0000-\u001f]/g, "").slice(0, 64), colors };
+  }
+
+  // The deck fields of a slide read from a file (`res` is the whole open result).
+  function deckFields(res) {
+    const out = {};
+    if (res?.showLoop === true) out.showLoop = true;
+    if (res?.manualAdvance === true) out.manualAdvance = true;
+    const scheme = normalizeScheme(res?.colorScheme);
+    if (scheme) out.colorScheme = scheme;
+    return out;
+  }
+
+  // The deck fields of the save payload, taken from the first slide.
+  const deckWire = (first) => deckFields(first);
+
   host.__EASYOFFICE_SLIDE_EXT__ = {
+    deckFields, deckWire, normalizeScheme,
     CLASS_EFFECTS, clipBytes, normalize, hydrate, wire, pictureTable, registerPictures, resolvePictureRef, resolveBackgroundRef, prune, pruneRefs, paintStage, footerParts, backgroundCss, todayText,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

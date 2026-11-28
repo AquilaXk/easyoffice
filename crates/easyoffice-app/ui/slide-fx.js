@@ -18,6 +18,7 @@
   const MAX_LINE_PCT = 500;
   const MAX_SPACE_PT = 200;
   const MAX_SHADOW_PT = 100;
+  const MAX_FACE_CHARS = 64;
   const FX_KINDS = new Set(["textbox", "shape", "image"]);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const round2 = (v) => Math.round(v * 100) / 100;
@@ -84,11 +85,22 @@
     if (kind !== "image") {
       const para = normalizePara(raw.para);
       if (para) out.para = para;
+      // Typefaces of the text (PD-398): the Latin face and the East Asian one, as `a:latin` and `a:ea`.
+      for (const key of ["font", "eastFont"]) {
+        const face = normalizeFace(raw[key]);
+        if (face) out[key] = face;
+      }
     }
     return out;
   }
 
-  const FX_KEYS = ["rot", "flipH", "flipV", "dash", "outline", "shadow", "para"];
+  // A typeface name: one line of at most 64 characters, no markup characters.
+  function normalizeFace(raw) {
+    const face = String(raw ?? "").replace(/[\u0000-\u001f<>"&]/g, "").trim();
+    return [...face].length > 0 ? [...face].slice(0, MAX_FACE_CHARS).join("") : "";
+  }
+
+  const FX_KEYS = ["rot", "flipH", "flipV", "dash", "outline", "shadow", "para", "font", "eastFont"];
 
   // Removes the effect properties of an element, so a merge can bring back only the ones it still has.
   function clear(el) {
@@ -178,6 +190,7 @@
   // the rotation handle.
   function applyDom(document, card, el, stage, interactive) {
     card.style.transform = el.rot ? `rotate(${el.rot}deg)` : "";
+    card.style.fontFamily = [el.font, el.eastFont].filter(Boolean).map((f) => `"${f}"`).join(", ");
     card.style.filter = el.shadow ? dropShadow(el.shadow, stage) : "";
     const mirror = [el.flipH ? "scaleX(-1)" : "", el.flipV ? "scaleY(-1)" : ""].filter(Boolean).join(" ");
     const body = card.querySelector(".slide-el-shape-svg, .slide-el-image");

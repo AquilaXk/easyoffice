@@ -76,7 +76,7 @@ test("assigning select.value in code refreshes the visible label", async () => {
   const { document } = await openSlide();
   const transition = document.getElementById("slide-transition-select");
   transition.value = "zoom";
-  assert.equal(transition.parentElement.querySelector(".custom-select-value").textContent, "확대");
+  assert.equal(transition.parentElement.querySelector(".custom-select-value").textContent, "확대/축소");
 });
 
 test("the laser pointer button reports its state through aria-pressed and its title", async () => {

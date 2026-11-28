@@ -335,9 +335,11 @@ fn slice5_native_menu_parity_covers_doc_slide_base_and_cross_module_find() {
     for kind in [MenuKind::Slide, MenuKind::Pdf, MenuKind::Board] {
         let edit = lines_of(kind, "편집");
         assert!(edit.contains(&"edit:find"), "{kind:?} missing edit:find");
-        assert!(
-            !edit.contains(&"edit:replace"),
-            "{kind:?} must omit edit:replace"
+        // The slide window replaces text (PD-398); a PDF and a board only find.
+        assert_eq!(
+            edit.contains(&"edit:replace"),
+            kind == MenuKind::Slide,
+            "{kind:?} edit:replace"
         );
     }
 }

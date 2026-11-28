@@ -239,6 +239,7 @@ fn build_test_pptx() -> Vec<u8> {
             },
         ],
         elements_rejected: 0,
+        settings: Default::default(),
     };
     UniversalFormatConverter::encode_rich_slides(&deck, DocumentFormat::Pptx).unwrap()
 }

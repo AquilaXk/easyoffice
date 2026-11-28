@@ -8,6 +8,7 @@ use crate::ooxml_presentation::{
     extract_notes_xml_text, parse_slide_chart_xml, parse_slide_size_aspect, read_ppt_rels,
     resolve_ppt, utf8_entry, SLIDESHOW_MAIN_CT,
 };
+use crate::pptx_deck_settings::read_deck_settings;
 use crate::pptx_ext_read::{
     apply_footer_ph, finish_ext, parse_bg, parse_timing, scan_fx, transform_group, ExtAccum,
     Member, PendingGroup,
@@ -15,9 +16,10 @@ use crate::pptx_ext_read::{
 use crate::pptx_shape_read::{parse_cxn_sp, parse_sp, ParsedSp};
 use crate::pptx_theme_cache::PptxThemeCache;
 use crate::pptx_theme_color::{ColorSpecBuilder, PptxClrMap, PptxThemePalette};
+use crate::pptx_transition::TransitionRead;
 use crate::rich_slide::{
     emu_to_pt, normalize_table_rows, push_checked_slide_element, RichSlide, RichSlideDeck,
-    SlideBox, SlideElement, SlideTransition,
+    SlideBox, SlideElement,
 };
 use crate::rich_slide_ext::{charge_background, ElementFx};
 use crate::rtf_xml_helpers::{extract_attr, extract_attr_from_fragment, extract_balanced_elements};
@@ -680,8 +682,8 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
             theme_cache.resolve_for_slide(layout_path.as_deref(), s_xml, &mut budget)?;
 
         let mut reader = XmlReader::with_budget(s_xml, MAX_SLIDE_XML_EVENTS);
-        let (mut transition, mut in_tr, mut sp_d, mut d) =
-            (SlideTransition::None, false, None::<usize>, 0usize);
+        let (mut tr, mut in_tr, mut sp_d, mut d) =
+            (TransitionRead::default(), false, None::<usize>, 0usize);
         let (mut in_bare_t, mut bare_t) = (false, String::new());
         let mut acc = SlideAccum {
             total_el,
@@ -702,20 +704,16 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
 
         while let Some(ev) = reader.next_event()? {
             match &ev {
-                XmlEvent::Start { name, .. } => {
+                XmlEvent::Start { name, attrs } => {
                     d += 1;
                     let ln = loc(name);
                     if ln == "transition" {
                         in_tr = true;
+                        tr.on_start(attrs);
                         continue;
                     }
                     if in_tr {
-                        match ln {
-                            "fade" => transition = SlideTransition::Fade,
-                            "push" => transition = SlideTransition::Push,
-                            "zoom" => transition = SlideTransition::Zoom,
-                            _ => {}
-                        }
+                        tr.on_child(ln, attrs);
                         continue;
                     }
                     if ln == "spTree" && sp_d.is_none() {
@@ -782,18 +780,30 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
         }
         acc.bullets.extend(acc.loose);
         let hidden = matches!(extract_attr(s_xml, "<p:sld", "show"), Some("0" | "false"));
-        let ext = finish_ext(std::mem::take(&mut acc.x), &mut acc.els, hidden)?;
+        let mut ext = finish_ext(std::mem::take(&mut acc.x), &mut acc.els, hidden)?;
+        ext.transition_dir = tr.dir;
+        ext.advance_after_ms = tr.advance_after_ms;
+        ext.no_click_advance = tr.no_click_advance;
         charge_background(&ext, &mut seen_bg, &mut total_img_b)?;
         slides.push(RichSlide {
             title: s_title,
             bullets: acc.bullets,
             notes,
             layout,
-            transition,
+            transition: tr.transition,
             elements: acc.els,
             ext,
         });
     }
+    let text_of = |path: &str| {
+        entry_map
+            .get(path)
+            .and_then(|e| std::str::from_utf8(&e.data).ok())
+    };
+    let settings = read_deck_settings(
+        text_of("ppt/presProps.xml"),
+        text_of("ppt/theme/theme1.xml"),
+    )?;
     let deck = RichSlideDeck {
         title,
         is_slideshow,
@@ -801,6 +811,7 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
         orientation,
         slides,
         elements_rejected: 0,
+        settings,
     };
     deck.validate()?;
     Ok(deck)

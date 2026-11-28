@@ -209,6 +209,7 @@ mod tests {
             orientation: SlideOrientation::Landscape,
             slides: (0..SLIDES).map(slide).collect(),
             elements_rejected: 0,
+            settings: Default::default(),
         }
     }
 

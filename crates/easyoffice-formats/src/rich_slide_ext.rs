@@ -186,6 +186,23 @@ pub struct ElementFx {
     pub outline: Option<SlideOutline>,
     pub shadow: Option<SlideShadow>,
     pub para: Option<SlideParaFmt>,
+    /// Latin typeface of the text (`a:latin`), PD-398.
+    pub font: Option<String>,
+    /// East Asian typeface of the text (`a:ea`), PD-398.
+    pub east_font: Option<String>,
+}
+
+/// Longest typeface name a slide keeps (in characters).
+pub const MAX_FACE_CHARS: usize = 64;
+
+/// A typeface name a file can carry: one line, no markup characters, within [`MAX_FACE_CHARS`].
+pub fn clean_face(raw: &str) -> Option<String> {
+    let face: String = raw
+        .chars()
+        .filter(|c| !c.is_control() && !matches!(c, '<' | '>' | '"' | '&'))
+        .collect();
+    let face = face.trim();
+    (!face.is_empty()).then(|| face.chars().take(MAX_FACE_CHARS).collect())
 }
 
 impl ElementFx {
@@ -205,9 +222,18 @@ impl ElementFx {
             && self.outline.is_none()
             && self.shadow.is_none()
             && self.para.is_none_or(|p| p.is_default())
+            && self.font.is_none()
+            && self.east_font.is_none()
     }
 
     fn validate(&self) -> Result<(), EasyOfficeError> {
+        for face in [&self.font, &self.east_font].into_iter().flatten() {
+            if clean_face(face).as_deref() != Some(face.as_str()) {
+                return Err(EasyOfficeError::InvalidArgument(
+                    "슬라이드 글꼴 이름이 올바르지 않습니다.".to_string(),
+                ));
+            }
+        }
         if !self.rotation_deg.is_finite() || !(0.0..360.0).contains(&self.rotation_deg) {
             return Err(EasyOfficeError::InvalidArgument(
                 "슬라이드 개체 회전각은 0 이상 360 미만이어야 합니다.".to_string(),
@@ -298,7 +324,116 @@ pub struct SlideExt {
     pub fx: Vec<ElementFx>,
     pub groups: Vec<SlideGroup>,
     pub anims: Vec<SlideAnim>,
+    /// Direction the transition moves in (`dir` of `p:push`, `p:wipe`, `p:cover`, `p:pull`; the split and the bars take its
+    /// axis). `None` is the file's own default: left.
+    pub transition_dir: Option<AnimDir>,
+    /// Milliseconds the show waits before it moves on by itself (`advTm` of `p:transition`), PD-398.
+    pub advance_after_ms: Option<u32>,
+    /// True when a click does not move the show on (`advClick="0"`).
+    pub no_click_advance: bool,
 }
+
+/// Slide transition effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SlideTransition {
+    #[default]
+    None,
+    Fade,
+    Push,
+    Zoom,
+    Wipe,
+    Split,
+    Cover,
+    Pull,
+    RandomBar,
+}
+
+impl SlideTransition {
+    /// Every transition the editor offers, in the order of its list.
+    pub const ALL: [Self; 9] = [
+        Self::None,
+        Self::Fade,
+        Self::Push,
+        Self::Wipe,
+        Self::Split,
+        Self::Cover,
+        Self::Pull,
+        Self::Zoom,
+        Self::RandomBar,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Fade => "fade",
+            Self::Push => "push",
+            Self::Zoom => "zoom",
+            Self::Wipe => "wipe",
+            Self::Split => "split",
+            Self::Cover => "cover",
+            Self::Pull => "pull",
+            Self::RandomBar => "randomBar",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        let t = s.trim();
+        Self::ALL
+            .into_iter()
+            .find(|v| v.as_str().eq_ignore_ascii_case(t))
+    }
+
+    /// True when the effect has a side it comes from (`p:push`, `p:wipe`, `p:cover`, `p:pull` carry `dir`).
+    pub const fn has_side(self) -> bool {
+        matches!(self, Self::Push | Self::Wipe | Self::Cover | Self::Pull)
+    }
+}
+
+/// Deck-wide settings that sit outside any one slide: the slide show's repeat flag (`p:showPr loop`), its manual advance
+/// (`useTimings="0"`) and the color scheme (`a:clrScheme` of the theme), PD-398.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DeckSettings {
+    /// The show starts again after the last slide (`loop="1"`).
+    pub show_loop: bool,
+    /// The show moves on by hand only and ignores the slides' advance times (`useTimings="0"`).
+    pub manual_advance: bool,
+    /// The theme's color scheme when it is not the default one.
+    pub color_scheme: Option<ColorScheme>,
+}
+
+/// Number of colors in a DrawingML color scheme: dk1, lt1, dk2, lt2, accent1 to accent6, hlink, folHlink.
+pub const COLOR_SCHEME_SLOTS: usize = 12;
+/// Longest color scheme name (in characters).
+pub const MAX_SCHEME_NAME_CHARS: usize = 64;
+
+/// A DrawingML color scheme: a name and twelve `RRGGBB` colors in the order of [`COLOR_SCHEME_SLOTS`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColorScheme {
+    pub name: String,
+    pub colors: [String; COLOR_SCHEME_SLOTS],
+}
+
+impl ColorScheme {
+    /// The scheme with every color normalized to `RRGGBB`; `None` when a color is not one or there are not twelve.
+    pub fn checked(name: &str, colors: &[String]) -> Option<Self> {
+        let colors: Vec<String> = colors
+            .iter()
+            .map(|c| normalize_hex_color(c))
+            .collect::<Option<_>>()?;
+        Some(Self {
+            name: name
+                .trim()
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(MAX_SCHEME_NAME_CHARS)
+                .collect(),
+            colors: colors.try_into().ok()?,
+        })
+    }
+}
+
+/// Longest wait before an automatic advance (one day in milliseconds).
+pub const MAX_ADVANCE_MS: u32 = 86_400_000;
 
 impl SlideExt {
     pub fn fx_of(&self, id: &str) -> Option<&ElementFx> {
@@ -441,6 +576,11 @@ impl SlideExt {
     }
 
     fn validate_look(&self) -> Result<(), EasyOfficeError> {
+        if self.advance_after_ms.is_some_and(|ms| ms > MAX_ADVANCE_MS) {
+            return Err(EasyOfficeError::InvalidArgument(
+                "슬라이드 자동 넘김 시간이 상한(24시간)을 초과했습니다.".to_string(),
+            ));
+        }
         match &self.background {
             Some(SlideBackground::Solid(c)) => check_hex(c, "background")?,
             Some(SlideBackground::Gradient {

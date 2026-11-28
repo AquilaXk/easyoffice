@@ -122,6 +122,7 @@ fn pptx_legacy_and_rich_emit_16_9_malgun_gothic_theme_master_and_layouts() {
         aspect: SlideAspect::Widescreen16x9,
         orientation: SlideOrientation::Landscape,
         elements_rejected: 0,
+        settings: Default::default(),
         slides: vec![
             RichSlide {
                 title: "대제목".into(),
@@ -210,6 +211,7 @@ fn odp_writes_malgun_gothic_default_styles_standard_xlink_and_layout_frames() {
         aspect: SlideAspect::Widescreen16x9,
         orientation: SlideOrientation::Landscape,
         elements_rejected: 0,
+        settings: Default::default(),
         slides: vec![
             RichSlide {
                 title: "첫 화면".into(),

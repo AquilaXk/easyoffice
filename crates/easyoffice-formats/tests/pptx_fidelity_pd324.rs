@@ -536,6 +536,7 @@ fn excludes_non_body_placeholders_roundtrips_two_column_and_ignores_end_para_rpr
         aspect: SlideAspect::Widescreen16x9,
         orientation: SlideOrientation::Landscape,
         elements_rejected: 0,
+        settings: Default::default(),
         slides: vec![
             RichSlide {
                 title: "비교".into(),

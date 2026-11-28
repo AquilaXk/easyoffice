@@ -9,9 +9,9 @@ use crate::pptx_theme_color::{ColorSpecBuilder, PptxClrMap, PptxThemePalette};
 use crate::rich_image::RichImage;
 use crate::rich_slide::{emu_to_pt, SlideElement, MAX_SLIDE_STROKE_PT};
 use crate::rich_slide_ext::{
-    AnimClass, AnimDir, AnimEffect, AnimStart, ElementFx, SlideAnim, SlideBackground, SlideBullet,
-    SlideDash, SlideDate, SlideExt, SlideFooter, SlideGroup, SlideNumberStyle, SlideOutline,
-    SlideParaFmt, SlideShadow, DEFAULT_ANIM_MS, MAX_ANIM_MS, MAX_GROUP_NESTING,
+    clean_face, AnimClass, AnimDir, AnimEffect, AnimStart, ElementFx, SlideAnim, SlideBackground,
+    SlideBullet, SlideDash, SlideDate, SlideExt, SlideFooter, SlideGroup, SlideNumberStyle,
+    SlideOutline, SlideParaFmt, SlideShadow, DEFAULT_ANIM_MS, MAX_ANIM_MS, MAX_GROUP_NESTING,
     MAX_LINE_SPACING_PCT, MAX_PARA_SPACE_PT, MAX_SHADOW_PT, MAX_SLIDE_ANIMS, MAX_SLIDE_GROUPS,
     MIN_LINE_SPACING_PCT,
 };
@@ -146,6 +146,11 @@ fn bullet_of(name: &str, attrs: &crate::xml_stream::Attrs<'_>) -> Option<SlideBu
     }
 }
 
+/// The typeface a run names itself: not a theme token (`+mn-lt`) and a valid name.
+fn own_face(raw: &str) -> Option<String> {
+    (!raw.starts_with('+')).then(|| clean_face(raw)).flatten()
+}
+
 /// Reads rotation, flips, outline, shadow and the first paragraph's format from one shape subtree.
 pub(crate) fn scan_fx(
     events: &[XmlEvent<'_>],
@@ -236,6 +241,13 @@ pub(crate) fn scan_fx(
                         } else {
                             para.space_after_pt = pts;
                         }
+                    }
+                    // The typefaces of the first run; a theme reference (`+mn-lt`, `+mj-ea`) is no face of its own.
+                    ("latin", "rPr") if out.fx.font.is_none() => {
+                        out.fx.font = attr(attrs, "typeface").and_then(|v| own_face(&v));
+                    }
+                    ("ea", "rPr") if out.fx.east_font.is_none() => {
+                        out.fx.east_font = attr(attrs, "typeface").and_then(|v| own_face(&v));
                     }
                     (b, "pPr") if ppr_seen && para.bullet == SlideBullet::None => {
                         if let Some(bu) = bullet_of(b, attrs) {

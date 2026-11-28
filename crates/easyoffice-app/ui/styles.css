@@ -148,6 +148,15 @@ select:focus-visible,
 }
 #slide-toolbar { margin: 0 0 12px; padding: 0 8px; flex-wrap: nowrap; }
 .slide-workspace { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 12px; align-items: start; }
+.slide-workspace[hidden], .slide-sorter[hidden] { display: none; }
+/* 슬라이드 정렬: the cells wrap into rows; the cell width is set by `slide-overview.js` (reveal.js's overview scale). */
+.slide-sorter { display: flex; flex-wrap: wrap; align-content: flex-start; gap: var(--space-8); padding: var(--space-5); max-height: calc(100vh - 200px); overflow-y: auto; }
+.slide-sorter-cell { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); width: var(--slide-sorter-cell, 200px); padding: var(--space-2); color: var(--ui-text-secondary); cursor: grab; }
+.slide-sorter-cell:hover { background: var(--ui-hover); }
+.slide-sorter-cell.active { outline: 2px solid var(--accent-strong); background: var(--ui-selected); color: var(--ui-text); }
+.slide-sorter-cell.is-hidden-slide { opacity: 0.55; }
+.slide-sorter-cell:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
+.slide-sorter-num { font-size: var(--font-size-sm); font-variant-numeric: tabular-nums; }
 .slide-thumb-list {
   display: flex;
   flex-direction: column;
@@ -185,14 +194,27 @@ select:focus-visible,
 .slide-context-menu button { padding: var(--space-3) var(--space-5); text-align: left; font-size: var(--font-size-sm); color: var(--ui-text); border-radius: 4px; }
 .slide-context-menu button:hover:not([disabled]), .slide-context-menu button:focus-visible { background: var(--ui-surface); }
 .slide-context-menu button[disabled] { opacity: 0.4; }
+/* Slide transitions of the show (PD-398). The arriving slide moves in as reveal.js's transitions do (`css/reveal.scss` SLIDE
+   TRANSITION: translate by 150% from the side, FADE: opacity, ZOOM: scale from 0.2); `data-dir` is the OOXML direction the
+   effect moves toward (`l`: it comes in from the right). */
+.slide-show-frame { --tx: 150%; --ty: 0%; --inset-from: 0 0 0 100%; --bars-from: 0 50% 0 50%; }
+.slide-show-frame[data-dir="r"] { --tx: -150%; --inset-from: 0 100% 0 0; }
+.slide-show-frame[data-dir="u"] { --tx: 0%; --ty: 150%; --inset-from: 100% 0 0 0; --bars-from: 50% 0 50% 0; }
+.slide-show-frame[data-dir="d"] { --tx: 0%; --ty: -150%; --inset-from: 0 0 100% 0; --bars-from: 50% 0 50% 0; }
 @keyframes slide-show-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes slide-show-push { from { transform: translateX(8%); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes slide-show-zoom { from { transform: scale(0.92); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes slide-show-push { from { transform: translate(var(--tx), var(--ty)); } to { transform: none; } }
+@keyframes slide-show-wipe { from { clip-path: inset(var(--inset-from)); } to { clip-path: inset(0 0 0 0); } }
+@keyframes slide-show-split { from { clip-path: inset(var(--bars-from)); } to { clip-path: inset(0 0 0 0); } }
+@keyframes slide-show-zoom { from { transform: scale(0.2); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes slide-show-bars { from { opacity: 0; } 20% { opacity: 1; } 35% { opacity: 0.2; } 55% { opacity: 1; } 70% { opacity: 0.4; } to { opacity: 1; } }
 /* Motion is opt-in: reduced-motion users get no transitions or hint fade. */
 @media (prefers-reduced-motion: no-preference) {
   .slide-show-frame[data-transition="fade"] { animation: slide-show-fade 0.4s ease; }
-  .slide-show-frame[data-transition="push"] { animation: slide-show-push 0.4s ease; }
+  .slide-show-frame[data-transition="push"], .slide-show-frame[data-transition="cover"] { animation: slide-show-push 0.4s ease; }
+  .slide-show-frame[data-transition="wipe"], .slide-show-frame[data-transition="pull"] { animation: slide-show-wipe 0.4s ease; }
+  .slide-show-frame[data-transition="split"] { animation: slide-show-split 0.4s ease; }
   .slide-show-frame[data-transition="zoom"] { animation: slide-show-zoom 0.4s ease; }
+  .slide-show-frame[data-transition="randomBar"] { animation: slide-show-bars 0.4s steps(6, end); }
 }
 .slide-thumb.active {
   border-left-color: var(--accent-strong);

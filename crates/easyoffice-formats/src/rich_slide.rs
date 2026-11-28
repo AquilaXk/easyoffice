@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 
 use crate::rich_document::normalize_hex_color;
-use crate::rich_slide_ext::SlideExt;
+use crate::rich_slide_ext::{DeckSettings, SlideExt};
 use crate::sheet_chart::{ChartKind, ChartLegendPos};
 use crate::{DecodedSlide, EasyOfficeError, RichImage};
 
@@ -269,41 +269,7 @@ impl SlideMasterLayout {
     }
 }
 
-/// Slide transition effect.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SlideTransition {
-    #[default]
-    None,
-    Fade,
-    Push,
-    Zoom,
-}
-
-impl SlideTransition {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Fade => "fade",
-            Self::Push => "push",
-            Self::Zoom => "zoom",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Self> {
-        let t = s.trim();
-        if t.eq_ignore_ascii_case("none") {
-            Some(Self::None)
-        } else if t.eq_ignore_ascii_case("fade") {
-            Some(Self::Fade)
-        } else if t.eq_ignore_ascii_case("push") {
-            Some(Self::Push)
-        } else if t.eq_ignore_ascii_case("zoom") {
-            Some(Self::Zoom)
-        } else {
-            None
-        }
-    }
-}
+pub use crate::rich_slide_ext::SlideTransition;
 
 /// Horizontal text alignment inside a slide textbox or shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -715,6 +681,7 @@ pub struct RichSlideDeck {
     pub orientation: SlideOrientation,
     pub slides: Vec<RichSlide>,
     pub elements_rejected: u32,
+    pub settings: DeckSettings,
 }
 
 impl Default for RichSlideDeck {
@@ -726,6 +693,7 @@ impl Default for RichSlideDeck {
             orientation: SlideOrientation::Landscape,
             slides: Vec::new(),
             elements_rejected: 0,
+            settings: DeckSettings::default(),
         }
     }
 }
@@ -779,6 +747,7 @@ impl RichSlideDeck {
                 })
                 .collect(),
             elements_rejected: 0,
+            settings: DeckSettings::default(),
         }
     }
 

@@ -69,6 +69,7 @@ fn full_test_deck(aspect: SlideAspect) -> RichSlideDeck {
         aspect,
         orientation: SlideOrientation::Landscape,
         elements_rejected: 0,
+        settings: Default::default(),
         slides: vec![
             RichSlide {
                 title: "경영 요약".into(),
@@ -849,6 +850,7 @@ fn bench_pd257_slide_deck_roundtrip() {
         orientation: SlideOrientation::Landscape,
         slides,
         elements_rejected: 0,
+        settings: Default::default(),
     };
 
     let t0 = Instant::now();

@@ -10,7 +10,7 @@
   const { buildMatcher, createFindIndex } = host.__EASYOFFICE_FIND_CORE__;
   const DIALOG_ID = "find-dialog";
   const KIND_OF = { DOC: "doc", HWP: "doc", SHEET: "sheet", SLIDE: "slide", BASE: "base", BOARD: "board", PDF: "pdf" };
-  const FIND_ONLY_KINDS = new Set(["slide", "board", "pdf"]);
+  const FIND_ONLY_KINDS = new Set(["board", "pdf"]);
   // Matches on each side of the current one that get an on-screen highlight range.
   const NEAR_WINDOW = 1000;
   const MAX_SELECTION_QUERY = 100;
@@ -52,6 +52,8 @@
           getSlideIndex: hooks.getSlideIndex,
           switchSlide: hooks.switchSlide,
           getSlideCanvas: () => host.__EASYOFFICE_SLIDE_CANVAS__,
+          withUndo,
+          renderSlideDeck: hooks.renderSlideDeck,
           getPdfPages: hooks.getPdfPages,
           goToPdfPage: hooks.goToPdfPage,
           getBoardStudio: () => host.__EASYOFFICE_BASE_BOARD_HOST__?.getBoardStudio?.(),
@@ -155,8 +157,8 @@
 
     // ---- replacing --------------------------------------------------------------------------
 
-    function reportReplaced({ replaced, skipped, rejected = 0 }) {
-      const skipNote = skipped > 0 ? " (수식 셀 " + skipped + "개는 건너뜀)" : "";
+    function reportReplaced({ replaced, skipped, rejected = 0, skippedLabel = "수식 셀" }) {
+      const skipNote = skipped > 0 ? " (" + skippedLabel + " " + skipped + "개는 건너뜀)" : "";
       const invalidNote = rejected > 0 ? " (유효성 불일치 " + rejected + "개는 건너뜀)" : "";
       const verb = isPagesDoc() ? "대치했습니다" : "바꿨습니다";
       const text = replaced + "개를 " + verb + skipNote + invalidNote;
@@ -175,7 +177,7 @@
       current = null;
       const next = refresh();
       goTo(next ? index.neighbour(id, origin.offset, true) : -1, next);
-      if (outcome.replaced === 0) showStatus("수식 셀의 결과 값은 바꿀 수 없습니다");
+      if (outcome.replaced === 0) showStatus(outcome.notice || "수식 셀의 결과 값은 바꿀 수 없습니다");
     }
 
     async function replaceAll() {
@@ -208,7 +210,7 @@
       const { title, replaceLabel, replaceRow, replaceButtons, replaceBtn, replaceAllBtn, sheetOptions: optionsRow } = ui();
       const replacing = mode === "replace" && !FIND_ONLY_KINDS.has(source?.kind);
       const pages = isPagesDoc();
-      const replaceTitle = getActiveModule() === "HWP" ? "찾아 바꾸기" : pages ? "찾기 및 대치" : "찾기 및 바꾸기";
+      const replaceTitle = { HWP: "찾아 바꾸기", SLIDE: "바꾸기" }[getActiveModule()] || (pages ? "찾기 및 대치" : "찾기 및 바꾸기");
       title.textContent = replacing ? replaceTitle : "찾기";
       if (replaceLabel) replaceLabel.textContent = pages ? "대치할 내용" : "바꿀 내용";
       if (replaceBtn) replaceBtn.textContent = pages ? "대치" : "바꾸기";

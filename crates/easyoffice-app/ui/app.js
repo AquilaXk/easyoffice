@@ -802,6 +802,8 @@
       "slide-delete": () => slideStudio.removeSlide(),
       "slide-group": () => slideStudio.runAct("group"),
       "slide-ungroup": () => slideStudio.runAct("ungroup"), ...host.__EASYOFFICE_PAGES_COMMANDS__.shortcutActions(runNativeMenu), palette: () => togglePaletteModal(modal, cmdSearchInput),
+      "slide-format-copy": () => slideStudio.runAct("format-copy"),
+      "slide-format-paste": () => slideStudio.runAct("format-paste"),
       "copilot-toggle": () => copilotUi.toggle(),
       "file-open": () => fileOpen.openFilePicker(),
       "recent-dialog": () => void windowBridge.chooseRecent().catch(() => {}),

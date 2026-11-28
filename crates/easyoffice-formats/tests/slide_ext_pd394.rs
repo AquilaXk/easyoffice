@@ -199,6 +199,7 @@ fn full_slide() -> RichSlide {
                 ),
                 anim("s1", AnimClass::Exit, AnimEffect::Wipe, AnimStart::OnClick),
             ],
+            ..SlideExt::default()
         },
         ..RichSlide::default()
     }

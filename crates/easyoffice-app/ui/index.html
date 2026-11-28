@@ -117,7 +117,7 @@
               <div class="md-item" data-kinds="SHEET" data-sheet-paste="special" role="menuitem" tabindex="-1"><span class="md-label">선택하여 붙여넣기…</span><span class="md-shortcut">Ctrl+Alt+V</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="DOC PAGES HWP SHEET SLIDE BASE BOARD PDF" data-studio-menu-cmd="find" role="menuitem" tabindex="-1"><span class="md-label">찾기</span><span class="md-shortcut">Ctrl+F</span></div>
-              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">바꾸기</span><span class="md-shortcut">⌃H</span></div>
+              <div class="md-item" data-kinds="DOC SLIDE" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">바꾸기</span><span class="md-shortcut">⌃H</span></div>
               <div class="md-item" data-kinds="SHEET BASE" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">찾기 및 바꾸기</span><span class="md-shortcut">⌃H</span></div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="goto" role="menuitem" tabindex="-1"><span class="md-label">이동…</span><span class="md-shortcut">⌃G</span></div>
               <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">찾기 및 대치</span><span class="md-shortcut">⌃H</span></div>
@@ -128,6 +128,9 @@
           <div class="menu-item" data-menu="view">
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="view">보기</button>
             <div class="menu-dropdown" role="menu">
+              <div class="md-item" data-kinds="SLIDE" data-slide-act="view-normal" role="menuitem" tabindex="-1"><span class="md-label">기본</span></div>
+              <div class="md-item" data-kinds="SLIDE" data-slide-act="view-sorter" role="menuitem" tabindex="-1"><span class="md-label">슬라이드 정렬</span></div>
+              <div class="md-sep" data-kinds="SLIDE"></div>
               <div class="md-item" data-studio-menu-cmd="zoom-in" role="menuitem" tabindex="-1"><span class="md-label">확대</span><span class="md-shortcut">Ctrl+=</span></div>
               <div class="md-item" data-studio-menu-cmd="zoom-out" role="menuitem" tabindex="-1"><span class="md-label">축소</span><span class="md-shortcut">Ctrl+-</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="zoom-fit-page" role="menuitem" tabindex="-1"><span class="md-label">한 페이지</span></div>
@@ -224,6 +227,17 @@
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="SLIDE" data-slide-act="insert-textbox" role="menuitem" tabindex="-1"><span class="md-label">텍스트 상자</span></div>
               <div class="md-item" data-studio-menu-cmd="insert-table" role="menuitem" tabindex="-1"><span class="md-label">표 삽입</span></div>
+              <div class="md-sub" data-kinds="SLIDE" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">표 편집</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="표 편집">
+                  <button type="button" class="md-item" data-slide-act="table-row-above" role="menuitem" tabindex="-1"><span class="md-label">위에 행 삽입</span></button>
+                  <button type="button" class="md-item" data-slide-act="table-row-below" role="menuitem" tabindex="-1"><span class="md-label">아래에 행 삽입</span></button>
+                  <button type="button" class="md-item" data-slide-act="table-col-left" role="menuitem" tabindex="-1"><span class="md-label">왼쪽에 열 삽입</span></button>
+                  <button type="button" class="md-item" data-slide-act="table-col-right" role="menuitem" tabindex="-1"><span class="md-label">오른쪽에 열 삽입</span></button>
+                  <button type="button" class="md-item" data-slide-act="table-row-delete" role="menuitem" tabindex="-1"><span class="md-label">행 삭제</span></button>
+                  <button type="button" class="md-item" data-slide-act="table-col-delete" role="menuitem" tabindex="-1"><span class="md-label">열 삭제</span></button>
+                </div>
+              </div>
               <div class="md-item" data-kinds="SHEET" data-sheet-act="insert-picture" role="menuitem" tabindex="-1"><span class="md-label">그림</span></div>
               <div class="md-item" data-kinds="SLIDE" data-slide-act="insert-picture" role="menuitem" tabindex="-1"><span class="md-label">그림</span></div>
               <div class="md-item" data-studio-menu-cmd="insert-shape" role="menuitem" tabindex="-1"><span class="md-label">도형</span></div>
@@ -280,6 +294,9 @@
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="format-painter" role="menuitem" tabindex="-1"><span class="md-label">서식 복사</span><span class="md-shortcut">Ctrl+Shift+C</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="format-paste" role="menuitem" tabindex="-1"><span class="md-label">서식 붙여넣기</span><span class="md-shortcut">Ctrl+Shift+V</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="format-clear" role="menuitem" tabindex="-1"><span class="md-label">모든 서식 지우기</span></div>
+              <div class="md-item" data-kinds="SLIDE" data-slide-act="font-dialog" role="menuitem" tabindex="-1"><span class="md-label">글꼴…</span></div>
+              <div class="md-item" data-kinds="SLIDE" data-slide-act="format-painter" role="menuitem" tabindex="-1"><span class="md-label">서식 복사</span><span class="md-shortcut">Ctrl+Shift+C</span></div>
+              <div class="md-item" data-kinds="SLIDE" data-slide-act="format-paste" role="menuitem" tabindex="-1"><span class="md-label">서식 붙여넣기</span><span class="md-shortcut">Ctrl+Shift+V</span></div>
               <div class="md-sub" data-kinds="DOC" role="menuitem" aria-haspopup="menu" tabindex="-1">
                 <span class="md-label">그림 서식</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
                 <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="그림 서식">
@@ -594,6 +611,7 @@
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="SLIDE" data-slide-act="format-background" role="menuitem" tabindex="-1"><span class="md-label">배경 서식…</span></div>
               <div class="md-item" data-kinds="SLIDE" data-slide-act="header-footer" role="menuitem" tabindex="-1"><span class="md-label">머리글 및 바닥글…</span></div>
+              <div class="md-item" data-kinds="SLIDE" data-slide-act="color-scheme" role="menuitem" tabindex="-1"><span class="md-label">색 구성표…</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="layout-orientation" role="menuitem" tabindex="-1"><span class="md-label">용지 방향</span></div>
             </div>
@@ -601,6 +619,8 @@
           <div class="menu-item" data-menu="slideshow" data-kinds="SLIDE">
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="view">슬라이드 쇼</button>
             <div class="menu-dropdown" role="menu">
+              <div class="md-item" data-slide-act="show-setup" role="menuitem" tabindex="-1"><span class="md-label">쇼 설정…</span></div>
+              <div class="md-item" data-slide-act="transition-dialog" role="menuitem" tabindex="-1"><span class="md-label">화면 전환…</span></div>
               <div class="md-item" data-slide-act="hide-slide" role="menuitem" tabindex="-1"><span class="md-label">슬라이드 숨기기</span></div>
               <div class="md-sep"></div>
               <div class="md-sub" role="menuitem" aria-haspopup="menu" tabindex="-1">
@@ -1394,6 +1414,10 @@
           <div id="pane-slide" class="editor-pane" hidden>
             <div id="slide-toolbar" class="formula-bar slide-toolbar eo-doc-style-bar" role="toolbar" aria-label="슬라이드 도구줄">
               <div class="tb-group">
+                <button id="btn-slide-format-painter" type="button" class="tb-btn" aria-pressed="false" title="서식 복사 (Ctrl+Shift+C)" aria-label="서식 복사"><span class="tb-icon-svg" data-icon="paintbrush" aria-hidden="true"></span><span class="tb-label">서식<br/>복사</span></button>
+              </div>
+              <span class="tb-sep" aria-hidden="true"></span>
+              <div class="tb-group">
                 <button id="btn-add-slide" type="button" class="tb-btn" title="새 슬라이드" aria-label="새 슬라이드"><span class="tb-sprite icon-add"></span><span class="tb-label">새<br/>슬라이드</span></button>
                 <button id="btn-slide-duplicate" type="button" class="tb-btn" title="슬라이드 복제" aria-label="슬라이드 복제"><span class="tb-sprite icon-copy"></span><span class="tb-label">슬라이드<br/>복제</span></button>
                 <button id="btn-slide-delete" type="button" class="tb-btn" title="슬라이드 삭제 · Delete" aria-label="슬라이드 삭제"><span class="tb-sprite icon-remove"></span><span class="tb-label">슬라이드<br/>삭제</span></button>
@@ -1421,7 +1445,12 @@
                   <option value="none" selected>없음</option>
                   <option value="fade">페이드</option>
                   <option value="push">밀어내기</option>
-                  <option value="zoom">확대</option>
+                  <option value="wipe">지우기</option>
+                  <option value="split">나누기</option>
+                  <option value="cover">덮기</option>
+                  <option value="pull">벗기기</option>
+                  <option value="zoom">확대/축소</option>
+                  <option value="randomBar">무작위 선</option>
                 </select>
               </div>
               <span class="tb-sep" aria-hidden="true"></span>
@@ -1432,7 +1461,8 @@
               </div>
               <span id="slide-meta-status" class="formula-result">슬라이드 1 / 1 · 전환: 없음</span>
             </div>
-            <div class="slide-workspace">
+            <div id="slide-sorter" class="slide-sorter" role="group" aria-label="슬라이드 정렬" hidden></div>
+            <div id="slide-workspace" class="slide-workspace">
               <div id="slide-thumb-list" class="slide-thumb-list" role="group" aria-label="슬라이드 목록"></div>
               <div class="slide-main-col">
                 <div class="slide-stage" id="slide-stage-box" data-layout="titleSlide" tabindex="-1">
@@ -3642,6 +3672,61 @@
       </div>
     </dialog>
 
+    <dialog id="slide-show-dialog" class="tool-dialog" aria-labelledby="slide-show-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="slide-show-dialog-title">쇼 설정</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <fieldset class="dialog-group">
+            <legend>옵션</legend>
+            <div class="dialog-row"><label class="dialog-checkbox"><input id="slide-show-loop" type="checkbox" /><span>Esc 키를 누를 때까지 계속 반복(<span class="dialog-key">L</span>)</span></label></div>
+          </fieldset>
+          <fieldset class="dialog-group">
+            <legend>슬라이드 넘기기</legend>
+            <div class="dialog-row"><label class="dialog-checkbox"><input id="slide-show-manual" type="radio" name="slide-show-advance" value="manual" /><span>수동(<span class="dialog-key">M</span>)</span></label></div>
+            <div class="dialog-row"><label class="dialog-checkbox"><input id="slide-show-timed" type="radio" name="slide-show-advance" value="timed" /><span>설정된 시간 사용(<span class="dialog-key">U</span>)</span></label></div>
+          </fieldset>
+          <p id="slide-show-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-slide-show-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+    <dialog id="slide-trans-dialog" class="tool-dialog" aria-labelledby="slide-trans-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="slide-trans-dialog-title">화면 전환</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="slide-trans-effect">효과</label><select id="slide-trans-effect" class="sb-combo dialog-select"><option value="none">없음</option><option value="fade">페이드</option><option value="push">밀어내기</option><option value="wipe">지우기</option><option value="split">나누기</option><option value="cover">덮기</option><option value="pull">벗기기</option><option value="zoom">확대/축소</option><option value="randomBar">무작위 선</option></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="slide-trans-dir">효과 옵션</label><select id="slide-trans-dir" class="sb-combo dialog-select"><option value="left">오른쪽에서</option><option value="right">왼쪽에서</option><option value="top">아래에서</option><option value="bottom">위에서</option></select><select id="slide-trans-axis" class="sb-combo dialog-select" aria-label="효과 옵션" hidden><option value="left">세로</option><option value="top">가로</option></select></div>
+          <fieldset class="dialog-group">
+            <legend>다음 슬라이드로 넘기기</legend>
+            <div class="dialog-row"><label class="dialog-checkbox"><input id="slide-trans-click" type="checkbox" /><span>마우스를 클릭할 때</span></label></div>
+            <div class="dialog-row"><label class="dialog-checkbox"><input id="slide-trans-timed" type="checkbox" /><span>다음 시간 후</span></label><input id="slide-trans-seconds" type="number" min="0" max="86400" step="0.5" value="5" class="dialog-input" aria-label="다음 시간 후" /><span class="dialog-unit">초</span></div>
+          </fieldset>
+          <p id="slide-trans-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-slide-trans-all" type="button" class="dialog-btn">모두 적용</button>
+          <button id="btn-slide-trans-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+    <dialog id="slide-colors-dialog" class="tool-dialog" aria-labelledby="slide-colors-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="slide-colors-dialog-title">색 구성표</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="slide-colors-scheme">색</label><select id="slide-colors-scheme" class="sb-combo dialog-select"></select></div>
+          <div id="slide-colors-preview" class="dialog-row" role="img" aria-label="색 구성표 미리 보기"></div>
+          <p id="slide-colors-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-slide-colors-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
     <dialog id="slide-anim-dialog" class="tool-dialog" aria-labelledby="slide-anim-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="slide-anim-dialog-title">애니메이션 창</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -3926,6 +4011,13 @@
     <script src="./slide-format.js"></script>
     <script src="./slide-page.js"></script>
     <script src="./slide-anim.js"></script>
+    <script src="./slide-painter.js"></script>
+    <script src="./slide-font.js"></script>
+    <script src="./slide-overview.js"></script>
+    <script src="./slide-show-setup.js"></script>
+    <script src="./slide-show-timing.js"></script>
+    <script src="./slide-colors.js"></script>
+    <script src="./slide-table.js"></script>
     <script src="./slide-show-anim.js"></script>
     <script src="./doc-symbol-dialog.js"></script>
     <script src="./doc-status-text.js"></script>

@@ -422,6 +422,9 @@
     { keys: "Ctrl+Alt+B", action: "pages-bookmark", module: "DOC", flavor: "pages", notInField: true },
     { keys: "Ctrl+Shift+W", action: "pages-word-count", module: "DOC", flavor: "pages", desktopOnly: true, notInField: true },
     { keys: "Ctrl+Shift+I", action: "pages-marks", module: "DOC", flavor: "pages", desktopOnly: true, notInField: true },
+    // 서식 복사 and 서식 붙여넣기 of the slide objects (PD-398), the keys of the word processor window. Ctrl+Shift+C is a browser key.
+    { keys: "Ctrl+Shift+C", action: "slide-format-copy", module: "SLIDE", desktopOnly: true, bareKey: true },
+    { keys: "Ctrl+Shift+V", action: "slide-format-paste", module: "SLIDE", bareKey: true },
   ]);
 
   // ---- menu bar -> ribbon command (PD-098) ----------------------------------------------------

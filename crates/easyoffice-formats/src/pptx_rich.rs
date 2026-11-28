@@ -17,10 +17,11 @@ use crate::pptx_master::{
     PlaceholderSpec,
 };
 pub use crate::pptx_rich_read::unpack_pptx_rich;
+use crate::pptx_transition::transition_xml;
 use crate::rich_image_writers::MediaParts;
 use crate::rich_slide::{
     pt_to_emu, pt_to_signed_emu, RichSlideDeck, SlideBox, SlideElement, SlideMasterLayout,
-    SlideTextAlign, SlideTransition,
+    SlideTextAlign,
 };
 use crate::rich_slide_ext::{hex6, ElementFx, SlideDash, SlideExt, SlideNode, SlideParaFmt};
 use crate::{EasyOfficeError, XmlSanitizer};
@@ -49,20 +50,40 @@ fn push_fill(out: &mut String, fill: Option<&str>) {
     }
 }
 
+/// Color and typefaces of a text run; a typeface that is not named is the theme's (`+mn-lt`, `+mn-ea`).
+struct RunLook<'a> {
+    color: Option<&'a str>,
+    latin: Option<&'a str>,
+    east: Option<&'a str>,
+}
+
+impl<'a> RunLook<'a> {
+    fn of(color: Option<&'a str>, fx: Option<&'a ElementFx>) -> Self {
+        Self {
+            color,
+            latin: fx.and_then(|f| f.font.as_deref()),
+            east: fx.and_then(|f| f.east_font.as_deref()),
+        }
+    }
+}
+
 fn push_paras(
     out: &mut String,
     text: &str,
     pt: f64,
     biu: (bool, bool, bool),
     align: SlideTextAlign,
-    color: Option<&str>,
+    look: RunLook<'_>,
     para: Option<&SlideParaFmt>,
 ) {
     let sz = (pt * 100.0).round() as u32;
     let (b, i) = (u8::from(biu.0), u8::from(biu.1));
     let u = if biu.2 { "sng" } else { "none" };
     let ppr = ppr_xml(align, para);
-    let clr = color
+    let latin = XmlSanitizer::escape(look.latin.unwrap_or("+mn-lt"));
+    let east = XmlSanitizer::escape(look.east.unwrap_or("+mn-ea"));
+    let clr = look
+        .color
         .map(|h| {
             format!(
                 "<a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill>",
@@ -73,7 +94,7 @@ fn push_paras(
     for line in text.split('\n') {
         let _ = write!(
             out,
-            "<a:p>{ppr}<a:r><a:rPr lang=\"ko-KR\" sz=\"{sz}\" b=\"{b}\" i=\"{i}\" u=\"{u}\" dirty=\"0\">{clr}<a:latin typeface=\"+mn-lt\"/><a:ea typeface=\"+mn-ea\"/></a:rPr><a:t>{}</a:t></a:r></a:p>",
+            "<a:p>{ppr}<a:r><a:rPr lang=\"ko-KR\" sz=\"{sz}\" b=\"{b}\" i=\"{i}\" u=\"{u}\" dirty=\"0\">{clr}<a:latin typeface=\"{latin}\"/><a:ea typeface=\"{east}\"/></a:rPr><a:t>{}</a:t></a:r></a:p>",
             XmlSanitizer::escape(line),
         );
     }
@@ -178,7 +199,7 @@ impl Emit<'_> {
                     *font_size_pt,
                     (*bold, *italic, *underline),
                     *align,
-                    color.as_deref(),
+                    RunLook::of(color.as_deref(), fx),
                     para,
                 );
                 self.xml.push_str("</p:txBody></p:sp>");
@@ -221,7 +242,7 @@ impl Emit<'_> {
                     *font_size_pt,
                     (*bold, *italic, *underline),
                     *align,
-                    color.as_deref(),
+                    RunLook::of(color.as_deref(), fx),
                     para,
                 );
                 self.xml.push_str("</p:txBody></p:sp>");
@@ -462,16 +483,12 @@ pub fn pack_pptx_rich(
         em.sid += used;
         let (mut s_xml, ids, text_shapes, next_rel) = (em.xml, em.ids, em.text_shapes, em.next_rel);
         s_xml.push_str("</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>");
-        match slide.transition {
-            SlideTransition::None => {}
-            SlideTransition::Fade => s_xml.push_str("<p:transition><p:fade/></p:transition>"),
-            SlideTransition::Push => {
-                s_xml.push_str("<p:transition><p:push dir=\"l\"/></p:transition>")
-            }
-            SlideTransition::Zoom => {
-                s_xml.push_str("<p:transition><p:zoom dir=\"in\"/></p:transition>")
-            }
-        }
+        s_xml.push_str(&transition_xml(
+            slide.transition,
+            slide.ext.transition_dir,
+            slide.ext.advance_after_ms,
+            slide.ext.no_click_advance,
+        ));
         push_timing(&mut s_xml, &slide.ext.anims, &ids, &text_shapes);
         s_xml.push_str("</p:sld>");
         slide_entries.push((format!("ppt/slides/slide{n}.xml"), s_xml.into_bytes()));

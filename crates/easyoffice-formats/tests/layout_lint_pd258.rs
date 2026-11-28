@@ -121,6 +121,7 @@ fn slide_lint_detects_stage_text_table_and_bullet_overflows() {
             ],
         }],
         elements_rejected: 0,
+        settings: Default::default(),
     };
 
     let report = lint_slide_deck(&deck);
@@ -170,6 +171,7 @@ fn slide_lint_detects_element_overlap_and_skips_full_background_shape() {
             ],
         }],
         elements_rejected: 0,
+        settings: Default::default(),
     };
 
     let report = lint_slide_deck(&deck);
@@ -278,6 +280,7 @@ fn slide_lint_detects_empty_placeholders_by_layout_and_textbox_content() {
             },
         ],
         elements_rejected: 0,
+        settings: Default::default(),
     };
 
     let report = lint_slide_deck(&deck);
@@ -466,6 +469,7 @@ fn lint_caps_hostile_report_at_max_lint_issues_and_marks_truncated() {
             elements,
         }],
         elements_rejected: 0,
+        settings: Default::default(),
     };
     let s_report = lint_slide_deck(&deck);
     assert!(s_report.truncated);
@@ -511,6 +515,7 @@ fn benchmark_layout_lint_release() {
         orientation: SlideOrientation::Landscape,
         slides,
         elements_rejected: 0,
+        settings: Default::default(),
     };
 
     // 2. 10,000-block RichDocument

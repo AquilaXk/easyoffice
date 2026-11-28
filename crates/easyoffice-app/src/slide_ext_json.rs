@@ -5,11 +5,11 @@
 use std::fmt::Write;
 
 use easyoffice_formats::{
-    base64_codec, normalize_hex_color, AnimClass, AnimDir, AnimEffect, AnimStart, EasyOfficeError,
-    ElementFx, RichImage, SlideAnim, SlideBackground, SlideBullet, SlideDash, SlideDate, SlideExt,
-    SlideFooter, SlideGroup, SlideNumberStyle, SlideOutline, SlideParaFmt, SlideShadow,
-    StrictJsonValue, DEFAULT_ANIM_MS, MAX_SLIDE_ANIMS, MAX_SLIDE_GROUPS,
-    MAX_SLIDE_TOTAL_IMAGE_BYTES,
+    base64_codec, clean_face, normalize_hex_color, AnimClass, AnimDir, AnimEffect, AnimStart,
+    ColorScheme, DeckSettings, EasyOfficeError, ElementFx, RichImage, SlideAnim, SlideBackground,
+    SlideBullet, SlideDash, SlideDate, SlideExt, SlideFooter, SlideGroup, SlideNumberStyle,
+    SlideOutline, SlideParaFmt, SlideShadow, StrictJsonValue, COLOR_SCHEME_SLOTS, DEFAULT_ANIM_MS,
+    MAX_ADVANCE_MS, MAX_SLIDE_ANIMS, MAX_SLIDE_GROUPS, MAX_SLIDE_TOTAL_IMAGE_BYTES,
 };
 
 use crate::convert_structured::{as_array, as_object, field, invalid, opt_str, Budget, JsonObject};
@@ -43,6 +43,17 @@ fn hex(obj: &JsonObject, key: &str) -> Result<String, EasyOfficeError> {
         opt_str(obj, key)?.ok_or_else(|| invalid(format!("슬라이드 '{key}' 색이 필요합니다.")))?;
     normalize_hex_color(raw)
         .ok_or_else(|| invalid(format!("슬라이드 '{key}'는 RRGGBB 색이어야 합니다: {raw}")))
+}
+
+/// A typeface name: an empty one is none, one that [`clean_face`] would change is refused.
+fn face(obj: &JsonObject, key: &str) -> Result<Option<String>, EasyOfficeError> {
+    match opt_str(obj, key)? {
+        None | Some("") => Ok(None),
+        Some(raw) if clean_face(raw).as_deref() == Some(raw) => Ok(Some(raw.to_string())),
+        Some(_) => Err(invalid(format!(
+            "슬라이드 '{key}' 글꼴 이름이 올바르지 않습니다."
+        ))),
+    }
 }
 
 fn named<T>(
@@ -123,6 +134,8 @@ pub(crate) fn parse_element_fx(
         .map(parse_para)
         .transpose()?
         .filter(|p| !p.is_default());
+    fx.font = face(obj, "font")?;
+    fx.east_font = face(obj, "eastFont")?;
     Ok((!fx.is_default()).then_some(fx))
 }
 
@@ -310,7 +323,75 @@ pub(crate) fn parse_slide_ext(
             .map(|a| parse_anims(a, budget))
             .transpose()?
             .unwrap_or_default(),
+        transition_dir: named(obj, "transitionDir", AnimDir::parse)?,
+        advance_after_ms: match num(obj, "advanceAfterMs")? {
+            None => None,
+            Some(v) if v.fract() == 0.0 && (0.0..=f64::from(MAX_ADVANCE_MS)).contains(&v) => {
+                Some(v as u32)
+            }
+            Some(_) => {
+                return Err(invalid(
+                    "슬라이드 자동 넘김 시간은 0~24시간(ms)이어야 합니다.",
+                ))
+            }
+        },
+        no_click_advance: flag(obj, "noClickAdvance")?,
     })
+}
+
+/// Deck-wide settings (`showLoop`, `colorScheme`) of the top-level object.
+pub(crate) fn parse_deck_settings(obj: &JsonObject) -> Result<DeckSettings, EasyOfficeError> {
+    let color_scheme = field(obj, "colorScheme")
+        .map(|v| {
+            let o = as_object(v, "colorScheme")?;
+            let colors: Vec<String> = as_array(
+                field(o, "colors").ok_or_else(|| invalid("색 구성표에 'colors'가 필요합니다."))?,
+                "colors",
+            )?
+            .iter()
+            .map(|c| {
+                c.as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| invalid("색 구성표의 색은 문자열이어야 합니다."))
+            })
+            .collect::<Result<_, _>>()?;
+            if colors.len() != COLOR_SCHEME_SLOTS {
+                return Err(invalid(format!(
+                    "색 구성표는 색 {COLOR_SCHEME_SLOTS}개여야 합니다."
+                )));
+            }
+            ColorScheme::checked(opt_str(o, "name")?.unwrap_or(""), &colors)
+                .ok_or_else(|| invalid("색 구성표의 색은 RRGGBB여야 합니다."))
+        })
+        .transpose()?;
+    Ok(DeckSettings {
+        show_loop: flag(obj, "showLoop")?,
+        manual_advance: flag(obj, "manualAdvance")?,
+        color_scheme,
+    })
+}
+
+/// `"showLoop":…,"colorScheme":…` fields, each only when the deck sets it; a leading comma comes with each.
+pub(crate) fn write_deck_settings(
+    out: &mut String,
+    settings: &DeckSettings,
+    push_str: fn(&mut String, &str),
+) {
+    if settings.show_loop {
+        out.push_str(",\"showLoop\":true");
+    }
+    if settings.manual_advance {
+        out.push_str(",\"manualAdvance\":true");
+    }
+    if let Some(s) = &settings.color_scheme {
+        out.push_str(",\"colorScheme\":{\"name\":");
+        push_str(out, &s.name);
+        out.push_str(",\"colors\":[");
+        for (i, c) in s.colors.iter().enumerate() {
+            let _ = write!(out, "{}\"{c}\"", if i > 0 { "," } else { "" });
+        }
+        out.push_str("]}");
+    }
 }
 
 fn push_f64(out: &mut String, v: f64) {
@@ -359,6 +440,12 @@ pub(crate) fn write_element_fx(
     if let Some(p) = &fx.para {
         write_para(out, p, push_str);
     }
+    for (key, face) in [("font", &fx.font), ("eastFont", &fx.east_font)] {
+        if let Some(face) = face {
+            let _ = write!(out, ",\"{key}\":");
+            push_str(out, face);
+        }
+    }
 }
 
 fn write_para(out: &mut String, p: &SlideParaFmt, push_str: fn(&mut String, &str)) {
@@ -402,6 +489,15 @@ pub(crate) fn write_slide_ext(
 ) {
     if ext.hidden {
         out.push_str(",\"hidden\":true");
+    }
+    if let Some(dir) = ext.transition_dir {
+        let _ = write!(out, ",\"transitionDir\":\"{}\"", dir.as_str());
+    }
+    if let Some(ms) = ext.advance_after_ms {
+        let _ = write!(out, ",\"advanceAfterMs\":{ms}");
+    }
+    if ext.no_click_advance {
+        out.push_str(",\"noClickAdvance\":true");
     }
     match &ext.background {
         None => {}

@@ -592,7 +592,7 @@ const SHEET: [&MenuSpec; 11] = [
 const SLIDE: [&MenuSpec; 11] = [
     &APP,
     &FILE_PAGE_SETUP,
-    &EDIT_FIND_ONLY,
+    &EDIT_FULL,
     &VIEW_PLAIN,
     &INSERT_SLIDE,
     &FORMAT_SLIDE,

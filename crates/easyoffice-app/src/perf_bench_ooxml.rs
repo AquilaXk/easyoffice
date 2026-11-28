@@ -271,5 +271,6 @@ pub(crate) fn slide_deck() -> StructuredContent {
         orientation: SlideOrientation::Landscape,
         slides: (0..DECK_SLIDES).map(|i| slide(i, &pictures)).collect(),
         elements_rejected: 0,
+        settings: Default::default(),
     })
 }

@@ -27,22 +27,33 @@
     return typeof host.CSS?.escape === "function" ? host.CSS.escape(String(val)) : String(val).replace(/["\\]/g, "\\$&");
   }
 
+  // 슬라이드의 찾기·바꾸기 원본(PD-398). 글상자·도형·표 칸·그림 대체 텍스트·제목·본문·노트가 블록이고, 바꾸기는 문서 창과 같은
+  // `find-core.js`의 `applyEdits`로 블록 문자열만 고쳐 쓴다. 차트·삽입 개체의 글자는 찾기만 된다.
+  const REPLACE_NOTICE = "차트와 삽입한 개체의 글자는 바꿀 수 없습니다";
+  const SKIPPED_LABEL = "차트·삽입 개체";
+
   function createSlideSource(deps) {
-    const { document, getSlideDeck, getSlideIndex, switchSlide, getSlideCanvas } = deps;
+    const { document, getSlideDeck, getSlideIndex, switchSlide, getSlideCanvas, withUndo, renderSlideDeck } = deps;
+    const { applyEdits } = host.__EASYOFFICE_FIND_CORE__;
     let watchCb = null;
 
-    function elementText(el) {
-      if (!el || typeof el !== "object") return "";
+    function chartText(el) {
+      const cats = Array.isArray(el.categories) ? el.categories.join(" ") : "";
+      const ser = Array.isArray(el.series) ? el.series.map((s) => s.name || "").join(" ") : "";
+      return [el.title || "", cats, ser].filter(Boolean).join(" ");
+    }
+
+    // One block per table cell, so a replacement never has to map an offset back across the joined row text.
+    function elementBlocks(i, el, blocks) {
+      if (!el || typeof el !== "object") return;
       if (el.kind === "table" && Array.isArray(el.rows)) {
-        return el.rows.map((r) => (Array.isArray(r) ? r.join(" ") : "")).join(" ");
+        el.rows.forEach((row, r) => (Array.isArray(row) ? row : []).forEach((cell, c) => {
+          if (cell) blocks.push({ id: `s:${i}:cell:${el.id}:${r}:${c}`, text: String(cell) });
+        }));
+        return;
       }
-      if (el.kind === "chart") {
-        const cats = Array.isArray(el.categories) ? el.categories.join(" ") : "";
-        const ser = Array.isArray(el.series) ? el.series.map((s) => s.name || "").join(" ") : "";
-        return [el.title || "", cats, ser].filter(Boolean).join(" ");
-      }
-      if (el.kind === "image") return String(el.alt || "");
-      return String(el.text || "");
+      const text = el.kind === "chart" ? chartText(el) : el.kind === "image" ? String(el.alt || "") : String(el.text || "");
+      if (text) blocks.push({ id: `s:${i}:${el.kind === "chart" ? "chart" : "el"}:${el.id}`, text });
     }
 
     function sync(index) {
@@ -52,15 +63,57 @@
         const s = deck[i];
         if (!s) continue;
         if (s.title) blocks.push({ id: `s:${i}:title`, text: String(s.title) });
-        const body = [s.lower || "", textOfNodeSpecs(s.insertedNodes)].filter(Boolean).join("\n");
-        if (body) blocks.push({ id: `s:${i}:body`, text: body });
-        for (const el of s.elements || []) {
-          const txt = elementText(el);
-          if (txt) blocks.push({ id: `s:${i}:el:${el.id}`, text: txt });
-        }
+        if (s.lower) blocks.push({ id: `s:${i}:body`, text: String(s.lower) });
+        const nodes = textOfNodeSpecs(s.insertedNodes);
+        if (nodes) blocks.push({ id: `s:${i}:nodes`, text: nodes });
+        for (const el of s.elements || []) elementBlocks(i, el, blocks);
         if (s.notes) blocks.push({ id: `s:${i}:notes`, text: String(s.notes) });
       }
       index.setBlocks(blocks);
+    }
+
+    // Writes the edited text of block `id` back to the deck; false when the block is not editable text.
+    function writeBlock(deck, id, edits) {
+      const parts = String(id).split(":");
+      const s = deck[Number(parts[1])];
+      const zone = parts[2];
+      if (!s) return false;
+      const edit = (text) => applyEdits([String(text ?? "")], edits)[0];
+      if (zone === "title" || zone === "body" || zone === "notes") {
+        s[zone === "body" ? "lower" : zone] = edit(s[zone === "body" ? "lower" : zone]);
+        return true;
+      }
+      if (zone === "el") {
+        const el = (s.elements || []).find((e) => e.id === parts.slice(3).join(":"));
+        if (!el) return false;
+        const field = el.kind === "image" ? "alt" : "text";
+        el[field] = edit(el[field]);
+        return true;
+      }
+      if (zone === "cell") {
+        const el = (s.elements || []).find((e) => e.id === parts.slice(3, -2).join(":"));
+        const row = el?.rows?.[Number(parts.at(-2))];
+        if (!row) return false;
+        row[Number(parts.at(-1))] = edit(row[Number(parts.at(-1))]);
+        return true;
+      }
+      return false;
+    }
+
+    // `plan` is `[{ id, edits }]`: one undo step for the whole replacement, then the active slide is drawn again.
+    function replace(plan) {
+      const deck = getSlideDeck?.() || [];
+      const outcome = withUndo(() => {
+        let replaced = 0;
+        let skipped = 0;
+        for (const { id, edits } of plan) {
+          if (writeBlock(deck, id, edits)) replaced += edits.length;
+          else skipped += edits.length;
+        }
+        return { replaced, skipped, skippedLabel: SKIPPED_LABEL, notice: REPLACE_NOTICE };
+      });
+      if (outcome.replaced > 0) renderSlideDeck?.(Number(getSlideIndex?.() || 0));
+      return outcome;
     }
 
     function anchor() {
@@ -81,8 +134,8 @@
       if (!Number.isInteger(slideIdx) || slideIdx < 0) return;
       if (Number(getSlideIndex?.()) !== slideIdx) switchSlide?.(slideIdx);
       const canvas = getSlideCanvas?.() || host.__EASYOFFICE_SLIDE_CANVAS__;
-      if (zone === "el") {
-        const elId = parts.slice(3).join(":");
+      if (zone === "el" || zone === "cell" || zone === "chart") {
+        const elId = parts.slice(3, zone === "cell" ? -2 : undefined).join(":");
         canvas?.selectElement?.(elId);
         const card = document.querySelector(`#slide-canvas-layer .slide-el[data-element-id="${cssEsc(elId)}"]`);
         card?.classList?.add("eo-search-hit");
@@ -91,7 +144,7 @@
         const notes = document.getElementById("slide-presenter-notes");
         notes?.classList?.add("eo-search-hit");
         notes?.scrollIntoView?.({ block: "nearest" });
-      } else if (zone === "body") {
+      } else if (zone === "body" || zone === "nodes") {
         const bodyEl = document.getElementById("slide-lower-zone");
         bodyEl?.classList?.add("eo-search-hit");
         bodyEl?.scrollIntoView?.({ block: "nearest" });
@@ -107,6 +160,7 @@
       sync,
       anchor,
       show,
+      replace,
       clearHighlight,
       watch: (cb) => { watchCb = cb; },
       notifyChange: () => watchCb?.(),

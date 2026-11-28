@@ -166,8 +166,21 @@
   let bound = false;
   let current = null;
 
-  function open(runs, document) {
+  // The controls a slide text box has no property for (PD-398): the 고급 tab, the effects, the underline color and the emphasis
+  // mark, and the 기본값으로 설정 button. A slide opens the dialog with `limited`; every other caller gets them all back.
+  const LIMITED_OFF = "#doc-font-pane-advanced input, #doc-font-pane-advanced select, .dialog-effects input, #doc-font-emphasis, #doc-font-underline-color-host button";
+  const LIMITED_ULINE = new Set(["none", "0"]);
+
+  function limitControls(document, limited) {
+    const dialog = document.getElementById("doc-font-dialog");
+    for (const el of dialog.querySelectorAll(LIMITED_OFF)) el.disabled = limited || el.hasAttribute("data-pending");
+    for (const o of dialog.querySelectorAll("#doc-font-underline-style option")) o.hidden = limited && !LIMITED_ULINE.has(o.value);
+    for (const el of [dialog.querySelector("#doc-font-tab-advanced"), document.getElementById("btn-doc-font-default")]) if (el) el.hidden = limited;
+  }
+
+  function open(runs, document, options = {}) {
     const byId = (id) => document.getElementById(id);
+    limitControls(document, options.limited === true);
     const els = {
       dialog: byId("doc-font-dialog"), family: byId("doc-font-family"), latin: byId("doc-font-latin"), style: byId("doc-font-style"), size: byId("doc-font-size"),
       strike: byId("doc-font-strike"), sup: byId("doc-font-sup"), sub: byId("doc-font-sub"),

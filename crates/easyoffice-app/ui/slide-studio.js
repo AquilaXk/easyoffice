@@ -10,6 +10,8 @@
   const ASPECT_CYCLE = ["16:9", "4:3", "A4"];
   const THUMB_REFRESH_MS = 150;
   const EMPTY_TITLE_LABEL = "(제목 없음)";
+  // The side a transition moves toward as the file names it (`dir` of `p:push`).
+  const DIR_CODE = Object.freeze({ left: "l", right: "r", top: "u", bottom: "d" });
   const NEXT_KEYS = new Set(["ArrowRight", "ArrowDown", " ", "PageDown", "Enter", "n", "N"]);
   const PREV_KEYS = new Set(["ArrowLeft", "ArrowUp", "PageUp", "Backspace"]);
   const MENU_ACTIONS = {
@@ -93,7 +95,7 @@
       startShow: (fromCur, opts) => startShow(fromCur, opts),
       onLeave: () => {
         slideDialogs?.closeAll?.();
-        [slideFormat, slidePage, slideAnim].forEach((m) => m?.closeAll?.());
+        slideTools.forEach((m) => m?.closeAll?.());
         endShow();
       },
     });
@@ -101,8 +103,17 @@
     const slideFormat = slideCanvas ? host.__EASYOFFICE_CREATE_SLIDE_FORMAT__?.(deps, slideCanvas) : null;
     const slidePage = slideCanvas ? host.__EASYOFFICE_CREATE_SLIDE_PAGE__?.(deps, slideCanvas) : null;
     const slideAnim = slideCanvas ? host.__EASYOFFICE_CREATE_SLIDE_ANIM__?.(deps, slideCanvas) : null;
+    // The tools of PD-398 (format painter, font, table, overview, show setup, size, colors) hang off one list: each has
+    // `run(act)` for its menu items, `bind()` and `closeAll()`. `ops` is what they take from the studio.
+    const ops = {
+      moveSlide: (from, to) => moveSlide(from, to), setDeckSize: (...a) => setDeckSize(...a), startShow: (...a) => startShow(...a),
+      buildFrame: (slide, idx) => buildSlideFrame(slide, idx), deckAspect: () => deckAspect(), deckOrientation: () => deckOrientation(),
+    };
+    const extraTools = ["PAINTER", "FONT", "TABLE", "OVERVIEW", "SHOW_SETUP", "SIZE", "COLORS"].map((name) => (slideCanvas ? host["__EASYOFFICE_CREATE_SLIDE_" + name + "__"]?.(deps, slideCanvas, ops) : null));
+    const slideTools = [slideFormat, slidePage, slideAnim, ...extraTools];
     const showAnim = host.__EASYOFFICE_CREATE_SHOW_ANIM__?.();
-    host.__EASYOFFICE_SLIDE_RUN_ACT__ = (act) => [slideFormat, slidePage, slideAnim].some((m) => m?.run?.(act) === true);
+    const timing = host.__EASYOFFICE_CREATE_SHOW_TIMING__?.();
+    host.__EASYOFFICE_SLIDE_RUN_ACT__ = (act) => slideTools.some((m) => m?.run?.(act) === true);
     if (slideCanvas) {
       slideCanvas.dialogs = slideDialogs;
       host.__EASYOFFICE_SLIDE_CANVAS__ = slideCanvas;
@@ -160,6 +171,7 @@
           layout: nextLayout,
           aspect: deckAspect(),
           orientation: deckOrientation(),
+          ...host.__EASYOFFICE_SLIDE_EXT__.deckWire(deck[0]),
         });
         return deck.length - 1;
       });
@@ -337,6 +349,7 @@
       if (stage) host.__EASYOFFICE_SLIDE_EXT__?.paintStage(document, stage, deck[activeIdx], activeIdx, slideCanvas?.stageSize?.() || { w: 960, h: 540 });
       slidePage?.refresh?.(activeIdx);
       slideCanvas?.render?.();
+      extraTools.forEach((m) => m?.onRender?.());
     }
 
     // ---- editing: typing-granular undo snapshots for the stage zones and notes -----------------
@@ -508,19 +521,12 @@
 
     // ---- slideshow ---------------------------------------------------------------------------
 
-    function paintShowSlide() {
-      const slide = deck[showIdx];
-      const viewport = byId("slide-show-viewport");
-      if (!slide || !viewport) return;
-      viewport.dataset.aspect = deckAspect();
-      viewport.dataset.orientation = deckOrientation();
+    // The slide as the show draws it (title, body, objects, background, footer); the slide sorter draws its thumbnails with it too.
+    function buildSlideFrame(slide, idx) {
       const frame = document.createElement("div");
-      frame.id = "slide-show-frame";
       frame.className = "slide-show-frame";
-      frame.dataset.transition = slide.transition || "none";
       frame.dataset.layout = slide.layout || "titleAndContent";
       const title = document.createElement("h2");
-      title.id = "slide-show-title";
       title.textContent = slide.title || "";
       Object.assign(title.style, {
         fontWeight: slide.titleStyle?.fontWeight || "",
@@ -528,7 +534,6 @@
         textDecoration: slide.titleStyle?.textDecoration || "",
       });
       const body = document.createElement("div");
-      body.id = "slide-show-body";
       body.className = "slide-show-body";
       const text = document.createElement("p");
       text.textContent = slide.lower || "";
@@ -544,11 +549,41 @@
         const layer = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__?.renderStaticElementsLayer?.(document, slide, deckAspect(), { orientation: deckOrientation() });
         if (layer) frame.appendChild(layer);
       }
-      host.__EASYOFFICE_SLIDE_EXT__?.paintStage(document, frame, slide, showIdx, host.__EASYOFFICE_SLIDE_CANVAS_CODEC__.stageSizeOf(deckAspect(), deckOrientation()));
+      host.__EASYOFFICE_SLIDE_EXT__?.paintStage(document, frame, slide, idx, host.__EASYOFFICE_SLIDE_CANVAS_CODEC__.stageSizeOf(deckAspect(), deckOrientation()));
+      return frame;
+    }
+
+    function paintShowSlide() {
+      const slide = deck[showIdx];
+      const viewport = byId("slide-show-viewport");
+      if (!slide || !viewport) return;
+      viewport.dataset.aspect = deckAspect();
+      viewport.dataset.orientation = deckOrientation();
+      const frame = buildSlideFrame(slide, showIdx);
+      frame.id = "slide-show-frame";
+      frame.querySelector("h2").id = "slide-show-title";
+      frame.querySelector(".slide-show-body").id = "slide-show-body";
+      frame.dataset.transition = slide.transition || "none";
+      frame.dataset.dir = DIR_CODE[slide.transitionDir] || "l";
       viewport.replaceChildren(frame);
       showAnim?.start(frame, slide, { complete: arrivedBack });
       arrivedBack = false;
       paintShowChrome();
+      cueAutoAdvance(slide);
+    }
+
+    // 쇼 설정: the show moves on by itself after the slide's wait (`advanceAfterMs`) unless it is set to move by hand.
+    function cueAutoAdvance(slide) {
+      const state = { manual: Boolean(deck[0]?.manualAdvance), loop: Boolean(deck[0]?.showLoop), isLast: nextShown(showIdx + 1) >= deck.length };
+      timing?.cue(slide, state, () => {
+        if (showing) goTo(nextIndexOfShow());
+      });
+    }
+
+    // The slide after the one shown: the next one, the first again when the show repeats, `deck.length` at the end.
+    function nextIndexOfShow() {
+      const next = host.__EASYOFFICE_SHOW_TIMING__.nextIndex(showIdx, deck.length, Boolean(deck[0]?.showLoop), nextShown);
+      return next < 0 ? deck.length : next;
     }
 
     function paintShowChrome() {
@@ -609,6 +644,7 @@
     function endShow() {
       if (!showing) return;
       showing = false;
+      timing?.cancel();
       fullscreenEntered = false;
       if (clockTimer !== null) host.clearTimeout?.(clockTimer);
       clockTimer = null;
@@ -645,7 +681,7 @@
     // The next click of the slide's animations, or the next slide once they have all played.
     function advance() {
       if (showAnim?.next()) return;
-      goTo(nextShown(showIdx + 1));
+      goTo(nextIndexOfShow());
     }
 
     // The last played click taken back, or the previous slide shown as it ends.
@@ -698,13 +734,17 @@
       if (getActiveModule() === "SLIDE" && list && target && list.contains?.(target)) {
         if (handleThumbKeydown(e)) return true;
       }
+      if (extraTools.some((m) => m?.handleKeydown?.(e) === true)) return true;
       if (slideClipboard?.handleKeydown?.(e)) return true;
       if (slideCanvas?.handleKeydown?.(e)) return true;
       return false;
     }
 
     function bindShow() {
-      byId("slide-show-viewport")?.addEventListener("click", () => advance());
+      // A slide set to move on by timing only (마우스를 클릭할 때 off) does not take a click.
+      byId("slide-show-viewport")?.addEventListener("click", () => {
+        if (!deck[showIdx]?.noClickAdvance) advance();
+      });
       byId("slide-show-exit")?.addEventListener("click", () => endShow());
       document.addEventListener("fullscreenchange", () => {
         if (showing && fullscreenEntered && !document.fullscreenElement) endShow();
@@ -733,9 +773,7 @@
       bindEditing();
       slideCanvas?.bind?.();
       slideDialogs?.bind?.();
-      slideFormat?.bind?.();
-      slidePage?.bind?.();
-      slideAnim?.bind?.();
+      slideTools.forEach((m) => m?.bind?.());
       slideContextMenu?.bind?.();
     }
 

@@ -9,6 +9,7 @@ use crate::ooxml_shared_parts::{
     core_properties_xml, drawingml_theme_xml, CORE_PROPERTIES_CONTENT_TYPE,
     CORE_PROPERTIES_REL_TYPE, PML_CLR_MAP, PML_SP_TREE_HEADER,
 };
+use crate::pptx_deck_settings::{pres_props_xml, theme_xml, PRES_PROPS_CT, PRES_PROPS_PATH};
 use crate::pptx_master::{
     build_slide_layout_xml, build_slide_master_xml, presentation_default_text_style_xml,
 };
@@ -238,6 +239,10 @@ pub(crate) fn finish_pptx_package(
     for layout in SlideMasterLayout::ALL {
         let _ = write!(ct, "<Override PartName=\"/ppt/slideLayouts/slideLayout{}.xml\" ContentType=\"{pml}.slideLayout+xml\"/>", layout.layout_index());
     }
+    let _ = write!(
+        ct,
+        "<Override PartName=\"/{PRES_PROPS_PATH}\" ContentType=\"{PRES_PROPS_CT}\"/>"
+    );
     if has_notes {
         let _ = write!(ct, "<Override PartName=\"/ppt/theme/theme2.xml\" ContentType=\"{CT_PREFIX}.theme+xml\"/><Override PartName=\"/ppt/notesMasters/notesMaster1.xml\" ContentType=\"{pml}.notesMaster+xml\"/>");
     }
@@ -291,6 +296,7 @@ pub(crate) fn finish_pptx_package(
             "slideMasters/slideMaster1.xml".into(),
         ),
         ("rIdTheme1".into(), "theme", "theme/theme1.xml".into()),
+        ("rIdPresProps1".into(), "presProps", "presProps.xml".into()),
     ]);
     if has_notes {
         pres_rels.push((
@@ -346,7 +352,11 @@ pub(crate) fn finish_pptx_package(
         ),
         (
             "ppt/theme/theme1.xml".into(),
-            drawingml_theme_xml("EasyOffice").into_bytes(),
+            theme_xml("EasyOffice", &deck.settings).into_bytes(),
+        ),
+        (
+            PRES_PROPS_PATH.into(),
+            pres_props_xml(&deck.settings).into_bytes(),
         ),
     ];
     let layout_rels = rels_xml(&[("rId1", "slideMaster", "../slideMasters/slideMaster1.xml")]);

@@ -352,13 +352,7 @@
       if (notesInput) notesInput.value = slide.notes;
       if (transSelect) transSelect.value = slide.transition;
       if (metaStatus) {
-        const transitionLabelMap = {
-          fade: "페이드",
-          push: "밀어내기",
-          zoom: "확대",
-          none: "없음",
-        };
-        const transitionLabel = transitionLabelMap[slide.transition] || slide.transition;
+        const transitionLabel = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__.TRANSITION_LABELS[slide.transition] || slide.transition;
         metaStatus.textContent =
           "슬라이드 " + (idx + 1) + " / " + slideDeckState.length + " · 전환: " + transitionLabel;
       }
@@ -774,6 +768,7 @@
       getSlideDeck: () => slideDeckState,
       getSlideIndex: deps.getActiveSlideIndex,
       switchSlide: switchToSlideIndex,
+      renderSlideDeck,
       getPdfPages: () => pdfPages,
       getPdfCurrentPage: () => pdfCurrentPage,
       goToPdfPage,
