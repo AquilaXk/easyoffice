@@ -691,6 +691,7 @@ macOS arm64, release(`lto = "thin"`, `codegen-units = 1`), 기준 커밋 `42d38f
 |---|---|
 | 큰 입력 생성(DOCX 1만 문단·책갈피 1,000·`REF` 1,000·구역 20, 시트 5만 행·쪽 나누기 999·인쇄 영역·반복 행, PPTX·ODP 500쪽·쪽마다 개체 12·그룹 3·효과·애니메이션·그림 4장 공유) | `crates/easyoffice-app/src/perf_bench_ooxml.rs`(`bench_generate_inputs`가 `docword-`·`sheetpage-`·`slidesext-large.*`를 씀) |
 | 엔진 사례 `open`·`save`·`sheetpdf` | `crates/easyoffice-app/src/perf_bench.rs`, `scripts/bench-run.mjs`(`--app-bin <시험 실행 파일>`로 빌드 없이 실행) |
+| 엔진 두 빌드를 번갈아(`open`·`save`·`sheetpdf`, 최소값과 중앙값) | `scripts/bench-ab.mjs` |
 | 시트 UI 모듈(Node, `--base <git ref>`로 전후를 번갈아) | `scripts/bench-ui-paths.mjs` |
 | 문서 필드·책갈피·보드 조회(실제 WebKit·Chromium) | `scripts/bench-ui-dom.mjs`(`EO_PW_DIR`) |
 
