@@ -6,7 +6,9 @@
  *
  * Usage: node scripts/bench-run.mjs [--runs 5] [--suite hwp|synthetic|engine|docpdf|quicklook|all]
  *          [--work <dir>] [--json <file>] [--only <text in the case id>] [--docs <file,file>]
- *          [--ref-bin <path>] [--ref-skia-bin <path>]
+ *          [--ref-bin <path>] [--ref-skia-bin <path>] [--app-bin <path>]
+ *   --app-bin  the unit-test executable of easyoffice-app (engine suite) to run as it is, without a cargo build; a
+ *              before/after pair keeps one executable per checkout (copy `target/release/deps/easyoffice_app-*`).
  *   --ref-bin / --ref-skia-bin  a binary of the reference app's document paths (built apart from this
  *              repository) that takes `<case> <input>` and prints the same `BENCH ...` line; the
  *              in-repo `ref-repro` cases run without it.
@@ -52,6 +54,7 @@ function parseArgs(argv) {
     else if (argv[i] === "--docs") opts.docs = next().split(",").filter(Boolean).map((file) => path.resolve(file));
     else if (argv[i] === "--ref-bin") opts.refBin = next();
     else if (argv[i] === "--ref-skia-bin") opts.refSkiaBin = next();
+    else if (argv[i] === "--app-bin") opts.appBin = path.resolve(next());
     else throw new Error(`unknown argument ${argv[i]}`);
   }
   return opts;
@@ -197,7 +200,7 @@ function main() {
   }
 
   if (want("engine")) {
-    const app = testBinary(["-p", "easyoffice-app"]);
+    const app = opts.appBin ?? testBinary(["-p", "easyoffice-app"]);
     const args = ["perf_bench::bench_case", "--ignored", "--exact", "--nocapture"];
     const generated = path.join(opts.work, "engine-inputs");
     spawnSync(app, ["perf_bench::bench_generate_inputs", "--ignored", "--exact", "--nocapture"], { env: { ...process.env, EASYOFFICE_BENCH_OUT: generated }, stdio: "inherit" });
@@ -207,6 +210,8 @@ function main() {
       }
     }
     for (const extension of ["docx", "hwpx", "xlsx", "pptx"]) jobs.push(benchJob({ tool: "eo", binary: app, args, benchCase: "encode", input: extension, label: `encode ${extension}` }));
+    // The sheet of 50,000 rows with its page setup (print area, repeated rows, manual page breaks) as the engine's own PDF.
+    jobs.push(benchJob({ tool: "eo", binary: app, args, benchCase: "sheetpdf", input: "paged-50000", label: "쪽 설정 5만 행 PDF" }));
     for (const rows of ["1000", "10000", "50000"]) jobs.push(benchJob({ tool: "eo", binary: app, args, benchCase: "recalc", input: rows, label: `${rows}행` }));
     jobs.push(benchJob({ tool: "eo", binary: app, args, benchCase: "layout", input: "100000", label: "100000회" }));
   }

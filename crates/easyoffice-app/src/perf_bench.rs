@@ -13,7 +13,8 @@
 //! `EASYOFFICE_BENCH_CASE`: `open`, `save` (input: a file made by `bench_generate_inputs`),
 //! `encode` (input: an extension; one `encode_structured` of the generated content),
 //! `recalc` (input: the row count), `sheet` (input: the row count, see `perf_bench_sheet`),
-//! `layout` (input: the call count).
+//! `layout` (input: the call count), `sheetpdf` (input: ignored; the sheet of `perf_bench_ooxml` with its
+//! page setup written as the engine's own PDF).
 
 use crate::benchmark_large::build_recalc_sheet;
 use crate::convert_structured::{encode_structured, StructuredContent};
@@ -187,7 +188,22 @@ fn bench_generate_inputs() {
     let dir = out_dir();
     std::fs::create_dir_all(&dir).expect("dir");
     let document = StructuredContent::Document(large_document(), PdfWriteOptions::default());
-    let families: [(&str, StructuredContent, &[DocumentFormat]); 3] = [
+    let families: [(&str, StructuredContent, &[DocumentFormat]); 6] = [
+        (
+            "docword",
+            crate::perf_bench_ooxml::word_content(),
+            &[DocumentFormat::Docx, DocumentFormat::Odt],
+        ),
+        (
+            "sheetpage",
+            crate::perf_bench_ooxml::paged_workbook(),
+            &[DocumentFormat::Xlsx],
+        ),
+        (
+            "slidesext",
+            crate::perf_bench_ooxml::slide_deck(),
+            &[DocumentFormat::Pptx, DocumentFormat::Odp],
+        ),
         (
             "doc",
             document,
@@ -250,15 +266,22 @@ fn open_request(bytes: &[u8], file_name: &str) -> String {
     )
 }
 
-/// The save request the page builds from what an open returned: the structured content (`blocks`,
-/// `sheets` or `slides`, the last member of the open's answer) with the formats and the title.
+/// The save request the page builds from what an open returned: the structured content (the page
+/// setup of a document, the picture table of a deck, `blocks`, `sheets` or `slides`, up to the end
+/// of the open's answer) with the formats and the title.
 fn save_request(decoded: &str, extension: &str) -> String {
-    let content_at = ["],\"blocks\":[", "],\"sheets\":[", "],\"slides\":["]
-        .iter()
-        .filter_map(|marker| decoded.find(marker))
-        .min()
-        .expect("structured content in the open's answer")
-        + 2;
+    let content_at = [
+        ",\"pageSetup\":{",
+        ",\"images\":[",
+        ",\"blocks\":[",
+        ",\"sheets\":[",
+        ",\"slides\":[",
+    ]
+    .iter()
+    .filter_map(|marker| decoded.find(marker))
+    .min()
+    .expect("structured content in the open's answer")
+        + 1;
     let content = &decoded[content_at..decoded.len() - 1];
     format!(
         "{{\"sourceFormat\":\"{extension}\",\"targetFormat\":\"{extension}\",\"title\":\"bench\",{content}}}"
@@ -311,6 +334,15 @@ fn run(case: &str, input: &str) -> String {
                 encode_structured(&content, format, "bench", &mut Vec::new()).expect("encode");
             phases.push(("encode", ms(t)));
             (format!("encode-{input}"), bytes.len())
+        }
+        "sheetpdf" => {
+            // The sheet of 50,000 rows with its page setup, written as the engine's own PDF.
+            let content = crate::perf_bench_ooxml::paged_workbook();
+            let t = Instant::now();
+            let bytes = encode_structured(&content, DocumentFormat::Pdf, "bench", &mut Vec::new())
+                .expect("encode");
+            phases.push(("encode", ms(t)));
+            ("sheetpdf".to_string(), bytes.len())
         }
         "recalc" => {
             let rows: u32 = input.parse().expect("rows");

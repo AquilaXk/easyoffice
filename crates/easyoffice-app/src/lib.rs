@@ -36,6 +36,8 @@ mod page_setup_json;
 #[cfg(test)]
 mod perf_bench;
 #[cfg(test)]
+mod perf_bench_ooxml;
+#[cfg(test)]
 mod perf_bench_sheet;
 mod pii_identifiers;
 pub mod readback;
