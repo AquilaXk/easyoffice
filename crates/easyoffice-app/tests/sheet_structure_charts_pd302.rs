@@ -306,7 +306,7 @@ fn a_hostile_chart_is_refused_before_the_session_changes() {
     let too_many = format!("[{}]", vec![ok.clone(); MAX_CHARTS_PER_SHEET + 1].join(","));
     let bad_charts = [
         too_many,
-        r#"[{"id":"x","chartType":"radar","anchor":{}}]"#.to_string(),
+        r#"[{"id":"x","chartType":"treemap","anchor":{}}]"#.to_string(),
         r#"[{"id":"x","chartType":"column","anchor":{"fromRow":2147483648}}]"#.to_string(),
         r#"[{"id":"x","chartType":"column","anchor":{"fromRow":1048576}}]"#.to_string(),
         r#"[{"id":"x","chartType":"column","anchor":{"width":0}}]"#.to_string(),
