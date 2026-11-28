@@ -198,6 +198,9 @@
       async function typeText(step) {
         const target = step.find ? need(step) : document.activeElement;
         if (target && document.activeElement !== target) target.focus?.({ preventScroll: true });
+        // 글을 치는 동안 치는 자리(칸·문단·상자)를 선택 강조로 보인다. 요소가 개체 틀 안의 글 영역이면 틀 전체를 보인다.
+        const frame = target?.closest?.(".slide-el, .board-node") || target;
+        if (frame?.getBoundingClientRect) cursor.setSelection([box(frame.getBoundingClientRect())]);
         let typed = 0;
         let failure = null;
         typing = createTypist({ onBlink: (idle) => cursor.setIdle(idle), ...(step.fast ? { typeSpeed: CELL_TYPE_SPEED, maxTotalMs: CELL_TYPE_MS, sentencePauseMs: 40 } : {}) });
