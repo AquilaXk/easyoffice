@@ -14,7 +14,7 @@ use crate::rich_image_writers::MediaParts;
 use crate::rich_slide::{
     RichSlideDeck, SlideBox, SlideElement, SlideMasterLayout, SlideTextAlign, SlideTransition,
 };
-use crate::rich_slide_ext::{ElementFx, SlideBullet, SlideExt, SlideNode, SlideParaFmt};
+use crate::rich_slide_ext::{hex6, ElementFx, SlideBullet, SlideExt, SlideNode, SlideParaFmt};
 use crate::{EasyOfficeError, XmlSanitizer};
 
 const ODP_CONTENT_NS: &str = concat!(
@@ -65,6 +65,7 @@ impl StyleGen {
         );
         match fill {
             Some(h) => {
+                let h = hex6(h);
                 let _ = write!(
                     self.auto_xml,
                     " draw:fill=\"solid\" draw:fill-color=\"#{h}\""
@@ -74,6 +75,7 @@ impl StyleGen {
         }
         match line {
             Some((Some(h), w)) => {
+                let h = hex6(h);
                 let dash = dash_attrs(fx.map_or(Default::default(), |f| f.dash));
                 let _ = write!(
                     self.auto_xml,
@@ -393,12 +395,15 @@ impl PageEmit<'_> {
     }
 }
 
-/// ODF ids for every element or group an animation targets.
-fn animation_ids(ext: &SlideExt) -> HashMap<String, String> {
+/// ODF ids for every element or group an animation targets. `xml:id` is unique in the whole document,
+/// so `used` counts the ids of all the pages written so far.
+fn animation_ids(ext: &SlideExt, used: &mut usize) -> HashMap<String, String> {
     let mut ids = HashMap::new();
     for a in &ext.anims {
-        let next = format!("id{}", ids.len() + 1);
-        ids.entry(a.target.clone()).or_insert(next);
+        ids.entry(a.target.clone()).or_insert_with(|| {
+            *used += 1;
+            format!("id{used}")
+        });
     }
     ids
 }
@@ -411,6 +416,7 @@ pub fn pack_odp_rich(deck: &RichSlideDeck) -> Result<Vec<u8>, EasyOfficeError> {
     let mut fills = OdpFills::default();
     let mut charts: Vec<(usize, String)> = Vec::new();
     let mut body = String::with_capacity(4_096);
+    let mut used_ids = 0usize;
 
     for (idx, slide) in deck.slides.iter().enumerate() {
         let dp = format!("dp{}", idx + 1);
@@ -453,7 +459,7 @@ pub fn pack_odp_rich(deck: &RichSlideDeck) -> Result<Vec<u8>, EasyOfficeError> {
                 &slide.bullets.iter().map(String::as_str).collect::<Vec<_>>(),
             );
         }
-        let ids = animation_ids(&slide.ext);
+        let ids = animation_ids(&slide.ext, &mut used_ids);
         let mut em = PageEmit {
             body,
             sg: &mut sg,

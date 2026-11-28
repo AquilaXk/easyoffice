@@ -912,6 +912,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       if (!binding) return false;
       if (isStartWindow() && !START_SHORTCUT_ACTIONS.has(binding.action)) return false;
       if (binding.macControl && isMacClient() && !e.ctrlKey) return false;
+      if (binding.notMac && isMacClient()) return false;
       if (binding.module && getActiveModule() !== binding.module) return false;
       if (binding.modules && !binding.modules.includes(getActiveModule())) return false;
       if (binding.notInField && /^(INPUT|TEXTAREA|SELECT)$/.test(String(document.activeElement?.tagName || "").toUpperCase())) return false;
@@ -929,7 +930,9 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     function normalizeMenuShortcuts(modifier) {
       const { formatPlatformShortcut } = host.__EASYOFFICE_RIBBON_CATALOG__;
       for (const label of document.querySelectorAll(".md-shortcut")) {
-        label.textContent = formatPlatformShortcut(label.textContent.trim(), modifier);
+        // `data-shortcut-mac` is the macOS key of an item whose key differs there (the slide group).
+        const raw = modifier === "⌘" && label.dataset.shortcutMac ? label.dataset.shortcutMac : label.textContent.trim();
+        label.textContent = formatPlatformShortcut(raw, modifier);
       }
       for (const el of document.querySelectorAll("[title]")) {
         const title = el.getAttribute("title") || "";

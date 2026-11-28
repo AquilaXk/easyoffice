@@ -834,7 +834,7 @@ impl RichSlideDeck {
         }
         check_text_len(&self.title, "프레젠테이션 제목")?;
         let mut total_elements = 0usize;
-        let mut total_image_bytes = 0usize;
+        let (mut total_image_bytes, mut seen_bg) = (0usize, HashSet::new());
         for slide in &self.slides {
             check_text_len(&slide.title, "슬라이드 제목")?;
             check_text_len(&slide.notes, "슬라이드 발표자 노트")?;
@@ -862,7 +862,7 @@ impl RichSlideDeck {
             let ids: HashSet<&str> = slide.elements.iter().map(SlideElement::id).collect();
             slide.ext.validate(&ids)?;
             total_image_bytes =
-                total_image_bytes.saturating_add(slide.ext.background_image_bytes());
+                total_image_bytes.saturating_add(slide.ext.new_background_bytes(&mut seen_bg));
             if total_image_bytes > MAX_SLIDE_TOTAL_IMAGE_BYTES {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
                     "슬라이드 전체 이미지 크기({total_image_bytes}B)가 상한({MAX_SLIDE_TOTAL_IMAGE_BYTES}B)을 초과했습니다."

@@ -33,7 +33,7 @@
     let index = 0;
     let running = [];
 
-    const cardsOf = (id) => groupApi().leavesOf(slide, id).map((leaf) => layer.querySelector(`[data-element-id="${leaf}"]`)).filter(Boolean);
+    const cardsOf = (id) => groupApi().leavesOf(slide, id).map((leaf) => layer.querySelector(groupApi().cardSelector(leaf))).filter(Boolean);
 
     function baseTransform(card) {
       return card.dataset.baseTransform ?? (card.dataset.baseTransform = card.style.transform || "");

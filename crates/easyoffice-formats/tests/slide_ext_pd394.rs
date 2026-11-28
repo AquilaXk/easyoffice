@@ -396,6 +396,288 @@ fn pptx_duplicate_shape_names_get_unique_ids() {
     assert_eq!(ids, ["same", "same-2"]);
 }
 
+/// A valid PNG of about `extra` bytes: a 2x2 picture with a padding chunk before its data.
+fn padded_png(extra: usize, fill: u8) -> RichImage {
+    let mut bytes = png();
+    let at = 33; // signature (8) + IHDR chunk (25)
+    let pad = png_chunk(b"tEXt", &vec![fill; extra]);
+    bytes.splice(at..at, pad);
+    RichImage::new(bytes, "").unwrap()
+}
+
+fn bg_slide(img: &RichImage) -> RichSlide {
+    RichSlide {
+        ext: SlideExt {
+            background: Some(SlideBackground::Picture(img.clone())),
+            ..SlideExt::default()
+        },
+        ..RichSlide::default()
+    }
+}
+
+fn bg_ptr(s: &RichSlide) -> *const u8 {
+    match &s.ext.background {
+        Some(SlideBackground::Picture(i)) => i.bytes().as_ptr(),
+        _ => std::ptr::null(),
+    }
+}
+
+const BIG: usize = 30 * 1024 * 1024;
+
+#[test]
+fn many_slides_sharing_one_large_background_count_once_and_share_one_buffer() {
+    let big = padded_png(BIG, b'a');
+    let deck = deck_with((0..200).map(|_| bg_slide(&big)).collect());
+    deck.validate().expect("a shared picture counts once");
+    for (name, bytes) in [
+        ("pptx", OoxmlCodec::pack_pptx_rich(&deck, false).unwrap()),
+        ("odp", OdfCodec::pack_odp_rich(&deck).unwrap()),
+    ] {
+        let read = if name == "pptx" {
+            OoxmlCodec::unpack_pptx_rich(&bytes).unwrap()
+        } else {
+            OdfCodec::unpack_odp_rich(&bytes).unwrap()
+        };
+        assert_eq!(read.slides.len(), 200, "{name}");
+        let first = bg_ptr(&read.slides[0]);
+        assert!(!first.is_null(), "{name}");
+        assert!(
+            read.slides.iter().all(|s| bg_ptr(s) == first),
+            "{name}: one buffer for all pages"
+        );
+    }
+}
+
+#[test]
+fn distinct_large_backgrounds_over_the_deck_limit_are_refused() {
+    let imgs: Vec<RichImage> = (0..5u8).map(|i| padded_png(BIG, b'a' + i)).collect();
+    let deck = deck_with(imgs.iter().map(bg_slide).collect());
+    assert!(matches!(
+        deck.validate(),
+        Err(EasyOfficeError::ResourceBudgetExceeded(_))
+    ));
+}
+
+fn slide_xml_of(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
+    ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())
+        .unwrap()
+        .into_iter()
+        .map(|e| (e.path, e.data))
+        .collect()
+}
+
+fn edit_part(
+    parts: Vec<(String, Vec<u8>)>,
+    path: &str,
+    edit: impl Fn(String) -> String,
+) -> Vec<(String, Vec<u8>)> {
+    parts
+        .into_iter()
+        .map(|(p, d)| {
+            if p == path {
+                (p, edit(String::from_utf8(d).unwrap()).into_bytes())
+            } else {
+                (p, d)
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn non_finite_and_extreme_numbers_are_ignored_instead_of_refusing_the_file() {
+    let deck = deck_with(vec![full_slide()]);
+    let pptx = slide_xml_of(&OoxmlCodec::pack_pptx_rich(&deck, false).unwrap());
+    let hostile = edit_part(pptx, "ppt/slides/slide1.xml", |xml| {
+        xml.replace("rot=\"1800000\"", "rot=\"inf\"")
+            .replace("blurRad=\"50800\"", "blurRad=\"NaN\"")
+            .replace("dir=\"2700000\"", "dir=\"1e999\"")
+            .replace("<a:ln w=\"38100\">", "<a:ln w=\"inf\">")
+    });
+    let read =
+        OoxmlCodec::unpack_pptx_rich(&ZipArchiveCodec::pack_compressed(&hostile).unwrap()).unwrap();
+    for fx in &read.slides[0].ext.fx {
+        assert!(fx.rotation_deg.is_finite() && (0.0..360.0).contains(&fx.rotation_deg));
+        if let Some(s) = &fx.shadow {
+            assert!(s.blur_pt.is_finite() && s.angle_deg.is_finite() && s.dist_pt.is_finite());
+        }
+    }
+
+    let odp = slide_xml_of(&OdfCodec::pack_odp_rich(&deck).unwrap());
+    let hostile = edit_part(odp, "content.xml", |xml| {
+        let at = xml.find("rotate (").expect("a rotated frame");
+        let end = xml[at..].find(')').unwrap() + at;
+        let xml = format!("{}rotate (1e308{}", &xml[..at], &xml[end..]);
+        // The shadow offset overflows once it is turned into points.
+        let key = "draw:shadow-offset-x=\"";
+        let from = xml.find(key).expect("a shadow") + key.len();
+        let to = xml[from..].find('"').unwrap() + from;
+        format!("{}1e308cm{}", &xml[..from], &xml[to..])
+    });
+    let read =
+        OdfCodec::unpack_odp_rich(&ZipArchiveCodec::pack_compressed(&hostile).unwrap()).unwrap();
+    for fx in &read.slides[0].ext.fx {
+        assert!(fx.rotation_deg.is_finite() && (0.0..360.0).contains(&fx.rotation_deg));
+        if let Some(s) = &fx.shadow {
+            assert!(s.dist_pt.is_finite() && s.angle_deg.is_finite());
+        }
+    }
+}
+
+const WRAP_SP: &str = "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"{name}\"/><p:cNvSpPr txBox=\"1\"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"100000\" cy=\"100000\"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>t</a:t></a:r></a:p></p:txBody></p:sp>";
+
+fn group_xml(id: usize, name: &str, inner: &str) -> String {
+    format!(
+        "<p:grpSp><p:nvGrpSpPr><p:cNvPr id=\"{id}\" name=\"{name}\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>{inner}</p:grpSp>"
+    )
+}
+
+fn sp_xml(id: usize, name: &str) -> String {
+    WRAP_SP
+        .replace("{id}", &id.to_string())
+        .replace("{name}", name)
+}
+
+fn with_tree(tree: String) -> RichSlideDeck {
+    let deck = deck_with(vec![RichSlide {
+        layout: SlideMasterLayout::Blank,
+        ..RichSlide::default()
+    }]);
+    let parts = slide_xml_of(&OoxmlCodec::pack_pptx_rich(&deck, false).unwrap());
+    let edited = edit_part(parts, "ppt/slides/slide1.xml", |xml| {
+        let at = xml.find("</p:spTree>").unwrap();
+        format!("{}{tree}{}", &xml[..at], &xml[at..])
+    });
+    OoxmlCodec::unpack_pptx_rich(&ZipArchiveCodec::pack_compressed(&edited).unwrap()).unwrap()
+}
+
+#[test]
+fn groups_nested_or_numerous_beyond_the_limits_are_opened_not_refused() {
+    let mut tree = group_xml(10, "inner", &(sp_xml(11, "a") + &sp_xml(12, "b")));
+    for n in 0..12 {
+        tree = group_xml(
+            100 + n,
+            &format!("wrap{n}"),
+            &(tree + &sp_xml(200 + n, &format!("e{n}"))),
+        );
+    }
+    let read = with_tree(tree);
+    let s = &read.slides[0];
+    assert_eq!(s.elements.len(), 14, "no element is lost");
+    assert!(s.ext.groups.len() <= 13);
+    let known: std::collections::HashSet<&str> = s
+        .ext
+        .groups
+        .iter()
+        .map(|g| g.id.as_str())
+        .chain(s.elements.iter().map(SlideElement::id))
+        .collect();
+    assert!(s
+        .ext
+        .groups
+        .iter()
+        .all(|g| g.members.len() >= 2 && g.members.iter().all(|m| known.contains(m.as_str()))));
+
+    let many: String = (0..70)
+        .map(|n| {
+            group_xml(
+                1000 + n,
+                &format!("g{n}"),
+                &(sp_xml(2000 + 2 * n, &format!("x{n}")) + &sp_xml(2001 + 2 * n, &format!("y{n}"))),
+            )
+        })
+        .collect();
+    let read = with_tree(many);
+    let s = &read.slides[0];
+    assert_eq!(s.elements.len(), 140);
+    assert!(s.ext.groups.len() <= 64, "{} groups", s.ext.groups.len());
+}
+
+#[test]
+fn a_group_that_is_not_contiguous_keeps_the_draw_order() {
+    let elements = vec![
+        text_box("a", rect(0.0, 0.0, 50.0, 20.0), "가"),
+        text_box("x", rect(60.0, 0.0, 50.0, 20.0), "엑스"),
+        text_box("b", rect(120.0, 0.0, 50.0, 20.0), "나"),
+    ];
+    let slide = RichSlide {
+        layout: SlideMasterLayout::Blank,
+        elements,
+        ext: SlideExt {
+            groups: vec![SlideGroup {
+                id: "g".into(),
+                members: vec!["a".into(), "b".into()],
+            }],
+            ..SlideExt::default()
+        },
+        ..RichSlide::default()
+    };
+    let read = OoxmlCodec::unpack_pptx_rich(
+        &OoxmlCodec::pack_pptx_rich(&deck_with(vec![slide.clone()]), false).unwrap(),
+    )
+    .unwrap();
+    let ids: Vec<&str> = read.slides[0]
+        .elements
+        .iter()
+        .map(SlideElement::id)
+        .collect();
+    assert_eq!(ids, ["a", "x", "b"], "x stays between a and b");
+    let read = OdfCodec::unpack_odp_rich(
+        &OdfCodec::pack_odp_rich(&deck_with(vec![slide]).clone()).unwrap(),
+    )
+    .unwrap();
+    let ids: Vec<&str> = read.slides[0]
+        .elements
+        .iter()
+        .map(SlideElement::id)
+        .collect();
+    assert_eq!(ids, ["a", "x", "b"]);
+}
+
+#[test]
+fn odp_animation_ids_are_unique_in_the_whole_document() {
+    let page = || {
+        let mut s = full_slide();
+        s.ext.hidden = false;
+        s
+    };
+    let bytes = OdfCodec::pack_odp_rich(&deck_with(vec![page(), page()])).unwrap();
+    let content = String::from_utf8(
+        slide_xml_of(&bytes)
+            .into_iter()
+            .find(|(p, _)| p == "content.xml")
+            .unwrap()
+            .1,
+    )
+    .unwrap();
+    let ids: Vec<&str> = content
+        .split("xml:id=\"")
+        .skip(1)
+        .map(|r| r.split('"').next().unwrap())
+        .collect();
+    let unique: std::collections::HashSet<&&str> = ids.iter().collect();
+    assert!(ids.len() >= 6);
+    assert_eq!(unique.len(), ids.len(), "{ids:?}");
+}
+
+#[test]
+fn colors_are_written_as_six_digit_upper_case_hex() {
+    let mut slide = full_slide();
+    slide.ext.background = Some(SlideBackground::Solid("#aabbcc".into()));
+    slide.ext.fx[1].shadow.as_mut().unwrap().color = "abcdef".into();
+    let deck = deck_with(vec![slide]);
+    let pptx = slide_xml_of(&OoxmlCodec::pack_pptx_rich(&deck, false).unwrap());
+    let xml = String::from_utf8(
+        pptx.into_iter()
+            .find(|(p, _)| p == "ppt/slides/slide1.xml")
+            .unwrap()
+            .1,
+    )
+    .unwrap();
+    assert!(xml.contains("<a:srgbClr val=\"AABBCC\"/>"));
+    assert!(xml.contains("<a:srgbClr val=\"ABCDEF\">"));
+    assert!(!xml.contains("srgbClr val=\"#"));
+}
+
 fn page_count(pdf: &[u8]) -> usize {
     let text = String::from_utf8_lossy(pdf);
     text.matches("/Type /Page").count() - text.matches("/Type /Pages").count()

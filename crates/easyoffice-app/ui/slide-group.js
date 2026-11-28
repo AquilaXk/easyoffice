@@ -5,22 +5,27 @@
   // `slide.groups`; its members are element ids or ids of other groups. Elements keep their own
   // coordinates and a group has no frame of its own: it moves, turns and flips its members. All
   // functions work on slide objects, so they run the same in the editor and in tests.
+  const MAX_NESTING = 8;
   const round2 = (v) => Math.round(v * 100) / 100;
+  // Selector of the card of an element; ids come from files, so they are escaped.
+  const cardSelector = (id) => `[data-element-id="${typeof host.CSS?.escape === "function" ? host.CSS.escape(String(id)) : String(id).replace(/["\\]/g, "\\$&")}"]`;
   const norm360 = (deg) => round2(((deg % 360) + 360) % 360) % 360;
   const groupsOf = (slide) => (Array.isArray(slide?.groups) ? slide.groups : []);
   const groupById = (slide, id) => groupsOf(slide).find((g) => g.id === id) || null;
   const parentOf = (slide, id) => groupsOf(slide).find((g) => g.members.includes(id)) || null;
 
+  // The outermost group `id` is in (or `id` itself); a payload with a cycle or a chain deeper than the
+  // model allows stops at the depth limit.
   function topOf(slide, id) {
     let cur = id;
-    for (let p = parentOf(slide, cur); p; p = parentOf(slide, cur)) cur = p.id;
+    for (let depth = 0, p = parentOf(slide, cur); p && depth <= MAX_NESTING; depth += 1, p = parentOf(slide, cur)) cur = p.id;
     return cur;
   }
 
-  // Element ids an id stands for: itself, or every element of a group.
-  function leavesOf(slide, id) {
-    const g = groupById(slide, id);
-    return g ? g.members.flatMap((m) => leavesOf(slide, m)) : [id];
+  // Element ids an id stands for: itself, or every element of a group (nesting is bounded the same way).
+  function leavesOf(slide, id, depth = 0) {
+    const g = depth <= MAX_NESTING ? groupById(slide, id) : null;
+    return g ? g.members.flatMap((m) => leavesOf(slide, m, depth + 1)) : [id];
   }
 
   // Everything that moves with `id`: all elements of the outermost group it is in.
@@ -109,7 +114,7 @@
   }
 
   host.__EASYOFFICE_SLIDE_GROUP__ = {
-    groupById, parentOf, topOf, leavesOf, expand, group, ungroup, nextGroupId,
+    cardSelector, groupById, parentOf, topOf, leavesOf, expand, group, ungroup, nextGroupId,
     rotatedBounds, unionBounds, centerOf, snapshot, transformAbout, transform, norm360,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

@@ -10,8 +10,8 @@ use crate::pptx_master::footer_placeholder_specs;
 use crate::rich_image_writers::MediaParts;
 use crate::rich_slide::{SlideBox, SlideTextAlign, EMU_PER_PT};
 use crate::rich_slide_ext::{
-    AnimClass, AnimDir, AnimEffect, AnimStart, ElementFx, SlideAnim, SlideBackground, SlideBullet,
-    SlideDash, SlideDate, SlideExt, SlideNumberStyle, SlideParaFmt, SlideShadow,
+    hex6, AnimClass, AnimDir, AnimEffect, AnimStart, ElementFx, SlideAnim, SlideBackground,
+    SlideBullet, SlideDash, SlideDate, SlideExt, SlideNumberStyle, SlideParaFmt, SlideShadow,
 };
 use crate::XmlSanitizer;
 
@@ -37,6 +37,7 @@ impl OdpFills {
         self.gradients += 1;
         let name = format!("eoGrad{}", self.gradients);
         let odf = (90 + 360 - i32::from(angle_deg) % 360) % 360;
+        let (from, to) = (hex6(from), hex6(to));
         let _ = write!(
             self.xml,
             "<draw:gradient draw:name=\"{name}\" draw:style=\"linear\" draw:start-color=\"#{from}\" draw:end-color=\"#{to}\" draw:start-intensity=\"100%\" draw:end-intensity=\"100%\" draw:angle=\"{odf}deg\" draw:border=\"0%\"/>"
@@ -72,6 +73,7 @@ pub(crate) fn page_attrs(ext: &SlideExt, fills: &mut OdpFills, media: &mut Media
     match &ext.background {
         None => {}
         Some(SlideBackground::Solid(c)) => {
+            let c = hex6(c);
             let _ = write!(s, " draw:fill=\"solid\" draw:fill-color=\"#{c}\"");
         }
         Some(SlideBackground::Gradient {
@@ -114,7 +116,7 @@ pub(crate) fn shadow_attrs(shadow: Option<&SlideShadow>) -> String {
         " draw:shadow=\"visible\" draw:shadow-offset-x=\"{:.3}pt\" draw:shadow-offset-y=\"{:.3}pt\" draw:shadow-color=\"#{}\" draw:shadow-opacity=\"{}%\" loext:shadow-blur=\"{:.3}pt\"",
         s.dist_pt * rad.cos(),
         s.dist_pt * rad.sin(),
-        s.color,
+        hex6(&s.color),
         s.alpha_pct,
         s.blur_pt
     )

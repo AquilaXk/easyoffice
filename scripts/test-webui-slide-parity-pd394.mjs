@@ -108,6 +108,43 @@ test("slide state keeps what is valid and dissolves groups and animations that l
   assert.equal(pruned.anims[0].target, "a", "an animation of a dissolved group follows its member");
 });
 
+test("group walkers stop on a cycle and a chain deeper than the model allows is opened", () => {
+  const env = loadModules();
+  const g = env.__EASYOFFICE_SLIDE_GROUP__, ext = env.__EASYOFFICE_SLIDE_EXT__;
+  const cyclic = { elements: [el("a", 0, 0)], groups: [{ id: "A", members: ["B", "a"] }, { id: "B", members: ["A", "a"] }] };
+  assert.ok(typeof g.topOf(cyclic, "a") === "string");
+  assert.ok(Array.isArray(g.leavesOf(cyclic, "A")));
+  const pruned = ext.pruneRefs(cyclic.groups, [], new Set(["a"]));
+  assert.ok(pruned.groups.length <= 2);
+  const ids = Array.from({ length: 14 }, (_, i) => "e" + i);
+  const chain = Array.from({ length: 12 }, (_, i) => ({ id: "g" + i, members: [i === 0 ? "e0" : "g" + (i - 1), ids[i + 1]] }));
+  const flat = ext.pruneRefs(chain, [], new Set(ids));
+  const parent = new Map(flat.groups.flatMap((x) => x.members.map((m) => [m, x.id])));
+  for (const x of flat.groups) {
+    let depth = 0;
+    for (let cur = x.id; parent.has(cur); cur = parent.get(cur)) depth += 1;
+    assert.ok(depth <= 8, `${x.id} is nested ${depth} deep`);
+  }
+  const many = Array.from({ length: 70 }, (_, i) => ({ id: "m" + i, members: ["x" + i, "y" + i] }));
+  const elementIds = new Set(many.flatMap((x) => x.members));
+  assert.ok(ext.pruneRefs(many, [], elementIds).groups.length <= 64);
+});
+
+test("ids from a file are escaped in card selectors, footers are cut by UTF-8 bytes and the Mac group keys are the official ones", () => {
+  const env = loadModules();
+  assert.equal(env.__EASYOFFICE_SLIDE_GROUP__.cardSelector('a"]x'), '[data-element-id="a\\"]x"]');
+  const text = "가".repeat(600);
+  const clipped = env.__EASYOFFICE_SLIDE_EXT__.clipBytes(text, 1024);
+  assert.equal(new TextEncoder().encode(clipped).length, 1023);
+  const footer = env.__EASYOFFICE_SLIDE_EXT__.normalize({ footer: { text } }, new Set()).footer;
+  assert.ok(new TextEncoder().encode(footer.text).length <= 1024);
+  const catalog = {};
+  loadUiModule(UI("ribbon-catalog.js"), catalog);
+  assert.equal(catalog.__EASYOFFICE_RIBBON_CATALOG__.formatPlatformShortcut("Ctrl+Alt+G", "⌘"), "⌥⌘G");
+  const mac = catalog.__EASYOFFICE_RIBBON_CATALOG__.WORKSPACE_SHORTCUT_BINDINGS.filter((b) => b.action === "slide-group");
+  assert.deepEqual(mac.map((b) => [b.keys, Boolean(b.macOnly), Boolean(b.notMac)]), [["Ctrl+G", false, true], ["Ctrl+Alt+G", true, false]]);
+});
+
 test("animation clicks: each click starts a step, with-previous joins it and after-previous starts a later group", () => {
   const { __EASYOFFICE_SHOW_CLICK_STEPS__: steps } = loadModules();
   const anim = (target, start) => ({ target, start });

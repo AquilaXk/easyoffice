@@ -125,9 +125,13 @@ pub(crate) fn parse_element_fx(
     Ok((!fx.is_default()).then_some(fx))
 }
 
+/// Background pictures decoded so far by their base64 text.
+pub(crate) type BackgroundCache = std::collections::HashMap<String, RichImage>;
+
 fn parse_background(
     v: &StrictJsonValue,
     total_img_bytes: &mut usize,
+    cache: &mut BackgroundCache,
 ) -> Result<SlideBackground, EasyOfficeError> {
     let o = as_object(v, "background")?;
     match opt_str(o, "kind")? {
@@ -149,6 +153,10 @@ fn parse_background(
                 .filter(|s| !s.is_empty())
                 .or(opt_str(o, "data")?.filter(|s| !s.is_empty()))
                 .ok_or_else(|| invalid("슬라이드 배경 그림에 'data'가 필요합니다."))?;
+            // Slides that carry the same picture share one decoded buffer and count once.
+            if let Some(img) = cache.get(b64) {
+                return Ok(SlideBackground::Picture(img.clone()));
+            }
             let bytes = base64_codec::decode(b64)
                 .ok_or_else(|| invalid("슬라이드 배경 그림 Base64 디코딩에 실패했습니다."))?;
             *total_img_bytes = total_img_bytes.saturating_add(bytes.len());
@@ -157,7 +165,9 @@ fn parse_background(
                     "슬라이드 전체 이미지 크기가 상한(128 MiB)을 초과했습니다.".to_string(),
                 ));
             }
-            Ok(SlideBackground::Picture(RichImage::new(bytes, "")?))
+            let img = RichImage::new(bytes, "")?;
+            cache.insert(b64.to_string(), img.clone());
+            Ok(SlideBackground::Picture(img))
         }
         other => Err(invalid(format!(
             "지원하지 않는 슬라이드 배경 종류: {}",
@@ -274,11 +284,12 @@ pub(crate) fn parse_slide_ext(
     fx: Vec<ElementFx>,
     budget: &mut Budget,
     total_img_bytes: &mut usize,
+    cache: &mut BackgroundCache,
 ) -> Result<SlideExt, EasyOfficeError> {
     Ok(SlideExt {
         hidden: flag(obj, "hidden")?,
         background: field(obj, "background")
-            .map(|b| parse_background(b, total_img_bytes))
+            .map(|b| parse_background(b, total_img_bytes, cache))
             .transpose()?,
         footer: field(obj, "footer")
             .map(parse_footer)

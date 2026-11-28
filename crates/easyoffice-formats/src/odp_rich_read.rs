@@ -19,7 +19,7 @@ use crate::rich_slide::{
     DEFAULT_SLIDE_FONT_PT, DEFAULT_SLIDE_STROKE_PT, MAX_SLIDES_PER_DECK, MAX_SLIDE_FONT_PT,
     MAX_SLIDE_STROKE_PT, MAX_SLIDE_TABLE_COLS, MAX_SLIDE_TABLE_ROWS, MIN_SLIDE_FONT_PT,
 };
-use crate::rich_slide_ext::{ElementFx, SlideOutline};
+use crate::rich_slide_ext::{charge_background, ElementFx, SlideOutline};
 use crate::rtf_xml_helpers::{extract_attr, extract_tag_bodies};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{EasyOfficeError, RichImage, XmlSanitizer, ZipArchiveEntry};
@@ -764,6 +764,7 @@ pub fn unpack_odp_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> {
     }
     let mut reader = XmlReader::with_budget(&content_xml, MAX_ODP_XML_EVENTS);
     let (mut media_cache, mut total_el, mut total_img_b) = (HashMap::new(), 0usize, 0usize);
+    let mut seen_bg = std::collections::HashSet::new();
     let mut slides = Vec::new();
 
     while let Some(ev) = reader.next_event()? {
@@ -819,12 +820,26 @@ pub fn unpack_odp_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> {
                     (total_el, total_img_b) = (acc.total_el, acc.total_img_b);
                     ctx.budget.charge(acc.notes.len(), "ODP 발표자 노트")?;
                     let page = style_maps.x.page(&page_style);
-                    let background = style_maps.x.background(&page, |href| {
-                        let path = safe_package_path(href)?;
-                        let entry = entry_map.get(path.as_str())?;
-                        RichImage::new(entry.data.clone(), "").ok()
-                    });
-                    acc.x.background = background;
+                    // A background picture is decoded once however many pages use it; the cache hands out
+                    // clones of one shared buffer, and the pages' total counts it once.
+                    acc.x.background = style_maps.x.background(&page, |href| {
+                        let path = safe_package_path(href).ok_or_else(|| {
+                            EasyOfficeError::SecurityViolation(format!(
+                                "ODP 배경 그림 경로가 안전하지 않습니다: {href}"
+                            ))
+                        })?;
+                        if let Some(img) = media_cache.get(&path) {
+                            return Ok(img.clone());
+                        }
+                        let entry = entry_map.get(path.as_str()).ok_or_else(|| {
+                            EasyOfficeError::CorruptedContainer(format!(
+                                "ODP 배경 그림 '{path}'가 누락되었습니다."
+                            ))
+                        })?;
+                        let img = RichImage::new(entry.data.clone(), "")?;
+                        media_cache.insert(path, img.clone());
+                        Ok(img)
+                    })?;
                     let s_title = if !acc.title_parts.is_empty() {
                         acc.title_parts.join("\n")
                     } else if acc.els.is_empty() {
@@ -834,6 +849,7 @@ pub fn unpack_odp_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> {
                     };
                     acc.bullets.extend(acc.loose);
                     let ext = finish_ext(acc.x, &mut acc.els, page.hidden)?;
+                    charge_background(&ext, &mut seen_bg, &mut total_img_b)?;
                     slides.push(RichSlide {
                         title: s_title,
                         bullets: acc.bullets,

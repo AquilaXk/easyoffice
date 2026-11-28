@@ -410,10 +410,10 @@
     { keys: "Alt+ArrowDown", action: "slide-move-down", module: "SLIDE", scope: "#slide-thumb-list" },
     { keys: "Delete", action: "slide-delete", module: "SLIDE", bareKey: true, scope: "#slide-thumb-list" },
     // Group and ungroup of the slide objects. Ctrl+G is also the spreadsheet's 이동: the same combination may be
-    // bound once per module. On macOS the slide keys are ⌘⌥G / ⌘⌥⇧G (the system keeps ⌘G for find-next), and the
-    // Control key alone works as it does for 이동.
-    { keys: "Ctrl+G", action: "slide-group", module: "SLIDE", macControl: true, bareKey: true },
-    { keys: "Ctrl+Shift+G", action: "slide-ungroup", module: "SLIDE", macControl: true, bareKey: true },
+    // bound once per module. On macOS the slide keys are ⌘⌥G / ⌘⌥⇧G only (`notMac` leaves ⌘G to the system's
+    // find-next).
+    { keys: "Ctrl+G", action: "slide-group", module: "SLIDE", notMac: true, bareKey: true },
+    { keys: "Ctrl+Shift+G", action: "slide-ungroup", module: "SLIDE", notMac: true, bareKey: true },
     { keys: "Ctrl+Alt+G", action: "slide-group", module: "SLIDE", macOnly: true, bareKey: true },
     { keys: "Ctrl+Alt+Shift+G", action: "slide-ungroup", module: "SLIDE", macOnly: true, bareKey: true },  ]);
 

@@ -65,8 +65,14 @@ pub(crate) struct OdpExtStyles {
 }
 
 /// The files keep lengths and angles to a few decimals, so values read back are rounded to 0.01.
+/// A value that overflows while it is rounded (a length of 1e308) reads as 0.
 fn round2(v: f64) -> f64 {
-    (v * 100.0).round() / 100.0
+    let r = (v * 100.0).round() / 100.0;
+    if r.is_finite() {
+        r
+    } else {
+        0.0
+    }
 }
 
 fn color_attr(attrs: &Attrs<'_>, key: &str) -> Option<String> {
@@ -245,9 +251,9 @@ impl OdpExtStyles {
     pub(crate) fn background(
         &self,
         page: &PageStyle,
-        resolve_image: impl Fn(&str) -> Option<crate::RichImage>,
-    ) -> Option<crate::SlideBackground> {
-        match page.fill.as_str() {
+        mut resolve_image: impl FnMut(&str) -> Result<crate::RichImage, EasyOfficeError>,
+    ) -> Result<Option<crate::SlideBackground>, EasyOfficeError> {
+        Ok(match page.fill.as_str() {
             "solid" => page.color.clone().map(crate::SlideBackground::Solid),
             "gradient" => {
                 page.name
@@ -259,14 +265,12 @@ impl OdpExtStyles {
                         angle_deg: *angle,
                     })
             }
-            "bitmap" => page
-                .name
-                .as_ref()
-                .and_then(|n| self.images.get(n))
-                .and_then(|href| resolve_image(href))
-                .map(crate::SlideBackground::Picture),
+            "bitmap" => match page.name.as_ref().and_then(|n| self.images.get(n)) {
+                Some(href) => Some(crate::SlideBackground::Picture(resolve_image(href)?)),
+                None => None,
+            },
             _ => None,
-        }
+        })
     }
 }
 
@@ -331,6 +335,8 @@ pub(crate) fn parse_transform(attrs: &Attrs<'_>) -> Option<OdfTransform> {
             parse_length_pt(parts.next()?)?,
         ))
     });
+    // A translation that overflows (1e308cm) is left out rather than refusing the file.
+    let translate = translate.filter(|(x, y)| x.is_finite() && y.is_finite());
     Some(OdfTransform {
         rotation_deg,
         translate,

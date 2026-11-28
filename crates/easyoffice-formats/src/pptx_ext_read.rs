@@ -11,8 +11,9 @@ use crate::rich_slide::{emu_to_pt, SlideElement, MAX_SLIDE_STROKE_PT};
 use crate::rich_slide_ext::{
     AnimClass, AnimDir, AnimEffect, AnimStart, ElementFx, SlideAnim, SlideBackground, SlideBullet,
     SlideDash, SlideDate, SlideExt, SlideFooter, SlideGroup, SlideNumberStyle, SlideOutline,
-    SlideParaFmt, SlideShadow, DEFAULT_ANIM_MS, MAX_ANIM_MS, MAX_LINE_SPACING_PCT,
-    MAX_PARA_SPACE_PT, MAX_SHADOW_PT, MAX_SLIDE_ANIMS, MAX_SLIDE_GROUPS, MIN_LINE_SPACING_PCT,
+    SlideParaFmt, SlideShadow, DEFAULT_ANIM_MS, MAX_ANIM_MS, MAX_GROUP_NESTING,
+    MAX_LINE_SPACING_PCT, MAX_PARA_SPACE_PT, MAX_SHADOW_PT, MAX_SLIDE_ANIMS, MAX_SLIDE_GROUPS,
+    MIN_LINE_SPACING_PCT,
 };
 use crate::xml_stream::{attr, XmlEvent};
 use crate::EasyOfficeError;
@@ -117,6 +118,11 @@ fn num<T: std::str::FromStr>(attrs: &crate::xml_stream::Attrs<'_>, key: &str) ->
     attr(attrs, key).and_then(|v| v.trim().parse().ok())
 }
 
+/// A number attribute; `NaN` and infinity (which `f64` parses from text) read as missing.
+fn fnum(attrs: &crate::xml_stream::Attrs<'_>, key: &str) -> Option<f64> {
+    num::<f64>(attrs, key).filter(|v| v.is_finite())
+}
+
 fn dash_of(val: &str) -> SlideDash {
     match val {
         "dot" | "sysDot" => SlideDash::Dot,
@@ -173,7 +179,7 @@ pub(crate) fn scan_fx(
                         out.spid = attr(attrs, "id").map(|s| s.into_owned())
                     }
                     ("xfrm", "spPr") => {
-                        let rot = num::<f64>(attrs, "rot").unwrap_or(0.0) / ANGLE_UNIT;
+                        let rot = fnum(attrs, "rot").unwrap_or(0.0) / ANGLE_UNIT;
                         out.fx.rotation_deg = rot.rem_euclid(360.0);
                         out.fx.flip_h =
                             attr(attrs, "flipH").is_some_and(|v| v == "1" || v == "true");
@@ -181,8 +187,8 @@ pub(crate) fn scan_fx(
                             attr(attrs, "flipV").is_some_and(|v| v == "1" || v == "true");
                     }
                     ("ln", "spPr") => {
-                        ln_w = num::<f64>(attrs, "w")
-                            .map(|w| emu_to_pt(w).clamp(0.0, MAX_SLIDE_STROKE_PT))
+                        ln_w =
+                            fnum(attrs, "w").map(|w| emu_to_pt(w).clamp(0.0, MAX_SLIDE_STROKE_PT))
                     }
                     ("prstDash", "ln") => {
                         out.fx.dash = attr(attrs, "val").map_or(SlideDash::Solid, |v| dash_of(&v))
@@ -191,11 +197,11 @@ pub(crate) fn scan_fx(
                         shadow = Some(SlideShadow {
                             color: "000000".to_string(),
                             alpha_pct: 100,
-                            blur_pt: emu_to_pt(num::<f64>(attrs, "blurRad").unwrap_or(0.0))
+                            blur_pt: emu_to_pt(fnum(attrs, "blurRad").unwrap_or(0.0))
                                 .clamp(0.0, MAX_SHADOW_PT),
-                            dist_pt: emu_to_pt(num::<f64>(attrs, "dist").unwrap_or(0.0))
+                            dist_pt: emu_to_pt(fnum(attrs, "dist").unwrap_or(0.0))
                                 .clamp(0.0, MAX_SHADOW_PT),
-                            angle_deg: (num::<f64>(attrs, "dir").unwrap_or(0.0) / ANGLE_UNIT)
+                            angle_deg: (fnum(attrs, "dir").unwrap_or(0.0) / ANGLE_UNIT)
                                 .rem_euclid(360.0),
                         });
                     }
@@ -215,7 +221,7 @@ pub(crate) fn scan_fx(
                         para.justify = attr(attrs, "algn").is_some_and(|a| a == "just");
                     }
                     ("spcPct", "lnSpc") if ppr_seen => {
-                        para.line_spacing_pct = num::<f64>(attrs, "val").map(|v| {
+                        para.line_spacing_pct = fnum(attrs, "val").map(|v| {
                             (v / 1_000.0).round().clamp(
                                 f64::from(MIN_LINE_SPACING_PCT),
                                 f64::from(MAX_LINE_SPACING_PCT),
@@ -223,8 +229,8 @@ pub(crate) fn scan_fx(
                         });
                     }
                     ("spcPts", "spcBef" | "spcAft") if ppr_seen => {
-                        let pts = num::<f64>(attrs, "val")
-                            .map(|v| (v / 100.0).clamp(0.0, MAX_PARA_SPACE_PT));
+                        let pts =
+                            fnum(attrs, "val").map(|v| (v / 100.0).clamp(0.0, MAX_PARA_SPACE_PT));
                         if parent == "spcBef" {
                             para.space_before_pt = pts;
                         } else {
@@ -273,8 +279,8 @@ pub(crate) fn parse_bg(
                         kind = ln
                     }
                     ("lin", "gradFill") => {
-                        angle = (num::<f64>(attrs, "ang").unwrap_or(0.0) / ANGLE_UNIT)
-                            .rem_euclid(360.0) as u16
+                        angle = (fnum(attrs, "ang").unwrap_or(0.0) / ANGLE_UNIT).rem_euclid(360.0)
+                            as u16
                     }
                     ("blip", "blipFill") => {
                         rid = attr(attrs, "r:embed")
@@ -486,7 +492,8 @@ pub(crate) fn transform_group(
         );
         r.x = nx - r.w / 2.0;
         r.y = ny - r.h / 2.0;
-        el.set_rect(r);
+        // A turned group can carry an element past the coordinate limit; it stays at the edge.
+        el.set_rect(r.scaled(1.0, 1.0));
         let pos = fxs.iter().position(|(k, _)| *k == i).unwrap_or_else(|| {
             fxs.push((i, ElementFx::default()));
             fxs.len() - 1
@@ -514,6 +521,50 @@ fn unique_name(base: &str, taken: &mut HashSet<String>) -> String {
     name
 }
 
+/// Opens groups beyond the model's limits into their members, so a file that nests deeper than the editor
+/// keeps every element instead of being refused: the groups past the count limit first (the outermost come
+/// last), then the outermost group of any chain nested too deep.
+fn flatten_excess_groups(mut groups: Vec<SlideGroup>) -> Vec<SlideGroup> {
+    fn dissolve(groups: &mut Vec<SlideGroup>, at: usize) {
+        let gone = groups.remove(at);
+        for g in groups.iter_mut() {
+            if let Some(p) = g.members.iter().position(|m| *m == gone.id) {
+                g.members.splice(p..=p, gone.members.iter().cloned());
+            }
+        }
+    }
+    while groups.len() > MAX_SLIDE_GROUPS {
+        let last = groups.len() - 1;
+        dissolve(&mut groups, last);
+    }
+    loop {
+        let top_of_deep_chain = {
+            let parent: HashMap<&str, &str> = groups
+                .iter()
+                .flat_map(|g| g.members.iter().map(|m| (m.as_str(), g.id.as_str())))
+                .collect();
+            let chain = |start: &str| {
+                let (mut cur, mut depth) = (start, 0usize);
+                while let Some(&p) = parent.get(cur) {
+                    (cur, depth) = (p, depth + 1);
+                }
+                (cur.to_string(), depth)
+            };
+            groups
+                .iter()
+                .map(|g| chain(&g.id))
+                .find(|(_, depth)| *depth > MAX_GROUP_NESTING)
+        };
+        let Some((top, _)) = top_of_deep_chain else {
+            return groups;
+        };
+        let Some(at) = groups.iter().position(|g| g.id == top) else {
+            return groups;
+        };
+        dissolve(&mut groups, at);
+    }
+}
+
 /// Turns what the shape tree gathered into the slide's [`SlideExt`]: element ids are made unique, group
 /// members and animation targets are resolved to ids, and entries that point at nothing are dropped.
 pub(crate) fn finish_ext(
@@ -525,11 +576,6 @@ pub(crate) fn finish_ext(
     for el in els.iter_mut() {
         let id = unique_name(el.id(), &mut taken);
         el.set_id(id);
-    }
-    if acc.groups.len() > MAX_SLIDE_GROUPS {
-        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-            "PPTX 슬라이드 그룹 수가 상한({MAX_SLIDE_GROUPS})을 초과했습니다."
-        )));
     }
     let group_ids: Vec<String> = acc
         .groups
@@ -549,15 +595,17 @@ pub(crate) fn finish_ext(
         Member::El(i) => els[i].id().to_string(),
         Member::Group(g) => group_ids[g].clone(),
     };
-    let groups: Vec<SlideGroup> = acc
-        .groups
-        .iter()
-        .zip(&group_ids)
-        .map(|(g, id)| SlideGroup {
-            id: id.clone(),
-            members: g.members.iter().map(|&m| id_of(m)).collect(),
-        })
-        .collect();
+    let groups: Vec<SlideGroup> = flatten_excess_groups(
+        acc.groups
+            .iter()
+            .zip(&group_ids)
+            .map(|(g, id)| SlideGroup {
+                id: id.clone(),
+                members: g.members.iter().map(|&m| id_of(m)).collect(),
+            })
+            .collect(),
+    );
+    let live: HashSet<String> = groups.iter().map(|g| g.id.clone()).collect();
     let mut ext = SlideExt {
         hidden,
         background: acc.background.take(),
@@ -576,8 +624,13 @@ pub(crate) fn finish_ext(
         let Some(&m) = acc.spids.get(&raw.spid) else {
             continue;
         };
+        let target = id_of(m);
+        // A group that was opened into its members no longer has an id to animate.
+        if matches!(m, Member::Group(_)) && !live.contains(&target) {
+            continue;
+        }
         ext.anims.push(SlideAnim {
-            target: id_of(m),
+            target,
             class: raw.class,
             effect: raw.effect,
             start: raw.start,

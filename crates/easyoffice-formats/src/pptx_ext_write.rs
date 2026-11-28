@@ -13,8 +13,8 @@ use crate::pptx_master::footer_placeholder_specs;
 use crate::rich_image_writers::MediaParts;
 use crate::rich_slide::{pt_to_emu, SlideTextAlign};
 use crate::rich_slide_ext::{
-    AnimClass, AnimDir, AnimEffect, AnimStart, ElementFx, SlideAnim, SlideBackground, SlideBullet,
-    SlideDash, SlideDate, SlideExt, SlideParaFmt,
+    hex6, AnimClass, AnimDir, AnimEffect, AnimStart, ElementFx, SlideAnim, SlideBackground,
+    SlideBullet, SlideDash, SlideDate, SlideExt, SlideParaFmt,
 };
 use crate::XmlSanitizer;
 
@@ -59,7 +59,11 @@ pub(crate) fn push_ln(
     out.push('>');
     match color {
         Some(h) => {
-            let _ = write!(out, "<a:solidFill><a:srgbClr val=\"{h}\"/></a:solidFill>");
+            let _ = write!(
+                out,
+                "<a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill>",
+                hex6(h)
+            );
             match dash {
                 SlideDash::Solid => {}
                 d => {
@@ -83,7 +87,7 @@ pub(crate) fn push_effects(out: &mut String, fx: Option<&ElementFx>) {
         pt_to_emu(s.blur_pt),
         pt_to_emu(s.dist_pt),
         (s.angle_deg * ANGLE_UNIT).round() as i64,
-        s.color,
+        hex6(&s.color),
         u32::from(s.alpha_pct) * 1_000
     );
 }
@@ -158,6 +162,7 @@ pub(crate) fn push_bg(
     out.push_str("<p:bg><p:bgPr>");
     match bg {
         SlideBackground::Solid(c) => {
+            let c = hex6(c);
             let _ = write!(out, "<a:solidFill><a:srgbClr val=\"{c}\"/></a:solidFill>");
         }
         SlideBackground::Gradient {
@@ -165,6 +170,7 @@ pub(crate) fn push_bg(
             to,
             angle_deg,
         } => {
+            let (from, to) = (hex6(from), hex6(to));
             let _ = write!(
                 out,
                 "<a:gradFill rotWithShape=\"1\"><a:gsLst><a:gs pos=\"0\"><a:srgbClr val=\"{from}\"/></a:gs><a:gs pos=\"100000\"><a:srgbClr val=\"{to}\"/></a:gs></a:gsLst><a:lin ang=\"{}\" scaled=\"0\"/></a:gradFill>",

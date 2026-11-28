@@ -644,7 +644,7 @@
       const layer = $("slide-canvas-layer");
       // The rest of the selection (the other members of a group) travels with a moved element.
       const others = mode !== "move" ? [] : ensureElements().filter((e) => e.id !== el.id && selectedIds.has(e.id)).map((e) => ({
-        el: e, x: e.x, y: e.y, card: layer?.querySelector(`[data-element-id="${e.id}"]`),
+        el: e, x: e.x, y: e.y, card: layer?.querySelector(groups.cardSelector(e.id)),
       }));
       activeDrag = {
         mode, dir, el, card, stage, others,
@@ -675,7 +675,7 @@
         moved = moved || delta !== 0;
         groups.transformAbout(snaps, center, { angle: delta });
         members.forEach((m) => {
-          const c = $("slide-canvas-layer")?.querySelector(`[data-element-id="${m.id}"]`);
+          const c = $("slide-canvas-layer")?.querySelector(groups.cardSelector(m.id));
           if (c) { positionElementDom(c, m, stage); c.style.transform = m.rot ? `rotate(${m.rot}deg)` : ""; }
         });
       };
@@ -921,7 +921,7 @@
       e.preventDefault();
       const stage = stageSizeOf(currentAspect(), currentOrientation());
       updateElement(el.id, { x: clamp(el.x + dx, 0, Math.max(0, stage.w - el.w)), y: clamp(el.y + dy, 0, Math.max(0, stage.h - el.h)) });
-      $("slide-canvas-layer")?.querySelector?.(`.slide-el[data-element-id="${el.id}"]`)?.focus?.();
+      $("slide-canvas-layer")?.querySelector?.(`.slide-el${groups.cardSelector(el.id)}`)?.focus?.();
       return true;
     }
 

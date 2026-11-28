@@ -15,7 +15,20 @@
   const DIRECTIONS = new Set(["left", "right", "top", "bottom"]);
   const MAX_ANIM_MS = 60000;
   const DEFAULT_ANIM_MS = 500;
-  const MAX_FOOTER_CHARS = 512;
+  const MAX_FOOTER_BYTES = 1024; // the file engine's limit, counted in UTF-8 bytes
+  const MAX_GROUPS = 64;
+  const MAX_NESTING = 8;
+  const encoder = new TextEncoder();
+  // The longest start of `text` within `limit` UTF-8 bytes, cut between characters.
+  function clipBytes(text, limit) {
+    let out = "", used = 0;
+    for (const ch of String(text)) {
+      used += encoder.encode(ch).length;
+      if (used > limit) break;
+      out += ch;
+    }
+    return out;
+  }
   const FOOTER_SLOTS = Object.freeze({
     date: { left: 6.875, width: 22.5, align: "left" },
     text: { left: 33.125, width: 33.75, align: "center" },
@@ -55,8 +68,8 @@
     const out = {};
     if (raw.number === true) out.number = true;
     if (raw.date?.kind === "auto") out.date = { kind: "auto" };
-    else if (raw.date?.kind === "fixed" && String(raw.date.text ?? "") !== "") out.date = { kind: "fixed", text: String(raw.date.text).slice(0, MAX_FOOTER_CHARS) };
-    if (typeof raw.text === "string" && raw.text !== "") out.text = raw.text.slice(0, MAX_FOOTER_CHARS);
+    else if (raw.date?.kind === "fixed" && String(raw.date.text ?? "") !== "") out.date = { kind: "fixed", text: clipBytes(raw.date.text, MAX_FOOTER_BYTES) };
+    if (typeof raw.text === "string" && raw.text !== "") out.text = clipBytes(raw.text, MAX_FOOTER_BYTES);
     return Object.keys(out).length > 0 ? out : null;
   }
 
@@ -77,10 +90,36 @@
     });
   }
 
+  // `id` opened into its members in every group that holds it.
+  function dissolve(live, id) {
+    const gone = live.find((g) => g.id === id);
+    if (!gone) return live;
+    return live.filter((g) => g !== gone).map((g) => ({ id: g.id, members: g.members.flatMap((m) => (m === id ? gone.members : [m])) }));
+  }
+
+  // Groups past the count or nesting limit (or in a cycle) are opened into their members, as the file
+  // readers do, so a slide from a file or a payload never keeps a chain the walkers would not stop on.
+  function flattenExcess(groups) {
+    let live = groups;
+    while (live.length > MAX_GROUPS) live = dissolve(live, live.at(-1).id);
+    for (let pass = 0; pass <= groups.length; pass += 1) {
+      const parent = new Map(live.flatMap((g) => g.members.map((m) => [m, g.id])));
+      let offender = null;
+      for (const g of live) {
+        let cur = g.id, depth = 0;
+        while (parent.has(cur) && depth <= MAX_NESTING + live.length && !(depth > 0 && cur === g.id)) { cur = parent.get(cur); depth += 1; }
+        if ((depth > 0 && cur === g.id) || depth > MAX_NESTING) { offender = cur; break; }
+      }
+      if (!offender) return live;
+      live = dissolve(live, offender);
+    }
+    return live;
+  }
+
   // Groups and animations that point at elements or groups the slide no longer has: a group that falls
   // below two members dissolves, and what pointed at it points at its remaining member.
   function pruneRefs(groups, anims, elementIds) {
-    let live = groups.map((g) => ({ id: g.id, members: [...g.members] }));
+    let live = flattenExcess(groups.map((g) => ({ id: g.id, members: [...g.members] })));
     for (let changed = true; changed;) {
       changed = false;
       const known = new Set([...elementIds, ...live.map((g) => g.id)]);
@@ -191,6 +230,6 @@
   }
 
   host.__EASYOFFICE_SLIDE_EXT__ = {
-    CLASS_EFFECTS, normalize, hydrate, wire, prune, pruneRefs, paintStage, footerParts, backgroundCss, todayText,
+    CLASS_EFFECTS, clipBytes, normalize, hydrate, wire, prune, pruneRefs, paintStage, footerParts, backgroundCss, todayText,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

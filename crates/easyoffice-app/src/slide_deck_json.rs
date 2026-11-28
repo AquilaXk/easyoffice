@@ -297,6 +297,7 @@ pub(crate) fn parse_slide_deck(
     let title = opt_str(entries, "title")?.unwrap_or("").to_string();
     let mut slides = Vec::with_capacity(items.len());
     let (mut total_elements, mut total_img_bytes) = (0usize, 0usize);
+    let mut bg_cache = crate::slide_ext_json::BackgroundCache::new();
 
     for item in items {
         budget.take(1)?;
@@ -346,7 +347,7 @@ pub(crate) fn parse_slide_deck(
                 elements.push(el);
             }
         }
-        let ext = parse_slide_ext(obj, fxs, budget, &mut total_img_bytes)?;
+        let ext = parse_slide_ext(obj, fxs, budget, &mut total_img_bytes, &mut bg_cache)?;
         slides.push(RichSlide {
             title: opt_str(obj, "title")?.unwrap_or("").to_string(),
             bullets,

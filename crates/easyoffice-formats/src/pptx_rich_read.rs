@@ -1,6 +1,6 @@
 //! Lossless ECMA-376 PresentationML (`.pptx`/`.ppsx`) reader for [`RichSlideDeck`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::decode_budget::DecodeBudget;
 use crate::office_codecs::validate_zip_xml_entries;
@@ -19,7 +19,7 @@ use crate::rich_slide::{
     emu_to_pt, normalize_table_rows, push_checked_slide_element, RichSlide, RichSlideDeck,
     SlideBox, SlideElement, SlideTransition,
 };
-use crate::rich_slide_ext::ElementFx;
+use crate::rich_slide_ext::{charge_background, ElementFx};
 use crate::rtf_xml_helpers::{extract_attr, extract_attr_from_fragment, extract_balanced_elements};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
@@ -636,6 +636,7 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
     let mut theme_cache = PptxThemeCache::new(&entry_map, &mut budget)?;
     let mut media_cache = HashMap::new();
     let (mut total_el, mut total_img_b) = (0usize, 0usize);
+    let mut seen_bg = HashSet::new();
     let mut slides = Vec::with_capacity(ordered_slides.len());
 
     for s_entry in ordered_slides {
@@ -785,6 +786,7 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
         acc.bullets.extend(acc.loose);
         let hidden = matches!(extract_attr(s_xml, "<p:sld", "show"), Some("0" | "false"));
         let ext = finish_ext(std::mem::take(&mut acc.x), &mut acc.els, hidden)?;
+        charge_background(&ext, &mut seen_bg, &mut total_img_b)?;
         slides.push(RichSlide {
             title: s_title,
             bullets: acc.bullets,

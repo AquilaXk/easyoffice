@@ -22,7 +22,7 @@ use crate::rich_slide::{
     pt_to_emu, pt_to_signed_emu, RichSlideDeck, SlideBox, SlideElement, SlideMasterLayout,
     SlideTextAlign, SlideTransition,
 };
-use crate::rich_slide_ext::{ElementFx, SlideDash, SlideExt, SlideNode, SlideParaFmt};
+use crate::rich_slide_ext::{hex6, ElementFx, SlideDash, SlideExt, SlideNode, SlideParaFmt};
 use crate::{EasyOfficeError, XmlSanitizer};
 
 fn push_xfrm(out: &mut String, tag: &str, r: SlideBox, fx: Option<&ElementFx>) {
@@ -42,6 +42,7 @@ fn push_xfrm(out: &mut String, tag: &str, r: SlideBox, fx: Option<&ElementFx>) {
 fn push_fill(out: &mut String, fill: Option<&str>) {
     match fill {
         Some(h) => {
+            let h = hex6(h);
             let _ = write!(out, "<a:solidFill><a:srgbClr val=\"{h}\"/></a:solidFill>");
         }
         None => out.push_str("<a:noFill/>"),
@@ -62,7 +63,12 @@ fn push_paras(
     let u = if biu.2 { "sng" } else { "none" };
     let ppr = ppr_xml(align, para);
     let clr = color
-        .map(|h| format!("<a:solidFill><a:srgbClr val=\"{h}\"/></a:solidFill>"))
+        .map(|h| {
+            format!(
+                "<a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill>",
+                hex6(h)
+            )
+        })
         .unwrap_or_default();
     for line in text.split('\n') {
         let _ = write!(
@@ -333,6 +339,7 @@ impl Emit<'_> {
                 }
                 match cell_fill {
                     Some(h) => {
+                        let h = hex6(h);
                         let _ = write!(out, "</a:txBody><a:tcPr><a:solidFill><a:srgbClr val=\"{h}\"/></a:solidFill></a:tcPr></a:tc>");
                     }
                     None => out.push_str("</a:txBody><a:tcPr/></a:tc>"),

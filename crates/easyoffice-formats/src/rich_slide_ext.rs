@@ -331,9 +331,13 @@ impl SlideExt {
             .collect()
     }
 
-    pub fn background_image_bytes(&self) -> usize {
+    /// Size of the background picture when no slide seen so far (`seen`) shares it, else 0: a picture
+    /// that many slides share is one buffer and counts once.
+    pub fn new_background_bytes(&self, seen: &mut HashSet<usize>) -> usize {
         match &self.background {
-            Some(SlideBackground::Picture(img)) => img.bytes().len(),
+            Some(SlideBackground::Picture(img)) if seen.insert(img.bytes().as_ptr() as usize) => {
+                img.bytes().len()
+            }
             _ => 0,
         }
     }
@@ -468,6 +472,27 @@ impl SlideExt {
     }
 }
 
+/// Adds a slide's new background picture to the deck's image total, refusing at once when it is over the
+/// deck limit (readers call this per slide, so a hostile file never builds up beyond it).
+pub(crate) fn charge_background(
+    ext: &SlideExt,
+    seen: &mut HashSet<usize>,
+    total: &mut usize,
+) -> Result<(), EasyOfficeError> {
+    *total = total.saturating_add(ext.new_background_bytes(seen));
+    if *total > crate::rich_slide::MAX_SLIDE_TOTAL_IMAGE_BYTES {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(
+            "슬라이드 전체 이미지 크기가 상한(128 MiB)을 초과했습니다.".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// A color the writers can put in a file: `RRGGBB` upper case (`000000` for a value that is none).
+pub(crate) fn hex6(raw: &str) -> String {
+    normalize_hex_color(raw).unwrap_or_else(|| "000000".to_string())
+}
+
 fn check_hex(raw: &str, field: &str) -> Result<(), EasyOfficeError> {
     if normalize_hex_color(raw).is_none() {
         return Err(EasyOfficeError::InvalidArgument(format!(
@@ -514,7 +539,13 @@ impl SlideExt {
             .map(|(i, e)| (e.id(), i))
             .collect();
         let mut owner: Vec<Option<&SlideGroup>> = vec![None; elements.len()];
-        for g in self.top_groups() {
+        // A group whose elements are not next to each other in the draw order cannot be written as one
+        // shape without moving elements past others, so its elements are written in place, ungrouped.
+        for g in self
+            .top_groups()
+            .into_iter()
+            .filter(|g| self.is_contiguous(&g.id, &index))
+        {
             for i in self.leaves_of(&g.id, &index) {
                 owner[i] = Some(g);
             }
@@ -543,15 +574,34 @@ impl SlideExt {
         })
     }
 
+    fn is_contiguous(&self, id: &str, index: &HashMap<&str, usize>) -> bool {
+        let mut leaves = self.leaves_of(id, index);
+        leaves.sort_unstable();
+        leaves.windows(2).all(|w| w[1] == w[0] + 1)
+    }
+
+    /// The members of `g` as nodes; an inner group that is not contiguous is opened into its members.
+    fn collect_kids<'a>(
+        &'a self,
+        g: &'a SlideGroup,
+        index: &HashMap<&str, usize>,
+        out: &mut Vec<SlideNode<'a>>,
+    ) {
+        for m in &g.members {
+            match (index.get(m.as_str()), self.group_of(m)) {
+                (Some(&i), _) => out.push(SlideNode::Leaf(i)),
+                (None, Some(sub)) if self.is_contiguous(&sub.id, index) => {
+                    out.push(self.group_node(sub, index));
+                }
+                (None, Some(sub)) => self.collect_kids(sub, index, out),
+                (None, None) => {}
+            }
+        }
+    }
+
     fn group_node<'a>(&'a self, g: &'a SlideGroup, index: &HashMap<&str, usize>) -> SlideNode<'a> {
-        let mut kids: Vec<SlideNode<'a>> = g
-            .members
-            .iter()
-            .filter_map(|m| match index.get(m.as_str()) {
-                Some(&i) => Some(SlideNode::Leaf(i)),
-                None => self.group_of(m).map(|sub| self.group_node(sub, index)),
-            })
-            .collect();
+        let mut kids = Vec::new();
+        self.collect_kids(g, index, &mut kids);
         kids.sort_by_key(SlideNode::min_leaf);
         SlideNode::Group {
             id: &g.id,
