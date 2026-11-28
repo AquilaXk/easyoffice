@@ -39,7 +39,7 @@
     if (el.classList?.contains("doc-table-toolbar")) return true;
     // The header/footer and note/comment metadata sections are read apart from body blocks.
     const ds = el.dataset;
-    if (ds && (ds.eoHf !== undefined || ds.eoNotes !== undefined || ds.eoComments !== undefined)) return true;
+    if (ds && (ds.eoHf !== undefined || ds.eoNotes !== undefined || ds.eoComments !== undefined || ds.eoTextbox !== undefined)) return true;
     return typeof el.hasAttribute === "function" && el.hasAttribute("hidden");
   }
 
@@ -575,6 +575,7 @@
         if (cur.ctx.columns) block.columns = cur.ctx.columns;
         if (cur.ctx.flags?.caption) block.caption = true;
         if (cur.ctx.flags?.sectionBreak) block.sectionBreak = cur.ctx.flags.sectionBreak;
+        if (cur.ctx.flags?.blocks) Object.assign(block, cur.ctx.flags.blocks);
         blocks.push(block);
       }
       cur = null;
@@ -615,6 +616,14 @@
     // A bookmark marker is an empty run that opens or closes the bookmark (`doc-word-model.js`).
     function walkBookmarkMarker(node, ctx) {
       const run = host.__EASYOFFICE_DOC_WORD_MODEL__?.bookmarkRun(node);
+      if (!run) return;
+      if (!cur) cur = { ctx, runs: [] };
+      cur.runs.push(run);
+    }
+
+    // An equation is a run that holds its OMML (`doc-word-blocks.js`).
+    function walkMath(node, ctx) {
+      const run = host.__EASYOFFICE_DOC_WORD_BLOCKS__?.mathRun(node);
       if (!run) return;
       if (!cur) cur = { ctx, runs: [] };
       cur.runs.push(run);
@@ -695,7 +704,7 @@
         listNumber,
         columns,
         layout: LAYOUT_TAGS.has(tag) ? paragraphLayout(node, baseLineHeight) : ctx.layout,
-        flags: host.__EASYOFFICE_DOC_WORD_MODEL__?.paragraphFlags(node),
+        flags: host.__EASYOFFICE_DOC_WORD_MODEL__?.paragraphFlags(node, (box) => collectDocBlocks(box, options)),
       };
     }
 
@@ -729,6 +738,7 @@
       if (tag === "IMG" && node.dataset?.eoImageId) return pushImage(node);
       if (FIELD_KEYS[node.dataset?.eoField]) return walkField(node, ctx, fmt);
       if (tag === "SPAN" && (node.dataset?.eoBookmarkStart !== undefined || node.dataset?.eoBookmarkEnd !== undefined)) return walkBookmarkMarker(node, ctx);
+      if (tag === "SPAN" && node.dataset?.eoOmml !== undefined) return walkMath(node, ctx);
       if (tag === "SUP" && (node.dataset?.eoNoteKind === "footnote" || node.dataset?.eoNoteKind === "endnote")) {
         return walkNoteRef(node, ctx, fmt);
       }

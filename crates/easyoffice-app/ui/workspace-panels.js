@@ -77,6 +77,7 @@
       }
     });
     editor.classList.toggle("manuscript-grid", Boolean(ls.manuscriptGrid));
+    host.__EASYOFFICE_DOC_WORD_COLUMNS__?.sync(editor);
   }
 
   const { serializeDomChildren, restoreDomChildren, releaseDocImageUrls } = host.__EASYOFFICE_SHEET_UTILS__;

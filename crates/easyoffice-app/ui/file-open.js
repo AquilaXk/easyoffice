@@ -123,7 +123,7 @@
       const gap = Number.isInteger(cols.gapTwips) && cols.gapTwips >= 0 ? cols.gapTwips : 720;
       spec.data.eoCols = cols.count + "," + (cols.equal === false ? 0 : 1) + "," + gap;
     }
-    return host.__EASYOFFICE_DOC_WORD_MODEL__.paragraph(spec, block);
+    return host.__EASYOFFICE_DOC_WORD_MODEL__.paragraph(spec, block, buildEditorNodes);
   }
 
   // A picture block: bytes live in the image store, the node carries only the id, size and alt.

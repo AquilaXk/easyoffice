@@ -149,6 +149,13 @@ const DOC_DIALOGS = [
   ["인쇄된 워터마크", "doc-watermark-dialog", [DOC_MENU("layout-watermark")]],
   ["텍스트를 표로 변환", "doc-table-convert-dialog", [selectDocText, DOC_MENU("table-from-text")]],
   ["표를 텍스트로 변환", "doc-table-convert-dialog", [pasteTable, DOC_MENU("table-to-text")]],
+  ["단", "doc-columns-dialog", [DOC_MENU("layout-columns")]],
+  ["탭", "doc-tabs-dialog", [selectDocText, DOC_MENU("para-tabs")]],
+  ["테두리 및 음영 테두리 탭", "doc-para-border-dialog", [selectDocText, DOC_MENU("format-borders")]],
+  ["테두리 및 음영 음영 탭", "doc-para-border-dialog", [selectDocText, DOC_MENU("format-borders"), click('[data-pb-tab="shade"]')]],
+  ["드롭 캡", "doc-dropcap-dialog", [selectDocText, DOC_MENU("insert-dropcap-options")]],
+  ["스타일", "doc-styles-dialog", [selectDocText, DOC_MENU("format-styles")]],
+  ["새 스타일 만들기", "doc-style-edit-dialog", [selectDocText, DOC_MENU("format-styles"), click("#btn-doc-styles-new")]],
 ];
 
 /** Violations the step may still have (`KNOWN_DIALOG_VIOLATIONS`), minus what the browser's fonts decide: a clipped box is listed but its absence is not an error. */

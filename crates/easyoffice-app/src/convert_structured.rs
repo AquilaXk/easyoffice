@@ -220,12 +220,13 @@ pub(crate) fn parse_structured_content(
         let mut warnings = Vec::new();
         let mut blocks = parse_blocks(as_array(v, "blocks")?, &mut budget, &mut warnings)?;
         let doc_look = convert_structured_blocks::parse_doc_column_look(entries)?;
+        let doc_gap = opt_bounded(entries, "docColumnGap", 0, 5_000)?.map_or(720, |g| g as u16);
         if let Some(doc_cols) = opt_bounded(entries, "docColumns", 0, 16)?
             .filter(|&c| c >= 2)
             .map(|c| RichColumns {
                 count: c as u8,
                 equal: true,
-                gap_twips: 720,
+                gap_twips: doc_gap,
             })
         {
             for block in &mut blocks {

@@ -144,6 +144,7 @@
               <div class="md-item" data-studio-menu-cmd="zoom-in" role="menuitem" tabindex="-1"><span class="md-label">확대</span><span class="md-shortcut">Ctrl+=</span></div>
               <div class="md-item" data-studio-menu-cmd="zoom-out" role="menuitem" tabindex="-1"><span class="md-label">축소</span><span class="md-shortcut">Ctrl+-</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="zoom-fit-page" role="menuitem" tabindex="-1"><span class="md-label">한 페이지</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="view-multipage" role="menuitem" tabindex="-1"><span class="md-label">여러 페이지</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="zoom-fit-width" role="menuitem" tabindex="-1"><span class="md-label">페이지 너비</span></div>
               <div class="md-item" data-kinds="PAGES HWP SHEET SLIDE PDF" data-studio-menu-cmd="zoom-fit-page" role="menuitem" tabindex="-1"><span class="md-label">쪽 맞춤</span></div>
               <div class="md-item" data-kinds="PAGES HWP SHEET SLIDE PDF" data-studio-menu-cmd="zoom-fit-width" role="menuitem" tabindex="-1"><span class="md-label">폭 맞춤</span></div>
@@ -212,6 +213,17 @@
                 </div>
               </div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="mod-symbol" role="menuitem" tabindex="-1"><span class="md-label">문자표</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-textbox" role="menuitem" tabindex="-1"><span class="md-label">텍스트 상자</span></div>
+              <div class="md-sub" data-kinds="DOC" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">드롭 캡</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="드롭 캡">
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-dropcap-none" role="menuitem" tabindex="-1"><span class="md-label">없음</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-dropcap-drop" role="menuitem" tabindex="-1"><span class="md-label">텍스트에 넣기</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-dropcap-margin" role="menuitem" tabindex="-1"><span class="md-label">여백에 넣기</span></div>
+                  <div class="md-sep"></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-dropcap-options" role="menuitem" tabindex="-1"><span class="md-label">드롭 캡 옵션…</span></div>
+                </div>
+              </div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크</span><span class="md-shortcut">Ctrl+K</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-bookmark" role="menuitem" tabindex="-1"><span class="md-label">책갈피…</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-xref" role="menuitem" tabindex="-1"><span class="md-label">상호 참조…</span></div>
@@ -302,6 +314,9 @@
               </div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="font-dialog" role="menuitem" tabindex="-1"><span class="md-label">글꼴…</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="para-dialog" role="menuitem" tabindex="-1"><span class="md-label">단락…</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="para-tabs" role="menuitem" tabindex="-1"><span class="md-label">탭…</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="format-borders" role="menuitem" tabindex="-1"><span class="md-label">테두리 및 음영…</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="format-styles" role="menuitem" tabindex="-1"><span class="md-label">스타일…</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="format-painter" role="menuitem" tabindex="-1"><span class="md-label">서식 복사</span><span class="md-shortcut">Ctrl+Shift+C</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="format-paste" role="menuitem" tabindex="-1"><span class="md-label">서식 붙여넣기</span><span class="md-shortcut">Ctrl+Shift+V</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="format-clear" role="menuitem" tabindex="-1"><span class="md-label">모든 서식 지우기</span></div>
@@ -606,7 +621,19 @@
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="mod-header" role="menuitem" tabindex="-1"><span class="md-label">머리말</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="mod-footer" role="menuitem" tabindex="-1"><span class="md-label">바닥글</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="mod-footer" role="menuitem" tabindex="-1"><span class="md-label">꼬리말</span></div>
-              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="layout-columns" role="menuitem" tabindex="-1"><span class="md-label">단</span></div>
+              <div class="md-sub" data-kinds="DOC" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">단</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="단">
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="layout-columns-1" role="menuitem" tabindex="-1"><span class="md-label">하나</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="layout-columns-2" role="menuitem" tabindex="-1"><span class="md-label">둘</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="layout-columns-3" role="menuitem" tabindex="-1"><span class="md-label">셋</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="layout-columns-left" role="menuitem" tabindex="-1"><span class="md-label">왼쪽</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="layout-columns-right" role="menuitem" tabindex="-1"><span class="md-label">오른쪽</span></div>
+                  <div class="md-sep"></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="layout-columns" role="menuitem" tabindex="-1"><span class="md-label">기타 단…</span></div>
+                </div>
+              </div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="layout-column-break" role="menuitem" tabindex="-1"><span class="md-label">단 나누기</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="layout-columns" role="menuitem" tabindex="-1"><span class="md-label">다단 설정</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="doc-mod-page-break" role="menuitem" tabindex="-1"><span class="md-label">페이지 나누기</span><span class="md-shortcut">Ctrl+Enter</span></div>
               <div class="md-sub" data-kinds="DOC" role="menuitem" aria-haspopup="menu" tabindex="-1">
@@ -1965,6 +1992,125 @@
         </div>
         <div class="dialog-footer">
           <button id="btn-doc-ln-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-columns-dialog" class="tool-dialog" aria-labelledby="doc-col-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-col-title">단</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="doc-col-count">단 개수(N)</label><input id="doc-col-count" class="dialog-input" type="number" min="1" max="12" step="1" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-col-narrow">미리 설정</label><select id="doc-col-narrow" class="sb-combo dialog-select"><option value="none">같은 너비(둘 또는 셋)</option><option value="first">왼쪽(좁은 단이 앞)</option><option value="last">오른쪽(좁은 단이 뒤)</option></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-col-gap">간격(P)</label><input id="doc-col-gap" class="dialog-input" type="number" min="0" max="352" step="0.1" /><span class="dialog-unit">mm</span></div>
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="doc-col-sep" type="checkbox" />구분선(B)</label></div>
+          <div class="dialog-row"><span class="dialog-label">적용 대상</span><span>문서 전체</span></div>
+          <div class="dialog-status-row"><span id="doc-col-status" class="dialog-status" role="status" aria-live="polite"></span></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-col-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-tabs-dialog" class="tool-dialog" aria-labelledby="doc-tab-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-tab-title">탭</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="doc-tab-pos">탭 정지 위치(T)</label><input id="doc-tab-pos" class="dialog-input" type="number" min="0" max="558" step="0.1" /><span class="dialog-unit">mm</span></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-tab-list">탭 정지 목록</label><select id="doc-tab-list" class="sb-combo dialog-select" size="5" aria-label="탭 정지 목록"></select></div>
+          <div class="dialog-row"><span class="dialog-label">맞춤</span><label class="dialog-checkbox"><input type="radio" name="doc-tab-align" value="left" checked />왼쪽(L)</label><label class="dialog-checkbox"><input type="radio" name="doc-tab-align" value="center" />가운데(C)</label><label class="dialog-checkbox"><input type="radio" name="doc-tab-align" value="right" />오른쪽(R)</label><label class="dialog-checkbox"><input type="radio" name="doc-tab-align" value="decimal" />소수점(D)</label></div>
+          <div class="dialog-row"><span class="dialog-label">채움 문자</span><label class="dialog-checkbox"><input type="radio" name="doc-tab-leader" value="none" checked />없음(1)</label><label class="dialog-checkbox"><input type="radio" name="doc-tab-leader" value="dot" />점선(2)</label><label class="dialog-checkbox"><input type="radio" name="doc-tab-leader" value="hyphen" />파선(3)</label><label class="dialog-checkbox"><input type="radio" name="doc-tab-leader" value="underscore" />실선(4)</label></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-tab-default">기본 탭 간격(F)</label><input id="doc-tab-default" class="dialog-input" type="number" readonly /><span class="dialog-unit">mm</span></div>
+          <div class="dialog-row"><button id="btn-doc-tab-set" type="button" class="dialog-btn">설정(S)</button><button id="btn-doc-tab-clear" type="button" class="dialog-btn">지우기(E)</button><button id="btn-doc-tab-clear-all" type="button" class="dialog-btn">모두 지우기(A)</button></div>
+          <div class="dialog-status-row"><span id="doc-tab-status" class="dialog-status" role="status" aria-live="polite"></span></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-tab-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-para-border-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="doc-pb-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-pb-title">테두리 및 음영</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-tabs" role="tablist" aria-label="테두리 및 음영">
+          <button type="button" class="dialog-tab active" role="tab" aria-selected="true" data-pb-tab="border">테두리(B)</button>
+          <button type="button" class="dialog-tab" role="tab" aria-selected="false" data-pb-tab="shade">음영(S)</button>
+        </div>
+        <div class="dialog-body" role="tabpanel" data-pb-pane="border">
+          <div class="dialog-row"><span class="dialog-label">설정</span><div class="dialog-btn-group" role="group" aria-label="설정"><button type="button" data-pb-preset="none">없음(N)</button><button type="button" data-pb-preset="box">상자(X)</button></div></div>
+          <div class="dialog-row"><span class="dialog-label">스타일(Y)</span><div class="sheet-line-grid" role="radiogroup" aria-label="스타일"><button type="button" class="sheet-line-item" role="radio" aria-checked="true" data-pb-style="single">실선</button><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-pb-style="double">이중선</button><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-pb-style="dotted">점선</button><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-pb-style="dashed">파선</button></div></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-pb-color">색(C)</label><input id="doc-pb-color" class="dialog-input" type="color" value="#000000" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-pb-width">너비(W)</label><select id="doc-pb-width" class="sb-combo dialog-select"><option value="2">1/4pt</option><option value="4">1/2pt</option><option value="6">3/4pt</option><option value="8">1pt</option><option value="12">1 1/2pt</option><option value="18">2 1/4pt</option><option value="24">3pt</option><option value="36">4 1/2pt</option><option value="48">6pt</option></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-pb-space">텍스트와의 간격(P)</label><input id="doc-pb-space" class="dialog-input" type="number" min="0" max="31" step="1" /><span class="dialog-unit">pt</span></div>
+          <div class="dialog-row"><span class="dialog-label">미리 보기</span><div id="doc-pb-preview" class="doc-pb-preview" role="img" aria-label="미리 보기">가나다 ABC</div><div class="dialog-btn-group" role="group" aria-label="테두리 위치"><button type="button" aria-pressed="false" data-pb-side="top">위</button><button type="button" aria-pressed="false" data-pb-side="bottom">아래</button><button type="button" aria-pressed="false" data-pb-side="left">왼쪽</button><button type="button" aria-pressed="false" data-pb-side="right">오른쪽</button></div></div>
+          <div class="dialog-row"><span class="dialog-label">적용 대상(L)</span><span>단락</span></div>
+        </div>
+        <div class="dialog-body" role="tabpanel" data-pb-pane="shade" hidden>
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="doc-pb-shade-on" type="checkbox" />채우기 색(F)</label><input id="doc-pb-shade" class="dialog-input" type="color" value="#ffff00" aria-label="채우기 색" /></div>
+          <div class="dialog-row"><span class="dialog-label">적용 대상(L)</span><span>단락</span></div>
+        </div>
+        <div class="dialog-status-row"><span id="doc-pb-status" class="dialog-status" role="status" aria-live="polite"></span></div>
+        <div class="dialog-footer">
+          <button id="btn-doc-pb-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-dropcap-dialog" class="tool-dialog" aria-labelledby="doc-dc-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-dc-title">드롭 캡</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><span class="dialog-label">위치</span><label class="dialog-checkbox"><input type="radio" name="doc-dc-pos" value="none" checked />없음(N)</label><label class="dialog-checkbox"><input type="radio" name="doc-dc-pos" value="drop" />텍스트에 넣기(D)</label><label class="dialog-checkbox"><input type="radio" name="doc-dc-pos" value="margin" />여백에 넣기(M)</label></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-dc-lines">줄 수(L)</label><input id="doc-dc-lines" class="dialog-input" type="number" min="2" max="10" step="1" /></div>
+          <div class="dialog-status-row"><span id="doc-dc-status" class="dialog-status" role="status" aria-live="polite"></span></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-dc-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-styles-dialog" class="tool-dialog" aria-labelledby="doc-styles-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-styles-title">스타일</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><select id="doc-styles-list" class="sb-combo dialog-select" size="8" aria-label="스타일 목록"></select></div>
+          <div class="dialog-row"><button id="btn-doc-styles-new" type="button" class="dialog-btn">새 스타일(N)…</button><button id="btn-doc-styles-edit" type="button" class="dialog-btn">스타일 수정(M)…</button><button id="btn-doc-styles-delete" type="button" class="dialog-btn">삭제(D)</button></div>
+          <div class="dialog-status-row"><span id="doc-styles-status" class="dialog-status" role="status" aria-live="polite"></span></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-styles-apply" type="button" class="dialog-btn dialog-btn-primary">적용(A)</button>
+          <button type="button" class="dialog-btn" data-dialog-close>닫기</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="doc-style-edit-dialog" class="tool-dialog" aria-labelledby="doc-st-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-st-title">새 스타일 만들기</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="doc-st-name">이름(N)</label><input id="doc-st-name" class="dialog-text-input" type="text" maxlength="64" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-st-font">글꼴(F)</label><input id="doc-st-font" class="dialog-text-input" type="text" maxlength="64" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-st-size">크기(S)</label><input id="doc-st-size" class="dialog-input" type="number" min="1" max="819" step="0.5" /><span class="dialog-unit">pt</span></div>
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="doc-st-bold" type="checkbox" />굵게(B)</label><label class="dialog-checkbox"><input id="doc-st-italic" type="checkbox" />기울임꼴(I)</label><label class="dialog-checkbox"><input id="doc-st-underline" type="checkbox" />밑줄(U)</label></div>
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="doc-st-color-on" type="checkbox" />글자 색(C)</label><input id="doc-st-color" class="dialog-input" type="color" value="#000000" aria-label="글자 색" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-st-align">맞춤(A)</label><select id="doc-st-align" class="sb-combo dialog-select"><option value="">변경 안 함</option><option value="left">왼쪽</option><option value="center">가운데</option><option value="right">오른쪽</option><option value="justify">양쪽</option></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-st-left">왼쪽 들여쓰기</label><input id="doc-st-left" class="dialog-input" type="number" min="0" step="0.1" /><span class="dialog-unit">mm</span></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-st-first">첫 줄</label><input id="doc-st-first" class="dialog-input" type="number" step="0.1" /><span class="dialog-unit">mm</span></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-st-before">단락 앞(B)</label><input id="doc-st-before" class="dialog-input" type="number" min="0" max="400" step="1" /><span class="dialog-unit">pt</span></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-st-after">단락 뒤(E)</label><input id="doc-st-after" class="dialog-input" type="number" min="0" max="400" step="1" /><span class="dialog-unit">pt</span></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-st-line">줄 간격(L)</label><input id="doc-st-line" class="dialog-input" type="number" min="1" max="1000" step="5" /><span class="dialog-unit">%</span></div>
+          <div class="dialog-status-row"><span id="doc-st-status" class="dialog-status" role="status" aria-live="polite"></span></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-st-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>
       </div>
@@ -4136,6 +4282,15 @@
     <script src="./doc-word-fields.js"></script>
     <script src="./doc-word-layout.js"></script>
     <script src="./doc-word-image.js"></script>
+    <script src="./doc-word-blocks.js"></script>
+    <script src="./doc-word-columns.js"></script>
+    <script src="./doc-word-tabs.js"></script>
+    <script src="./doc-para-border.js"></script>
+    <script src="./doc-drop-cap.js"></script>
+    <script src="./doc-text-box.js"></script>
+    <script src="./doc-word-math.js"></script>
+    <script src="./doc-styles.js"></script>
+    <script src="./doc-view-pages.js"></script>
     <script src="./pages-commands.js"></script>
     <script src="./doc-dialogs-ext.js"></script>
     <script src="./workspace-tools.js"></script>

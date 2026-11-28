@@ -59,16 +59,28 @@
     }
     const watermark = noControls(raw.watermark, false).trim().slice(0, MAX_WATERMARK_CHARS);
     if (watermark) meta.watermark = watermark;
+    // PD-401: the styles of the user and the look of the document's columns (`doc-word-blocks.js` checks them).
+    const blocks = host.__EASYOFFICE_DOC_WORD_BLOCKS__;
+    const styles = blocks?.cleanStyles(raw.styles) ?? [];
+    if (styles.length > 0) meta.styles = styles;
+    const cols = blocks?.cleanColumns(raw.columns);
+    if (cols) meta.columns = cols;
     return meta;
   }
 
-  // The payload keys of the settings: `properties`, `lineNumbers` and `watermark`.
+  // The payload keys of the settings: `properties`, `lineNumbers`, `watermark`, `styles` and the look of the columns.
   function wordMetaPayload(text) {
     const meta = readWordMeta(text);
     const out = {};
     if (meta.props) out.properties = meta.props;
     if (meta.lineNumbers) out.lineNumbers = meta.lineNumbers;
     if (meta.watermark) out.watermark = meta.watermark;
+    if (meta.styles) out.styles = meta.styles;
+    if (meta.columns) {
+      out.docColumnGap = meta.columns.gap;
+      if (meta.columns.sep) out.docColumnSeparator = true;
+      if (meta.columns.narrow !== "none") out.docColumnNarrow = meta.columns.narrow;
+    }
     return out;
   }
 
@@ -84,7 +96,9 @@
     const stem = String(fileName ?? "").replace(/\.[^.\\/]+$/, "").trim();
     const title = String(res?.title ?? "").trim();
     const own = title && title !== stem && title !== "문서" ? { title } : {};
-    return packWordMeta({ props: { ...res?.properties, ...own }, lineNumbers: res?.lineNumbers, watermark: res?.watermark });
+    const first = (res?.blocks ?? []).find((b) => b.type === "paragraph" && b.columns?.count >= 2);
+    const columns = first && { gap: first.columns.gapTwips, sep: first.columnLook?.separator === true, narrow: first.columnLook?.narrow ?? "none" };
+    return packWordMeta({ props: { ...res?.properties, ...own }, lineNumbers: res?.lineNumbers, watermark: res?.watermark, styles: res?.styles, columns });
   }
 
   function collectDocAnnotations(root) {

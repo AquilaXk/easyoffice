@@ -387,7 +387,12 @@
       syncDocStyleBarFromTarget(getWorkspacePanels().getFocusedDocBlock(docEditor));
     }
 
-    function docEffectColumns({ docEditor }) {
+    function docEffectColumns({ docEditor, cmdId = "" }) {
+      // The word processor window's 단 command opens the 단 dialog (`doc-word-columns.js`); the Hangul window cycles 1, 2, 3.
+      if (cmdId.startsWith("document-") && docEditor.dataset.eoDocFlavor !== "pages" && host.__EASYOFFICE_DOC_WORD_COLUMNS__) {
+        host.__EASYOFFICE_DOC_WORD_COLUMNS__.open({ document, editor: docEditor, runs: getDocRuns() });
+        return;
+      }
       const curCols = Number(docEditor.style.columnCount || "1");
       const cols = curCols >= MAX_DOC_COLUMNS ? 1 : curCols + 1;
       docEditor.style.columnCount = cols > 1 ? String(cols) : "";

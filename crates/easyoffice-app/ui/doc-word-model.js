@@ -32,7 +32,8 @@
   // The specs of `runs`: the runs that are fields or open or close a bookmark are made one at a time and wrapped; the others go
   // to `base` together, as before (revision and comment wrappers span runs).
   function runSpecs(runs, noteSeq, base) {
-    const special = (run) => isFieldCode(run?.fieldCode) || isBookmarkName(run?.bookmarkStart) || isBookmarkName(run?.bookmarkEnd);
+    const isMath = (run) => typeof run?.math === "string" && run.math.startsWith("<m:oMath");
+    const special = (run) => isFieldCode(run?.fieldCode) || isBookmarkName(run?.bookmarkStart) || isBookmarkName(run?.bookmarkEnd) || isMath(run);
     if (!Array.isArray(runs) || !runs.some(special)) return base(runs, noteSeq);
     const out = [];
     let plain = [];
@@ -46,6 +47,10 @@
         continue;
       }
       flush();
+      if (isMath(run)) {
+        out.push(host.__EASYOFFICE_DOC_WORD_BLOCKS__.mathSpec(run));
+        continue;
+      }
       if (isBookmarkName(run.bookmarkStart)) out.push(markerSpec("start", run.bookmarkStart));
       const pieces = base([{ ...run, fieldCode: undefined, bookmarkStart: undefined, bookmarkEnd: undefined }], noteSeq);
       out.push(...(isFieldCode(run.fieldCode) ? [fieldSpec(run.fieldCode.trim(), pieces)] : pieces));
@@ -56,13 +61,13 @@
   }
 
   // The caption and the section break of a decoded paragraph.
-  function paragraph(spec, block) {
+  function paragraph(spec, block, buildNodes) {
     if (block.caption === true) {
       spec.attrs.class = [spec.attrs.class, "eo-caption"].filter(Boolean).join(" ");
       spec.data.eoCaption = "1";
     }
     if (SECTION_BREAKS.includes(block.sectionBreak)) spec.data.eoSectionBreak = block.sectionBreak;
-    return spec;
+    return host.__EASYOFFICE_DOC_WORD_BLOCKS__.paragraph(spec, block, buildNodes);
   }
 
   const table = (spec, block) => {
@@ -94,9 +99,13 @@
   }
 
   // `caption` and `sectionBreak` of a paragraph element.
-  function paragraphFlags(node) {
+  function paragraphFlags(node, collect) {
     const kind = node.dataset?.eoSectionBreak;
-    return { caption: node.dataset?.eoCaption === "1", sectionBreak: SECTION_BREAKS.includes(kind) ? kind : undefined };
+    return {
+      caption: node.dataset?.eoCaption === "1",
+      sectionBreak: SECTION_BREAKS.includes(kind) ? kind : undefined,
+      blocks: host.__EASYOFFICE_DOC_WORD_BLOCKS__.paragraphKeys(node, collect),
+    };
   }
 
   const tableFlags = (node) => {

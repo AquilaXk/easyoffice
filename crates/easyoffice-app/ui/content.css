@@ -154,6 +154,32 @@
 #doc-editor[data-show-ctrl-marks="true"] [data-eo-section-break="continuous"]::after { content: "구역 나누기(연속)"; }
 #doc-editor[data-show-ctrl-marks="true"] [data-eo-section-break="evenPage"]::after { content: "구역 나누기(짝수 페이지)"; }
 #doc-editor[data-show-ctrl-marks="true"] [data-eo-section-break="oddPage"]::after { content: "구역 나누기(홀수 페이지)"; }
+/* PD-401: column break, tab stops, drop cap, text box and equation (doc-word-columns.js, doc-word-tabs.js, doc-drop-cap.js, doc-text-box.js, doc-word-math.js) */
+#doc-editor [data-eo-col-break] { break-before: column; }
+#doc-editor .eo-tab { display: inline-block; white-space: pre; }
+#doc-editor .eo-tab[data-eo-leader="dot"] { background: radial-gradient(circle at 50% 50%, currentColor 0.7px, transparent 0.9px) 0 88% / 4px 4px repeat-x; }
+#doc-editor .eo-tab[data-eo-leader="hyphen"] { background: linear-gradient(90deg, currentColor 4px, transparent 4px) 0 82% / 7px 1px repeat-x; }
+#doc-editor .eo-tab[data-eo-leader="underscore"] { background: linear-gradient(currentColor, currentColor) 0 88% / 100% 1px no-repeat; }
+#doc-editor p[data-eo-dropcap] { float: left; margin: 0 0.08em 0 0; padding: 0; line-height: 0.82; }
+#doc-editor p[data-eo-dropcap$=",margin"] { margin-left: -1.2em; }
+#doc-editor p[data-eo-dropcap^="2,"] { font-size: 2.3em; }
+#doc-editor p[data-eo-dropcap^="3,"] { font-size: 3.4em; }
+#doc-editor p[data-eo-dropcap^="4,"] { font-size: 4.5em; }
+#doc-editor p[data-eo-dropcap^="5,"] { font-size: 5.6em; }
+#doc-editor p[data-eo-dropcap^="6,"] { font-size: 6.7em; }
+#doc-editor p[data-eo-dropcap^="7,"] { font-size: 7.8em; }
+#doc-editor p[data-eo-dropcap^="8,"] { font-size: 8.9em; }
+#doc-editor p[data-eo-dropcap^="9,"] { font-size: 10em; }
+#doc-editor p[data-eo-dropcap^="10,"] { font-size: 11.1em; }
+#doc-editor .eo-textbox { box-sizing: border-box; overflow: auto; padding: 4px 6px; margin: 0 0.6em 0.3em 0; background-color: transparent; }
+#doc-editor .eo-textbox[data-eo-tb-border="1"] { border: 1px solid var(--ui-border); }
+#doc-editor .eo-textbox[data-eo-tb-wrap="square"], #doc-editor .eo-textbox[data-eo-tb-wrap="front"] { float: left; }
+#doc-editor .eo-textbox[data-eo-tb-wrap="behind"] { float: left; opacity: 0.55; }
+#doc-editor .eo-textbox[data-eo-tb-wrap="topBottom"] { float: none; clear: both; display: block; }
+#doc-editor .eo-textbox > p { margin: 0; }
+#doc-editor .eo-math { display: inline-block; vertical-align: middle; }
+.doc-pb-preview { min-width: 8em; padding: 6px 10px; text-align: center; background: var(--doc-paper); color: var(--caret-color); }
+#doc-editor[data-show-ctrl-marks="true"] [data-eo-col-break]::before { content: "단 나누기"; display: block; color: var(--accent-light); font-size: 0.75em; }
 #doc-editor[data-eo-watermark-text]::before { content: attr(data-eo-watermark-text); position: absolute; top: 40%; left: 0; right: 0; text-align: center; font-size: 5em; color: var(--ui-border); opacity: 0.5; transform: rotate(-45deg); pointer-events: none; }
 #doc-editor[data-show-ctrl-marks="true"] h1::after,
 #doc-editor[data-show-ctrl-marks="true"] h2::after { content: " ¶"; color: var(--accent-light); font-size: 0.75em; }

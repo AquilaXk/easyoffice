@@ -409,6 +409,116 @@ export const docSteps = [
     assert.ok(runs.some((r) => r.fieldCode?.startsWith("DATE")), "the date is a field of the payload");
   }],
 
+  // The paragraph and block features of PD-401 on the real layout: a tab stop puts the text at its position, the columns are
+  // CSS columns, an equation is drawn as MathML, a drop cap floats, a text box takes typing and reaches the payload.
+  ["탭 정지: a right stop puts the end of the text at its position and the leader is drawn", async (page) => {
+    await page.evaluate(() => {
+      const p = document.createElement("p");
+      p.dataset.eoTabs = "7200:right:dot";
+      p.textContent = "목차\t12";
+      document.getElementById("doc-editor").replaceChildren(p);
+    });
+    await page.waitForFunction(() => parseFloat(document.querySelector("#doc-editor .eo-tab")?.style.width) > 50);
+    const hit = await page.evaluate(() => {
+      const p = document.querySelector("#doc-editor p");
+      const tab = p.querySelector(".eo-tab");
+      const range = document.createRange();
+      range.selectNodeContents(tab.nextSibling);
+      const cs = getComputedStyle(p);
+      const left = p.getBoundingClientRect().left + parseFloat(cs.paddingLeft) + parseFloat(cs.borderLeftWidth);
+      return { right: range.getBoundingClientRect().right - left, leader: tab.dataset.eoLeader, text: p.textContent, background: getComputedStyle(tab).backgroundImage };
+    });
+    assert.ok(Math.abs(hit.right - 480) < 3, `the text ends at the stop (480px): ${hit.right}`);
+    assert.equal(hit.text, "목차\t12", "the spans leave the text as it was");
+    assert.equal(hit.leader, "dot");
+    assert.match(hit.background, /radial-gradient/, "the dotted leader is drawn");
+    await page.evaluate(() => {
+      const p = document.querySelector("#doc-editor p");
+      getSelection().collapse(p.lastChild, p.lastChild.textContent.length);
+    });
+    await page.keyboard.type("3");
+    await page.waitForFunction(() => document.querySelector("#doc-editor p").textContent === "목차\t123");
+    assert.equal(await page.evaluate(() => document.querySelectorAll("#doc-editor .eo-tab").length), 1, "typing does not add or lose a span");
+  }],
+
+  ["단: the presets and the dialog draw CSS columns with a separator, and 단 나누기 breaks the column", async (page) => {
+    await page.evaluate(() => {
+      const editor = document.getElementById("doc-editor");
+      editor.replaceChildren(...["가", "나", "다"].map((t) => Object.assign(document.createElement("p"), { textContent: t.repeat(30) })));
+      editor.querySelectorAll("p")[1].dataset.eoColBreak = "1";
+      document.querySelector('[data-studio-menu-cmd="layout-columns-2"]').click();
+    });
+    assert.equal(await page.$eval(EDITOR, (el) => getComputedStyle(el).columnCount), "2");
+    await page.evaluate(() => document.querySelector('[data-studio-menu-cmd="layout-columns"]').click());
+    await page.waitForSelector("#doc-columns-dialog[open]");
+    await page.check("#doc-col-sep");
+    await page.click("#btn-doc-col-ok");
+    await page.waitForFunction(() => !document.getElementById("doc-columns-dialog").open);
+    assert.match(await page.$eval(EDITOR, (el) => getComputedStyle(el).columnRuleStyle), /solid/);
+    const lefts = await page.$$eval(`${EDITOR} > p`, (nodes) => nodes.slice(0, 2).map((p) => Math.round(p.getBoundingClientRect().left)));
+    assert.ok(lefts[1] > lefts[0] + 40, `the paragraph after the column break starts in the next column: ${lefts}`);
+    await page.evaluate(() => document.querySelector('[data-studio-menu-cmd="layout-columns-1"]').click());
+    assert.equal(await page.$eval(EDITOR, (el) => getComputedStyle(el).columnCount), "auto");
+  }],
+
+  ["수식: the OMML of an opened equation is drawn as MathML with a fraction", async (page) => {
+    await page.evaluate(() => {
+      const p = document.createElement("p");
+      p.append("값 ");
+      const span = document.createElement("span");
+      span.className = "eo-math";
+      span.contentEditable = "false";
+      span.dataset.eoOmml = "<m:oMath><m:f><m:num><m:r><m:t>1</m:t></m:r></m:num><m:den><m:r><m:t>x</m:t></m:r></m:den></m:f><m:r><m:t>=</m:t></m:r><m:rad><m:radPr><m:degHide m:val=\"1\"></m:degHide></m:radPr><m:e><m:r><m:t>2</m:t></m:r></m:e></m:rad></m:oMath>";
+      span.dataset.eoMathText = "1x=2";
+      p.append(span);
+      document.getElementById("doc-editor").replaceChildren(p);
+    });
+    await page.waitForSelector(`${EDITOR} .eo-math math mfrac`);
+    const hit = await page.evaluate(() => {
+      const math = document.querySelector("#doc-editor .eo-math math");
+      const rect = math.getBoundingClientRect();
+      return { width: rect.width, height: rect.height, ns: math.namespaceURI, fraction: document.querySelector("#doc-editor mfrac").children.length, sqrt: Boolean(document.querySelector("#doc-editor msqrt")) };
+    });
+    assert.equal(hit.ns, "http://www.w3.org/1998/Math/MathML");
+    assert.ok(hit.width > 10 && hit.height > 10, JSON.stringify(hit));
+    assert.deepEqual([hit.fraction, hit.sqrt], [2, true]);
+    const run = await page.evaluate(() => window.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(document.getElementById("doc-editor"))[0].runs.at(-1));
+    assert.equal(run.text, "1x=2");
+    assert.ok(run.math.startsWith("<m:oMath><m:f>"));
+  }],
+
+  ["드롭 캡 floats the first letter and 텍스트 상자 takes typing and reaches the payload", async (page) => {
+    await page.evaluate(() => {
+      const p = document.createElement("p");
+      p.textContent = "가나다라마바사 ".repeat(20);
+      document.getElementById("doc-editor").replaceChildren(p);
+    });
+    await page.click(`${EDITOR} p`);
+    await page.evaluate(() => document.querySelector('[data-studio-menu-cmd="insert-dropcap-drop"]').click());
+    const cap = await page.$eval(`${EDITOR} p[data-eo-dropcap]`, (el) => ({ float: getComputedStyle(el).float, text: el.textContent, size: parseFloat(getComputedStyle(el).fontSize) }));
+    assert.deepEqual([cap.float, cap.text], ["left", "가"]);
+    assert.ok(cap.size > 30, `the letter is as tall as three lines: ${cap.size}`);
+    await page.click(`${EDITOR} p:not([data-eo-dropcap])`);
+    await page.evaluate(() => document.querySelector('[data-studio-menu-cmd="insert-textbox"]').click());
+    await page.waitForSelector(`${EDITOR} .eo-textbox`);
+    await page.keyboard.type("상자 안");
+    const box = await page.$eval(`${EDITOR} .eo-textbox`, (el) => ({ float: getComputedStyle(el).float, width: Math.round(el.getBoundingClientRect().width), text: el.textContent }));
+    assert.deepEqual([box.float, box.width, box.text], ["left", 225, "상자 안"]);
+    const blocks = await page.evaluate(() => window.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(document.getElementById("doc-editor")));
+    assert.deepEqual(blocks[0].dropCap, { lines: 3, margin: false });
+    const boxes = blocks.flatMap((b) => b.textBoxes ?? []);
+    assert.equal(boxes.length, 1);
+    assert.equal(boxes[0].paragraphs[0].runs.map((r) => r.text).join(""), "상자 안");
+  }],
+
+  ["보기 > 여러 페이지 opens the print preview layout in its two-page arrangement and a second use closes it", async (page) => {
+    await page.evaluate(() => document.querySelector('[data-studio-menu-cmd="view-multipage"]').click());
+    await page.waitForSelector("#print-preview-pane:not([hidden]) .print-preview-sheet");
+    assert.equal(await page.$eval("#print-preview-stage", (el) => el.dataset.arrangement), "spread");
+    await page.evaluate(() => document.querySelector('[data-studio-menu-cmd="view-multipage"]').click());
+    await page.waitForSelector("#print-preview-pane[hidden]", { state: "attached" });
+  }],
+
   // The Pages window (PD-399): the menus stand in the reference app's order on the real layout, and 하이라이트 and 대문자 act on the
   // real selection through the menu items the page shows.
   ["the Pages window lays its menus out in the reference order and its 하이라이트 and 대문자 items format the selection", async (page) => {

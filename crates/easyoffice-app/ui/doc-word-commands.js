@@ -30,5 +30,5 @@
 
   register("para-dialog", (env) => host.__EASYOFFICE_DOC_LINE_SPACING__.openParagraphDialog(env.document, env.runs));
 
-  host.__EASYOFFICE_DOC_WORD_COMMANDS__ = { register, run, has: (cmd) => handlers.has(cmd) };
+  host.__EASYOFFICE_DOC_WORD_COMMANDS__ = { register, run, has: (cmd) => handlers.has(cmd), get: (cmd) => handlers.get(cmd) };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
