@@ -503,7 +503,7 @@ test("PD-254: 코파일럿 sheet.chart 연동, 시트 보호 편집 거부, 차�
   );
 
   assert.throws(
-    () => layoutApi.setCharts("Sheet1", [{ ...maxCharts[0], chartType: "radar" }]),
+    () => layoutApi.setCharts("Sheet1", [{ ...maxCharts[0], chartType: "treemap" }]),
     /차트 종류/,
     "미지원 chartType Fail-Closed"
   );
