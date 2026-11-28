@@ -515,6 +515,45 @@ fn a_header_row_below_a_body_row_is_not_a_header_row_and_a_hostile_count_is_cut(
     );
 }
 
+// ---- what a save to another format leaves out
+
+#[test]
+fn a_save_to_a_format_without_them_counts_the_word_style_items_it_leaves_out() {
+    let mut doc = doc_of(vec![
+        paragraph_of(vec![coded("2026-11-28", "DATE"), run(" 끝")]),
+        RichBlock::Paragraph(RichParagraph {
+            runs: vec![run("구역")],
+            section_break: Some(RichSectionBreak::NextPage),
+            ..RichParagraph::default()
+        }),
+        table_of(2, 1),
+    ]);
+    doc.page_frame.watermark = Some("초안".to_string());
+    doc.page_frame.line_numbers = Some(RichLineNumbers::DEFAULT);
+    // a field, a section break, a table with header rows, a watermark and line numbers
+    for format in [
+        DocumentFormat::Odt,
+        DocumentFormat::Rtf,
+        DocumentFormat::Hwpx,
+    ] {
+        let loss = easyoffice_formats::doc_save_loss(&doc, format);
+        assert_eq!(loss.word_features, 5, "{format:?}");
+        assert!(loss
+            .warnings("ODT")
+            .iter()
+            .any(|w| w.contains("필드·책갈피·구역 나누기·줄 번호·워터마크·표 머리글 행 5곳")));
+    }
+    assert_eq!(
+        easyoffice_formats::doc_save_loss(&doc, DocumentFormat::Docx).word_features,
+        0
+    );
+    assert_eq!(
+        easyoffice_formats::doc_save_loss(&doc_of(vec![paragraph("본문")]), DocumentFormat::Odt)
+            .word_features,
+        0
+    );
+}
+
 // ---- document properties
 
 #[test]

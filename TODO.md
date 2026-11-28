@@ -3,6 +3,9 @@
 ## 지금
 - [ ] 설치본 실기기 점검(아래; 현재 공개판은 `v0.2.3`)
 - [ ] `docs/office-parity.md`의 없음·일부 항목을 중요도 순으로 구현(상세는 표, PD-393)
+- [ ] 문서 창: 그림 텍스트 배치(줄 안·정사각형·위/아래·텍스트 뒤/앞)와 그림 자르기·회전(DOCX `wp:anchor`·`a:srcRect`·`a:xfrm rot`) (PD-395에서 못 함)
+- [ ] 문서 창: 새 메뉴 항목의 macOS 네이티브 메뉴 항목. `native_menu/items.rs`와 `layout/bars.rs`가 줄 수 상한이라 표를 나누고 `scripts/test-support/word-web-only.mjs`를 비운다(PD-395)
+- [ ] 문서 창: 줄 번호를 화면 가장자리에 그리고, 워터마크를 쪽마다 그리며, ODT·HWPX에 필드·책갈피·표 머리글 행을 쓴다(PD-395 Trade-offs)
 - [ ] 코파일럿 포인터의 실제 조작을 내장 한글 편집기와 시트 서식·차트·정렬로 넓힘(PD-392 Revisit)
 
 ## v0.2.3 실기기 점검 (macOS·Windows)

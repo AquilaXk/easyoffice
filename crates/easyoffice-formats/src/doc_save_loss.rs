@@ -10,6 +10,9 @@ pub struct DocSaveLoss {
     pub comments: usize,
     pub revisions: usize,
     pub first_page_frames: usize,
+    /// The Word-style items of PD-395 that only DOCX writes: the fields (date, time, cross reference, caption number), the
+    /// bookmarks, the section breaks, the line numbers, the watermark and the repeated table header rows.
+    pub word_features: usize,
 }
 
 impl DocSaveLoss {
@@ -31,8 +34,36 @@ impl DocSaveLoss {
                 self.first_page_frames
             ));
         }
+        if self.word_features > 0 {
+            out.push(format!(
+                "{label} 저장에서 빠진 필드·책갈피·구역 나누기·줄 번호·워터마크·표 머리글 행 {}곳",
+                self.word_features
+            ));
+        }
         out
     }
+}
+
+/// How many of the Word-style items of PD-395 a document holds.
+fn word_features(doc: &RichDocument) -> usize {
+    let in_text: usize = doc
+        .blocks
+        .iter()
+        .map(|block| match block {
+            RichBlock::Paragraph(p) => {
+                usize::from(p.section_break.is_some())
+                    + p.runs
+                        .iter()
+                        .filter(|r| r.field_code.is_some() || r.bookmark_start.is_some())
+                        .count()
+            }
+            RichBlock::Table(t) => usize::from(t.header_rows > 0),
+            RichBlock::Image(_) => 0,
+        })
+        .sum();
+    in_text
+        + usize::from(doc.page_frame.line_numbers.is_some())
+        + usize::from(doc.page_frame.watermark.is_some())
 }
 
 /// Counts what saving `doc` as `format` does not write; only the formats that cannot hold it lose anything.
@@ -47,8 +78,20 @@ pub fn doc_save_loss(doc: &RichDocument, format: DocumentFormat) -> DocSaveLoss 
             | DocumentFormat::Txt
             | DocumentFormat::Pdf
     );
+    // DOCX and the formats that are not documents keep or never had them; every other document format writes none of them.
+    let word_features = if matches!(
+        format,
+        DocumentFormat::Docx | DocumentFormat::Xlsx | DocumentFormat::Pptx
+    ) {
+        0
+    } else {
+        word_features(doc)
+    };
     if !marks_lost {
-        return DocSaveLoss::default();
+        return DocSaveLoss {
+            word_features,
+            ..DocSaveLoss::default()
+        };
     }
     let revisions = doc
         .blocks
@@ -71,5 +114,6 @@ pub fn doc_save_loss(doc: &RichDocument, format: DocumentFormat) -> DocSaveLoss 
         comments: doc.validated_comments().len(),
         revisions,
         first_page_frames,
+        word_features,
     }
 }
