@@ -6,6 +6,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::rich_document::{RichBlock, RichDocument};
+use crate::rich_image_layout::RichImageLayout;
 use crate::rich_image_probe::{probe_jpeg, probe_png, sniff_format};
 use crate::{EasyOfficeError, RichImageFormat};
 
@@ -44,6 +45,7 @@ pub struct RichImage {
     width_emu: u64,
     height_emu: u64,
     alt: String,
+    layout: RichImageLayout,
 }
 
 impl fmt::Debug for RichImage {
@@ -120,7 +122,23 @@ impl RichImage {
             width_emu,
             height_emu,
             alt: truncate_alt(alt.into()),
+            layout: RichImageLayout::default(),
         })
+    }
+
+    /// Wrap, crop and rotation of the picture.
+    pub fn layout(&self) -> RichImageLayout {
+        self.layout
+    }
+
+    /// Sets the wrap, crop and rotation; a crop that leaves less than 1% of a side or a turn of 360 degrees or more is refused.
+    pub fn set_layout(&mut self, layout: RichImageLayout) -> Result<(), EasyOfficeError> {
+        self.layout = layout.checked().ok_or_else(|| {
+            EasyOfficeError::InvalidArgument(
+                "그림 자르기·회전 값이 허용 범위를 벗어났습니다.".to_string(),
+            )
+        })?;
+        Ok(())
     }
 
     /// The same picture (bytes shared, already validated) with other alternative text.

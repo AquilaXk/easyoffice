@@ -8,6 +8,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::rich_document::safe_link_target;
+use crate::rich_image_layout::{
+    degrees_of_drawing_angle, RichImageCrop, RichImageLayout, RichImageWrap,
+};
+use crate::rich_xml::toggle_on;
 use crate::xml_stream::{attr, XmlEvent, XmlReader};
 use crate::{EasyOfficeError, RichImage, XmlSanitizer, ZipArchiveEntry};
 
@@ -154,6 +158,37 @@ struct DrawingFields<'e> {
     embed: Option<Cow<'e, str>>,
     alt: Option<Cow<'e, str>>,
     extent: Option<(u64, u64)>,
+    /// `wp:anchor` (a floating picture), its `behindDoc`, and the wrap element it holds.
+    anchored: bool,
+    behind: bool,
+    wrap: Option<RichImageWrap>,
+    /// `a:srcRect` (when it is a crop and not an overscan), and `rot` of the picture's `a:xfrm`.
+    crop: Option<RichImageCrop>,
+    rotation: Option<u16>,
+}
+
+impl DrawingFields<'_> {
+    /// The picture's wrap, crop and rotation; a crop that leaves nothing of a side reads as no crop.
+    fn layout(&self) -> RichImageLayout {
+        let wrap = if !self.anchored {
+            RichImageWrap::Inline
+        } else {
+            self.wrap.unwrap_or(if self.behind {
+                RichImageWrap::Behind
+            } else {
+                RichImageWrap::InFront
+            })
+        };
+        let layout = RichImageLayout {
+            wrap,
+            crop: self.crop.unwrap_or_default(),
+            rotation_degrees: self.rotation.unwrap_or(0),
+        };
+        layout.checked().unwrap_or(RichImageLayout {
+            crop: RichImageCrop::default(),
+            ..layout
+        })
+    }
 }
 
 fn scan_drawing<'e>(events: &[XmlEvent<'e>]) -> DrawingFields<'e> {
@@ -163,6 +198,40 @@ fn scan_drawing<'e>(events: &[XmlEvent<'e>]) -> DrawingFields<'e> {
             continue;
         };
         match *name {
+            "wp:anchor" => {
+                fields.anchored = true;
+                fields.behind = toggle_on(attr(attrs, "behindDoc").as_deref());
+            }
+            "wp:wrapSquare" | "wp:wrapTight" | "wp:wrapThrough" => {
+                fields.wrap = fields.wrap.or(Some(RichImageWrap::Square));
+            }
+            "wp:wrapTopAndBottom" => {
+                fields.wrap = fields.wrap.or(Some(RichImageWrap::TopBottom));
+            }
+            "a:srcRect" if fields.crop.is_none() => {
+                // Each side is a whole number of thousandths of a percent; a missing one is 0 and a negative one (the
+                // picture is padded, not cut) leaves the picture whole.
+                let side = |key| match attr(attrs, key) {
+                    None => Some(0),
+                    Some(v) => v.trim().parse::<u32>().ok(),
+                };
+                fields.crop = Some(match (side("l"), side("t"), side("r"), side("b")) {
+                    (Some(left), Some(top), Some(right), Some(bottom)) => RichImageCrop {
+                        left,
+                        top,
+                        right,
+                        bottom,
+                    },
+                    _ => RichImageCrop::default(),
+                });
+            }
+            "a:xfrm" if fields.rotation.is_none() => {
+                fields.rotation = Some(
+                    attr(attrs, "rot")
+                        .and_then(|v| v.trim().parse::<i64>().ok())
+                        .map_or(0, degrees_of_drawing_angle),
+                );
+            }
             "a:blip" if fields.embed.is_none() => fields.embed = attr(attrs, "r:embed"),
             "wp:docPr" if fields.alt.is_none() => fields.alt = attr(attrs, "descr"),
             "wp:extent" if fields.extent.is_none() => {
@@ -190,6 +259,7 @@ pub(crate) fn drawing_picture(events: &[XmlEvent<'_>], media: &DocxMedia<'_>) ->
                 // An out-of-range extent keeps the default size derived from the pixels.
                 let _ = img.set_display_emu(cx, cy);
             }
+            let _ = img.set_layout(fields.layout());
             img
         });
     match built {

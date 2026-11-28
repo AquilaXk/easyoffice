@@ -73,6 +73,7 @@ mod rich_defaults;
 pub mod rich_document;
 mod rich_font_face;
 mod rich_image;
+mod rich_image_layout;
 mod rich_image_probe;
 mod rich_image_writers;
 mod rich_line_spacing;
@@ -176,6 +177,7 @@ pub use rich_image::{
     check_document_images, ImageBudget, RichImage, IMAGE_PLACEHOLDER_TEXT, MAX_ALT_TEXT_BYTES,
     MAX_IMAGES_PER_DOCUMENT, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_TOTAL_IMAGE_BYTES,
 };
+pub use rich_image_layout::{RichImageCrop, RichImageLayout, RichImageWrap, MAX_CROP_SIDE};
 pub use rich_image_probe::RichImageFormat;
 pub use rich_notes::{
     RichComment, RichNote, RichNoteKind, RichRevision, RichRevisionKind, MAX_ACTIVE_COMMENT_RANGES,

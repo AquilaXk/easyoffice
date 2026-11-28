@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use crate::bytes_hash::{hash_bytes, random_seed};
 use crate::rich_image::{RichImage, EMU_PER_POINT};
+use crate::rich_image_layout::{drawing_angle_of_degrees, RichImageWrap};
 use crate::{RichImageFormat, XmlSanitizer};
 
 const EMU_PER_INCH: u64 = 914_400;
@@ -125,26 +126,76 @@ pub(crate) fn docx_image_relationship(rel_id: &str, target: &str) -> String {
 pub(crate) fn docx_image_paragraph(img: &RichImage, number: usize, rel_id: &str) -> String {
     let (cx, cy) = img.display_emu();
     let alt = XmlSanitizer::escape(img.alt());
-    format!(
+    let layout = img.layout();
+    let crop = layout.crop;
+    let src_rect = if crop.is_none() {
+        String::new()
+    } else {
+        // Thousandths of a percent of each side (`a:srcRect`, ECMA-376 20.1.8.55).
+        format!(
+            "<a:srcRect l=\"{}\" t=\"{}\" r=\"{}\" b=\"{}\"/>",
+            crop.left, crop.top, crop.right, crop.bottom
+        )
+    };
+    let rot = if layout.rotation_degrees == 0 {
+        String::new()
+    } else {
+        format!(
+            " rot=\"{}\"",
+            drawing_angle_of_degrees(layout.rotation_degrees)
+        )
+    };
+    let picture = format!(
         concat!(
-            "<w:p><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">",
             "<wp:extent cx=\"{cx}\" cy=\"{cy}\"/>",
+            "{effect}",
+            "{wrap}",
             "<wp:docPr id=\"{n}\" name=\"Picture {n}\" descr=\"{alt}\"/>",
             "<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>",
             "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">",
             "<pic:pic><pic:nvPicPr><pic:cNvPr id=\"{n}\" name=\"image{n}.{ext}\" descr=\"{alt}\"/><pic:cNvPicPr/></pic:nvPicPr>",
-            "<pic:blipFill><a:blip r:embed=\"{rid}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>",
-            "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm>",
+            "<pic:blipFill><a:blip r:embed=\"{rid}\"/>{src_rect}<a:stretch><a:fillRect/></a:stretch></pic:blipFill>",
+            "<pic:spPr><a:xfrm{rot}><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm>",
             "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>",
-            "</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"
+            "</a:graphicData></a:graphic>"
         ),
         cx = cx,
         cy = cy,
+        effect = if layout.wrap == RichImageWrap::Inline {
+            ""
+        } else {
+            "<wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/>"
+        },
+        wrap = match layout.wrap {
+            RichImageWrap::Inline => "",
+            RichImageWrap::Square => "<wp:wrapSquare wrapText=\"bothSides\"/>",
+            RichImageWrap::TopBottom => "<wp:wrapTopAndBottom/>",
+            RichImageWrap::Behind | RichImageWrap::InFront => "<wp:wrapNone/>",
+        },
         n = number,
         alt = alt,
         ext = img.format().extension(),
-        rid = rel_id
-    )
+        rid = rel_id,
+        src_rect = src_rect,
+        rot = rot,
+    );
+    let frame = if layout.wrap == RichImageWrap::Inline {
+        format!("<wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">{picture}</wp:inline>")
+    } else {
+        // A floating picture is anchored to its own paragraph, at the left of the column and the top of the paragraph.
+        format!(
+            concat!(
+                "<wp:anchor distT=\"0\" distB=\"0\" distL=\"114300\" distR=\"114300\" simplePos=\"0\" relativeHeight=\"{height}\" ",
+                "behindDoc=\"{behind}\" locked=\"0\" layoutInCell=\"1\" allowOverlap=\"1\"><wp:simplePos x=\"0\" y=\"0\"/>",
+                "<wp:positionH relativeFrom=\"column\"><wp:align>left</wp:align></wp:positionH>",
+                "<wp:positionV relativeFrom=\"paragraph\"><wp:posOffset>0</wp:posOffset></wp:positionV>{picture}</wp:anchor>"
+            ),
+            height = 251_658_240 + number,
+            behind = u8::from(layout.wrap == RichImageWrap::Behind),
+            picture = picture,
+        )
+    };
+    format!("<w:p><w:r><w:drawing>{frame}</w:drawing></w:r></w:p>")
 }
 
 /// Namespace declarations the DOCX body needs for pictures.

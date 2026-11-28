@@ -61,3 +61,32 @@ fn a_value_the_formats_do_not_keep_rejects_the_save() {
         assert!(save(&bad).is_err(), "{to} must be refused");
     }
 }
+
+const PICTURE: &str = concat!(
+    "{\"targetFormat\":\"docx\",\"title\":\"그림\",\"blocks\":[{\"type\":\"image\",\"format\":\"png\",",
+    "\"base64\":\"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==\",",
+    "\"alt\":\"점\",\"wrap\":\"square\",\"crop\":{\"left\":10000,\"top\":0,\"right\":20000,\"bottom\":5000},\"rotation\":90}]}"
+);
+
+#[test]
+fn a_pictures_wrap_crop_and_rotation_survive_a_docx_save_and_a_bad_one_rejects_the_save() {
+    let json = reopen(&save(PICTURE).unwrap());
+    for expected in [
+        "\"wrap\":\"square\"",
+        "\"crop\":{\"left\":10000,\"top\":0,\"right\":20000,\"bottom\":5000}",
+        "\"rotation\":90",
+    ] {
+        assert!(json.contains(expected), "{expected}: {json}");
+    }
+    for (from, to) in [
+        ("\"square\"", "\"tight-ish\""),
+        ("\"rotation\":90", "\"rotation\":360"),
+        ("\"left\":10000", "\"left\":90000"),
+        ("\"left\":10000", "\"left\":100001"),
+    ] {
+        assert!(
+            save(&PICTURE.replace(from, to)).is_err(),
+            "{to} must be refused"
+        );
+    }
+}

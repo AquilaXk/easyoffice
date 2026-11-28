@@ -4,8 +4,9 @@ use std::fmt::Write;
 
 use easyoffice_formats::{
     base64_codec, evaluate_table_formulas, safe_link_target, CellFill, CellMerge, EasyOfficeError,
-    ImageBudget, RichImage, RichTable, StrictJsonValue, TableBorderEdge, TableBorderKind,
-    TableCellBorders, TableCellImage, TableCellLink, TableCellStyleEntry, MAX_COL_WIDTH_TWIPS,
+    ImageBudget, RichImage, RichImageCrop, RichImageLayout, RichImageWrap, RichTable,
+    StrictJsonValue, TableBorderEdge, TableBorderKind, TableCellBorders, TableCellImage,
+    TableCellLink, TableCellStyleEntry, MAX_COL_WIDTH_TWIPS, MAX_CROP_SIDE,
     MAX_IMAGES_PER_DOCUMENT, MAX_IMAGE_BYTES, MAX_STYLED_TABLE_CELLS, MAX_TABLE_LINKS,
     MIN_COL_WIDTH_TWIPS,
 };
@@ -31,6 +32,53 @@ pub(crate) fn write_image_fields(out: &mut String, img: &RichImage) {
     );
     EasyOfficeIpcRouter::escape_json_into(out, img.alt());
     out.push('"');
+    let layout = img.layout();
+    if layout.wrap != RichImageWrap::Inline {
+        let _ = write!(out, ",\"wrap\":\"{}\"", layout.wrap.wire_name());
+    }
+    if !layout.crop.is_none() {
+        let c = layout.crop;
+        let _ = write!(
+            out,
+            ",\"crop\":{{\"left\":{},\"top\":{},\"right\":{},\"bottom\":{}}}",
+            c.left, c.top, c.right, c.bottom
+        );
+    }
+    if layout.rotation_degrees != 0 {
+        let _ = write!(out, ",\"rotation\":{}", layout.rotation_degrees);
+    }
+}
+
+/// `"wrap"`, `"crop"` and `"rotation"` of a picture: a value the formats do not keep rejects the save.
+fn parse_image_layout(obj: &JsonObject) -> Result<RichImageLayout, EasyOfficeError> {
+    let wrap = match opt_str(obj, "wrap")?.filter(|w| !w.is_empty()) {
+        None => RichImageWrap::Inline,
+        Some(name) => RichImageWrap::from_wire_name(name)
+            .ok_or_else(|| invalid(format!("구조화 저장: 알 수 없는 그림 배치 '{name}'")))?,
+    };
+    let crop = match field(obj, "crop") {
+        None => RichImageCrop::default(),
+        Some(value) => {
+            let o = as_object(value, "crop")?;
+            let side = |key: &str| -> Result<u32, EasyOfficeError> {
+                Ok(opt_bounded(o, key, 0, i64::from(MAX_CROP_SIDE))?.unwrap_or(0) as u32)
+            };
+            RichImageCrop {
+                left: side("left")?,
+                top: side("top")?,
+                right: side("right")?,
+                bottom: side("bottom")?,
+            }
+        }
+    };
+    let rotation_degrees = opt_bounded(obj, "rotation", 0, 359)?.unwrap_or(0) as u16;
+    RichImageLayout {
+        wrap,
+        crop,
+        rotation_degrees,
+    }
+    .checked()
+    .ok_or_else(|| invalid("구조화 저장: 그림 자르기가 그림을 남기지 않습니다."))
 }
 
 /// Appends optional `colWidthsTwips`, `cellStyles`, and `cellImages` JSON properties to an open
@@ -133,6 +181,7 @@ pub(super) fn parse_image_budgeted(
     if let (Some(w), Some(h)) = (width, height) {
         image.set_display_emu(w as u64, h as u64)?;
     }
+    image.set_layout(parse_image_layout(obj)?)?;
     Ok(image)
 }
 

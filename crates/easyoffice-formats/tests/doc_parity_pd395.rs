@@ -1,11 +1,14 @@
 //! Word-style document features (PD-395): each one is written to DOCX and read back, and the readers refuse what
 //! a hostile file claims beyond the bounds.
 
+#[allow(dead_code)]
+mod image_fixture;
+
 use easyoffice_formats::{
     DecodedContent, DocumentFormat, RichBinding, RichBindingKind, RichBlock, RichDocument,
-    RichLineNumberRestart, RichLineNumbers, RichPageFrame, RichPageMargins, RichPaper,
-    RichParagraph, RichProperties, RichRun, RichSectionBreak, UniversalFormatConverter,
-    ZipArchiveCodec, ZipSecurityPolicy,
+    RichImage, RichImageCrop, RichImageLayout, RichImageWrap, RichLineNumberRestart,
+    RichLineNumbers, RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichProperties,
+    RichRun, RichSectionBreak, UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy,
 };
 
 pub fn decode(bytes: &[u8], name: &str) -> RichDocument {
@@ -376,6 +379,99 @@ fn line_numbers_round_trip_and_a_hostile_value_is_dropped() {
             .line_numbers,
         None
     );
+}
+
+// ---- pictures: wrap, crop, rotation
+
+fn image_doc(layout: RichImageLayout) -> RichDocument {
+    let mut image = RichImage::new(image_fixture::make_png(32, 24, 2, 3), "도표").unwrap();
+    image.set_layout(layout).unwrap();
+    doc_of(vec![paragraph("앞"), RichBlock::Image(image)])
+}
+
+fn layout_of(doc: &RichDocument) -> RichImageLayout {
+    doc.blocks
+        .iter()
+        .find_map(|b| match b {
+            RichBlock::Image(i) => Some(i.layout()),
+            _ => None,
+        })
+        .expect("a picture")
+}
+
+#[test]
+fn a_picture_keeps_its_wrap_crop_and_rotation() {
+    for wrap in RichImageWrap::ALL {
+        let layout = RichImageLayout {
+            wrap,
+            crop: RichImageCrop {
+                left: 10_000,
+                top: 5_000,
+                right: 20_000,
+                bottom: 0,
+            },
+            rotation_degrees: 90,
+        };
+        let bytes = encode(&image_doc(layout), DocumentFormat::Docx);
+        let body = part(&bytes, "word/document.xml");
+        assert!(
+            body.contains("<a:srcRect l=\"10000\" t=\"5000\" r=\"20000\" b=\"0\"/>")
+                && body.contains("<a:xfrm rot=\"5400000\">"),
+            "{wrap:?}: {body}"
+        );
+        assert_eq!(
+            body.contains("<wp:anchor"),
+            wrap != RichImageWrap::Inline,
+            "{wrap:?}"
+        );
+        assert_eq!(layout_of(&decode(&bytes, "i.docx")), layout, "{wrap:?}");
+    }
+}
+
+#[test]
+fn a_picture_without_a_layout_is_inline_and_whole() {
+    let bytes = encode(&image_doc(RichImageLayout::default()), DocumentFormat::Docx);
+    let body = part(&bytes, "word/document.xml");
+    assert!(
+        body.contains("<wp:inline") && !body.contains("srcRect") && !body.contains(" rot="),
+        "{body}"
+    );
+    assert!(layout_of(&decode(&bytes, "i.docx")).is_default());
+}
+
+#[test]
+fn a_hostile_picture_layout_is_refused_or_read_as_whole() {
+    let mut image = RichImage::new(image_fixture::make_png(8, 8, 2, 3), "").unwrap();
+    assert!(image
+        .set_layout(RichImageLayout {
+            rotation_degrees: 360,
+            ..Default::default()
+        })
+        .is_err());
+    assert!(image
+        .set_layout(RichImageLayout {
+            crop: RichImageCrop {
+                left: 60_000,
+                right: 60_000,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .is_err());
+    let bytes = encode(&image_doc(RichImageLayout::default()), DocumentFormat::Docx);
+    let body = part(&bytes, "word/document.xml");
+    for bad in ["l=\"-5\"", "l=\"99999999999\"", "l=\"60000\" r=\"60000\""] {
+        let hostile = body.replace("<a:stretch>", &format!("<a:srcRect {bad}/><a:stretch>"));
+        let mut entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
+        for e in &mut entries {
+            if e.path == "word/document.xml" {
+                e.data = hostile.clone().into_bytes();
+            }
+        }
+        let pairs: Vec<(String, Vec<u8>)> = entries.into_iter().map(|e| (e.path, e.data)).collect();
+        let back = decode(&ZipArchiveCodec::pack_compressed(&pairs).unwrap(), "h.docx");
+        assert!(layout_of(&back).crop.is_none(), "{bad}");
+    }
 }
 
 // ---- watermark
