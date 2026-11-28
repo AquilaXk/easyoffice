@@ -489,15 +489,16 @@ test("모델 설정 대화상자와 하단 모델 선택 메뉴는 회사별 모
     effortButtons.map((b) => b.textContent.trim()),
     ["낮음", "보통", "높음"]
   );
-  assert.equal(document.querySelector(".eo-copilot-welcome-title"), null, "welcome title copy removed per design-system.md 4-1");
-  assert.equal(COPILOT_CSS.includes(".eo-copilot-welcome-title"), false, "unused welcome title CSS rule removed");
+  // design-system.md 4-1 (no explanatory sentences on screen) has one exception: the copilot panel keeps the greeting of the chat UI it ports (QA 2026-11-28, PD-388).
+  assert.equal(document.querySelectorAll(".eo-copilot-welcome-title").length, 1, "the greeting is the panel's one 4-1 exception");
+  assert.match(COPILOT_CSS, /\.eo-copilot-welcome-title\s*\{[^}]*font-size:\s*var\(--copilot-font-2xl\)/);
   // The panel takes the type scale of the chat UI it ports (PD-388): 16px input and body, 14px menu rows, 12px headings.
   assert.match(COPILOT_CSS, /\.eo-copilot-textarea\s*\{[^}]*font-size:\s*var\(--copilot-font-base\)/);
   assert.match(COPILOT_CSS, /\.eo-copilot-shell\s*\{[^}]*font-size:\s*var\(--copilot-font-base\)/);
   assert.match(COPILOT_CSS, /\.eo-copilot-menu-heading\s*\{[^}]*font-size:\s*var\(--copilot-font-xs\)[^}]*font-weight:\s*500/s);
-  // The mode and model lists take the sizes of the Continue Listbox they port (11px rows).
-  assert.match(COPILOT_CSS, /\.eo-copilot-menu-item-title\s*\{[^}]*font-size:\s*var\(--copilot-font-listbox\)[^}]*font-weight:\s*400/s);
-  assert.match(COPILOT_CSS, /\.eo-copilot-menu-action-label\s*\{[^}]*font-size:\s*var\(--copilot-font-listbox\)[^}]*font-weight:\s*400/s);
+  // The mode and model lists take the sizes of the chat UI's ModelSelector they port (14px rows, medium names).
+  assert.match(COPILOT_CSS, /\.eo-copilot-menu-item-title\s*\{[^}]*font-weight:\s*500/s);
+  assert.match(COPILOT_CSS, /\.eo-copilot-menu-action-label\s*\{[^}]*font-size:\s*var\(--copilot-font-sm\)/s);
   const lowEffortBtn = effortButtons.find((b) => b.dataset.effortChoice === "low");
   assert.ok(lowEffortBtn);
   userClick(lowEffortBtn);

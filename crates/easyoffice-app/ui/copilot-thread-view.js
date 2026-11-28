@@ -215,20 +215,16 @@
       return row;
     }
 
-    // 사용자 메시지: 말풍선 왼쪽 바깥에 복사·다시 보내기, 아래 오른쪽에 상대 시간(원본 UserActionBar와 BranchPicker 자리).
+    // 사용자 메시지: 말풍선 아래 오른쪽에 시간 · 복사 · 다시 보내기(QA 목표 화면의 배치). 말풍선과 단추 크기·간격은 원본 값이다.
     function renderUser(msg) {
       const row = mkEl("div", "eo-copilot-row eo-copilot-row--user");
-      const wrap = mkEl("div", "eo-copilot-user-wrap");
       const bubble = mkEl("div", "eo-copilot-msg eo-copilot-msg--user");
       bubble.appendChild(mkEl("div", "eo-copilot-msg-text", msg.text));
       const meta = mkEl("div", "eo-copilot-meta eo-copilot-meta--user");
       const resend = iconButton("eo-copilot-meta-btn eo-copilot-resend-btn", "rotate-ccw", "다시 보내기", () => hooks.resend(msg));
       resend.disabled = hooks.isBusy();
-      meta.replaceChildren(copyButton(() => msg.text), resend);
-      wrap.replaceChildren(bubble, meta);
-      const time = timeLabel(msg);
-      time.classList.add("eo-copilot-meta-time--user");
-      row.replaceChildren(wrap, time);
+      meta.replaceChildren(timeLabel(msg), copyButton(() => msg.text), resend);
+      row.replaceChildren(bubble, meta);
       return row;
     }
 

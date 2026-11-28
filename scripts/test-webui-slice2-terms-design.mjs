@@ -140,7 +140,8 @@ test("Slice 2: Design system icons, token SVGs, BASE/BOARD custom selects, and c
   // No trash emoji or symbol glyphs in icons/buttons, PDF stamp normalized
   const html = readRepo("crates/easyoffice-app/ui/index.html");
   assert.equal(html.includes("🗑"), false);
-  assert.equal(html.includes("무엇을 도와드릴까요?"), false);
+  // The greeting is allowed in one place only: the copilot panel's welcome (QA 2026-11-28, PD-388, design-system.md 4-1 exception).
+  assert.equal(html.replace('<div class="eo-copilot-welcome-title">무엇을 도와드릴까요?</div>', "").includes("무엇을 도와드릴까요?"), false);
   assert.equal(html.includes("이 모듈"), false);
   assert.equal(html.includes("..."), false, "ellipses unified to … in index.html");
   assert.equal(html.includes("공문서 바탕글"), false);

@@ -19,7 +19,7 @@ const RADIUS_OF = {
 };
 // The one gradient of the panel is the shimmer of the waiting line (a moving band of light text over muted text, PD-388).
 const SHIMMER_RULE = /\.eo-copilot-shimmer\s*\{[^}]*\}/;
-const SHADOW_OF = { "base.css": [], "board.css": [], "copilot.css": ["var(--copilot-menu-shadow)", "var(--copilot-listbox-shadow)", "var(--copilot-focus-shadow)"] };
+const SHADOW_OF = { "base.css": [], "board.css": [], "copilot.css": ["var(--copilot-menu-shadow)", "var(--copilot-popover-ring)","var(--copilot-focus-shadow)"] };
 
 for (const name of Object.keys(RADIUS_OF)) {
   test(`${name}: corners are 0 or the reference value, no gradient, no shadow beyond the reference tokens`, () => {

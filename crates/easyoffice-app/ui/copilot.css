@@ -4,9 +4,12 @@
    `tool-fallback.aui.tsx` 96-249(도구 줄 접힘), `markdown-text.tsx` 65-237(본문 요소), `tooltip-icon-button.tsx` 1-49, `components/ui/button.tsx` 6-48(단추 변형),
    `app/globals.css`(색 의미와 모서리), `packages/tw-shimmer/src/index.css`(대기 문구 반짝임)의 Tailwind 클래스를 같은 값의 CSS로 옮겼다.
    값은 모두 tokens.css의 `--copilot-*` 토큰이다(패널은 앱 크기표의 예외, PD-388). 이 파일에는 길이·색 리터럴을 두지 않는다(패널 폭 한계·포인터 연출 층처럼 이전부터 있던 배치 값은 예외).
-   참조 구현: continuedev/continue (Apache-2.0) 커밋 5522c6f4 `gui/src/components/ui/Listbox.tsx`·`ModeSelect/ModeSelect.tsx`·`modelSelection/ModelSelect.tsx` = 모드·모델 단추와 목록(`.eo-copilot-listbox`, `-mode-btn`, `-model-btn`, `-model-menu`).
+   모델·모드 단추와 목록(`.eo-copilot-pill-btn`, `-listbox`, `-model-menu`)도 같은 저장소의 `packages/ui/src/components/react/assistant-ui/elements/model-selector.tsx` 52-135, 236-330, 370-510과
+   `ui/base/popover.tsx` 20-52, `ui/base/command.tsx` 143-157(항목)·114-130(그룹)·131-142(구분선) 값이다. 모드 목록의 동작(현재 값을 보이는 단추와 체크가 있는 선택지)은 Continue(Apache-2.0)
+   `gui/src/components/ModeSelect/ModeSelect.tsx` 89-172에서 옮겼다. 메뉴가 화면 밖으로 넘칠 때 뒤집는 계산(`placeMenu`)은 floating-ui(MIT) `packages/core/src/middleware/flip.ts`·`shift.ts`에서 옮겼다.
    참조 구현: LibreChat (MIT) 커밋 4700c44e `packages/chat/src/components/messages/Feedback.tsx`, `packages/client/src/components/Button.tsx`(popover-option) = 싫어요 이유 목록(`.eo-copilot-feedback-popover`, `-reason-option`).
-   원본에 없는 부분은 머리글(제목·더보기·닫기의 구조)과 사용자 메시지 아래 상대 시간 글자, + 메뉴(예시 질문)다. 값은 가까운 원본 부품의 것을 쓴다. */
+   인사말과 제안 줄은 assistant-ui Welcome·Suggestion(thread.aui.tsx 159-201)이고, 부제는 원본에 없다. 머리글(제목·더보기·닫기)과 + 메뉴(예시 질문)는 같은 구성을 가진 저장소 소스를 못 찾아
+   이 앱의 구조에 단추·메뉴 값만 위 원본 부품의 것을 썼다. 사용자 메시지 아래 시간·복사·다시 보내기 줄과 답변 아래 복사·좋아요·싫어요·시간 줄은 QA 목표 화면의 배치다. */
 
 .workspace-stage-row {
   display: flex;
@@ -224,8 +227,9 @@
   animation: eo-copilot-pop-in var(--copilot-duration) var(--copilot-ease);
 }
 
-.eo-copilot-popup--up,
-.eo-copilot-model-menu {
+/* 메뉴가 뒤집혀 위에 뜨면(`placeMenu`가 `data-side="top"`을 둔다) 아래에서 올라오며 나타난다(원본 data-[side=top]:slide-in-from-bottom-2) */
+.eo-copilot-popup[data-side="top"],
+.eo-copilot-model-menu[data-side="top"] {
   --copilot-pop-dy: var(--copilot-enter-rise-2);
 }
 
@@ -248,13 +252,13 @@
   color: var(--copilot-muted-foreground);
 }
 
-/* Continue ModelSelect의 "Models" 머리글: `px-1.5 py-1 text-description text-xs font-medium` */
+/* CommandGroup 머리글: `px-2 py-1.5 text-xs font-medium text-muted-foreground` */
 .eo-copilot-menu-heading {
-  padding: var(--copilot-u-1) var(--copilot-u-1_5);
+  padding: var(--copilot-u-1_5) var(--copilot-u-2);
   font-size: var(--copilot-font-xs);
-  line-height: normal;
+  line-height: var(--copilot-leading-xs);
   font-weight: 500;
-  color: var(--copilot-description);
+  color: var(--copilot-muted-foreground);
 }
 
 .eo-copilot-popup-item {
@@ -312,12 +316,24 @@
   }
 }
 
-/* ── 빈 상태: 제안 줄(`>` 표시 + text-sm). 원본의 인사말(Welcome 제목)은 4-1 "화면에는 설명 문장을 두지 않는다" 때문에 두지 않는다. ── */
+/* ── 빈 상태: Welcome(원본 `aui-thread-welcome-root mb-6 px-2`, 제목 `text-2xl font-medium tracking-tight`, 200ms 올라오며 나타남)과 제안 줄(`>` 표시 + text-sm).
+   인사말은 design-system 4-1(화면에 설명 문장을 두지 않는다)의 코파일럿 패널 예외다(QA 2026-11-28, PD-388). ── */
 .eo-copilot-welcome {
   display: flex;
   flex-direction: column;
   margin: auto 0;
   padding-bottom: var(--copilot-u-6);
+}
+
+.eo-copilot-welcome-title {
+  margin: 0 0 var(--copilot-u-6);
+  padding: 0 var(--copilot-u-2);
+  font-size: var(--copilot-font-2xl);
+  line-height: var(--copilot-leading-2xl);
+  font-weight: 500;
+  letter-spacing: var(--copilot-tracking-tight);
+  color: var(--copilot-foreground);
+  animation: eo-copilot-rise-1 var(--copilot-duration-200) ease;
 }
 
 .eo-copilot-welcome[hidden] {
@@ -424,7 +440,7 @@
   animation: eo-copilot-rise-1 var(--copilot-duration) ease;
 }
 
-/* ── UserMessage(원본: grid minmax(72px,1fr) auto, gap-y-2, px-2; 말풍선 bg-muted rounded-(--composer-radius) px-4 py-2; 단추는 말풍선 왼쪽 바깥) ── */
+/* ── UserMessage(원본: grid minmax(72px,1fr) auto, gap-y-2, px-2; 말풍선 bg-muted rounded-(--composer-radius) px-4 py-2; 시간·복사·다시 보내기는 QA 목표 화면대로 말풍선 아래 오른쪽) ── */
 .eo-copilot-row--user {
   display: grid;
   grid-template-columns: minmax(var(--copilot-u-18), 1fr) auto;
@@ -433,8 +449,7 @@
   padding: 0 var(--copilot-u-2);
 }
 
-.eo-copilot-user-wrap {
-  position: relative;
+.eo-copilot-row--user > .eo-copilot-msg--user {
   grid-column: 2;
   min-width: 0;
 }
@@ -453,16 +468,8 @@
 }
 
 .eo-copilot-meta--user {
-  position: absolute;
-  inset-inline-start: 0;
-  top: 50%;
-  padding-inline-end: var(--copilot-u-2);
-  transform: translate(-100%, -50%);
-}
-
-.eo-copilot-meta-time--user {
   grid-column: 1 / -1;
-  justify-self: end;
+  justify-content: flex-end;
 }
 
 /* ── AssistantMessage(원본: 본문 px-2 leading-relaxed, 아래 ActionBar 줄 ms-2 min-h-7.5 pt-1.5를 -mb-7.5 pb-7.5로 겹쳐 높이를 늘리지 않는다) ── */
@@ -490,16 +497,6 @@
   min-height: var(--copilot-u-7_5);
   margin-inline-start: var(--copilot-u-1);
   padding-top: var(--copilot-u-1_5);
-}
-
-/* ActionBar autohide="not-last": 마지막 메시지가 아니면 마우스를 올리거나 키보드로 들어갈 때만 보인다. */
-.eo-copilot-row:not(:last-child) .eo-copilot-meta {
-  visibility: hidden;
-}
-
-.eo-copilot-row:not(:last-child):hover .eo-copilot-meta,
-.eo-copilot-row:not(:last-child):focus-within .eo-copilot-meta {
-  visibility: visible;
 }
 
 .eo-copilot-meta-time {
@@ -686,6 +683,7 @@
   .eo-copilot-row.is-entering,
   .eo-copilot-steps-panel,
   .eo-copilot-steps-toggle[data-running="true"] .eo-copilot-steps-status,
+  .eo-copilot-welcome-title,
   .eo-copilot-example-btn,
   .eo-copilot-popup,
   .eo-copilot-model-menu,
@@ -930,42 +928,35 @@
   background: var(--copilot-add-hover);
 }
 
-/* 모드·모델 단추(Continue ModeSelect: `text-description bg-lightgray/20 gap-1 rounded-full border-none px-1.5 py-0.5 transition-colors duration-200 hover:brightness-110`,
-   ModelSelect: `text-description h-[18px] gap-1 border-none` + ListboxButton `bg-input-background px-1 py-0.5`, 모서리 0.5rem, 글자 14px - 3) */
+/* 모델·모드 단추(기준 저장소 ModelSelectorTrigger ghost sm: `h-8 px-2.5 py-1.5 gap-2 rounded-md text-xs whitespace-nowrap transition-colors hover:bg-accent`,
+   값 글자 `font-medium truncate`, 쉐브론 `size-4 opacity-50`) */
 .eo-copilot-pill-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: space-between;
   box-sizing: border-box;
-  gap: var(--copilot-u-1);
+  gap: var(--copilot-u-2);
+  height: var(--copilot-u-8);
   max-width: 176px;
   margin: 0;
+  padding: var(--copilot-u-1_5) var(--copilot-u-2_5);
   font-family: var(--font-family-ui);
-  font-size: var(--copilot-font-listbox);
-  font-weight: 400;
-  line-height: var(--copilot-leading-sm);
-  color: var(--copilot-description);
+  font-size: var(--copilot-font-xs);
+  font-weight: 500;
+  line-height: var(--copilot-leading-xs);
+  color: var(--copilot-foreground);
+  background: transparent;
   border: 0;
+  border-radius: var(--copilot-radius-md);
   cursor: pointer;
   overflow: hidden;
   white-space: nowrap;
-  transition: background-color 200ms var(--copilot-ease), color 200ms var(--copilot-ease), filter 200ms var(--copilot-ease);
+  transition: background-color var(--copilot-duration) var(--copilot-ease), color var(--copilot-duration) var(--copilot-ease);
 }
 
-.eo-copilot-mode-btn {
-  padding: var(--copilot-u-0_5) var(--copilot-u-1_5);
-  background: var(--copilot-mode-bg);
-  border-radius: var(--copilot-pill-radius);
-}
-
-.eo-copilot-model-btn {
-  height: var(--copilot-model-button-height);
-  padding: var(--copilot-u-0_5) var(--copilot-u-1);
-  background: var(--copilot-listbox-bg);
-  border-radius: var(--copilot-radius-md);
-}
-
-.eo-copilot-pill-btn:hover:not(:disabled) {
-  filter: brightness(1.1);
+.eo-copilot-pill-btn:hover:not(:disabled),
+.eo-copilot-pill-btn[aria-expanded="true"] {
+  background: var(--copilot-accent);
 }
 
 .eo-copilot-pill-btn:focus-visible {
@@ -974,8 +965,9 @@
 }
 
 .eo-copilot-pill-btn .eo-chevron {
-  width: var(--copilot-u-2);
-  height: var(--copilot-u-2);
+  width: var(--copilot-u-4);
+  height: var(--copilot-u-4);
+  opacity: var(--copilot-chevron-opacity);
 }
 
 .eo-copilot-pill-btn:disabled {
@@ -1080,43 +1072,76 @@
   background: var(--copilot-accent);
 }
 
-/* ── 모드·모델 선택 목록(Continue Listbox: ListboxOptions `bg-input-background flex w-max min-w-[160px] max-w-[400px] flex-col overflow-auto px-0 shadow-md`,
-   border 1px, 모서리 0.5rem, 글자 14px - 3; ListboxOption `flex flex-row items-center justify-between px-2 py-1 hover:bg-list-active`) ── */
+/* ── 모델·모드 선택 목록(기준 저장소 ModelSelectorContent: `bg-popover w-72 min-w-(--anchor-width) overflow-hidden rounded-xl p-0`, Popover `ring-1 ring-foreground/10 text-sm duration-100`;
+   CommandItem `rounded-lg py-2 ps-3 pe-9 gap-2`, 고른 것·호버 `bg-accent`, 체크 `absolute end-3 top-2.5 size-4`; CommandGroup `p-1`, 머리글 `px-2 py-1.5 text-xs font-medium`) ── */
 .eo-copilot-listbox,
 .eo-copilot-model-menu {
-  min-width: var(--copilot-listbox-min-width);
-  max-width: var(--copilot-listbox-max-width);
-  padding: 0;
-  background: var(--copilot-listbox-bg);
-  border-color: var(--copilot-listbox-border);
-  border-radius: var(--copilot-radius-md);
-  box-shadow: var(--copilot-listbox-shadow);
+  --copilot-pop-dy: calc(-1 * var(--copilot-enter-rise-2));
+  width: min(var(--copilot-u-72), calc(100vw - 24px));
+  padding: var(--copilot-u-1);
+  background: var(--copilot-popover);
+  border: 0;
+  border-radius: var(--copilot-radius-xl);
+  box-shadow: var(--copilot-popover-ring);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  font-size: var(--copilot-font-listbox);
-  line-height: normal;
+  font-size: var(--copilot-font-sm);
+  line-height: var(--copilot-leading-sm);
+  animation-duration: var(--copilot-duration-100);
 }
 
-.eo-copilot-listbox {
-  width: max-content;
+.eo-copilot-popup[data-side="top"],
+.eo-copilot-model-menu[data-side="top"] {
+  --copilot-pop-dy: var(--copilot-enter-rise-2);
 }
 
-.eo-copilot-listbox .eo-copilot-popup-item {
-  justify-content: space-between;
-  padding: var(--copilot-u-1) var(--copilot-u-2);
-  font-size: var(--copilot-font-listbox);
-  line-height: normal;
-  border-radius: 0;
+.eo-copilot-listbox .eo-copilot-popup-item,
+.eo-copilot-model-menu [focusgroup~="menu"] button {
+  position: relative;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: var(--copilot-u-2);
+  width: 100%;
+  padding: var(--copilot-u-2) var(--copilot-u-9) var(--copilot-u-2) var(--copilot-u-3);
+  font-family: var(--font-family-ui);
+  font-size: var(--copilot-font-sm);
+  font-weight: 400;
+  line-height: var(--copilot-leading-sm);
+  text-align: left;
+  color: var(--copilot-foreground);
+  background: transparent;
+  border: 0;
+  border-radius: var(--copilot-radius-lg);
+  cursor: pointer;
 }
 
 .eo-copilot-listbox .eo-copilot-popup-item:hover:not(:disabled),
-.eo-copilot-listbox .eo-copilot-popup-item:focus-visible {
-  background: var(--copilot-listbox-active);
-  color: var(--copilot-listbox-active-foreground);
+.eo-copilot-listbox .eo-copilot-popup-item:focus-visible,
+.eo-copilot-model-menu [focusgroup~="menu"] button:hover,
+.eo-copilot-model-menu [focusgroup~="menu"] button:focus-visible,
+.eo-copilot-model-menu [focusgroup~="menu"] button[role="menuitemradio"]:not([data-effort-choice])[aria-checked="true"] {
+  background: var(--copilot-accent);
+  outline: none;
+}
+
+/* 체크: 오른쪽 위에 16px (`absolute end-3 top-2.5 size-4`) */
+.eo-copilot-listbox .eo-copilot-popup-item[aria-checked="true"]::after,
+.eo-copilot-model-menu [focusgroup~="menu"] button[role="menuitemradio"]:not([data-effort-choice])[aria-checked="true"]::after {
+  content: "✓";
+  position: absolute;
+  inset-inline-end: var(--copilot-u-3);
+  top: var(--copilot-u-2_5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--copilot-u-4);
+  height: var(--copilot-u-4);
+  margin: 0;
+  float: none;
+  font-weight: 400;
 }
 
 .eo-copilot-model-menu {
-  width: min(296px, calc(100vw - 24px));
   max-height: min(620px, calc(100vh - 24px));
   overflow: hidden;
 }
@@ -1149,7 +1174,7 @@
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  max-height: 184px;
+  max-height: var(--copilot-list-max-height);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -1165,44 +1190,12 @@
   gap: var(--menu-footer-gap);
 }
 
-/* Continue Divider */
+/* CommandSeparator: `bg-border -mx-1 h-px` */
 .eo-copilot-model-menu [focusgroup~="menu"] hr {
+  margin: var(--copilot-u-1) calc(-1 * var(--copilot-u-1));
   border: 0;
-  border-top: 1px solid var(--copilot-listbox-border);
-  margin: 0;
+  border-top: 1px solid var(--copilot-border);
   flex-shrink: 0;
-}
-
-.eo-copilot-model-menu [focusgroup~="menu"] button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--copilot-u-2);
-  width: 100%;
-  padding: var(--copilot-u-1) var(--copilot-u-2);
-  font-family: var(--font-family-ui);
-  font-size: var(--copilot-font-listbox);
-  font-weight: 400;
-  line-height: normal;
-  text-align: left;
-  color: var(--copilot-foreground);
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  cursor: pointer;
-}
-
-.eo-copilot-model-menu [focusgroup~="menu"] button:hover,
-.eo-copilot-model-menu [focusgroup~="menu"] button:focus-visible {
-  background: var(--copilot-listbox-active);
-  color: var(--copilot-listbox-active-foreground);
-  outline: none;
-}
-
-/* 고른 항목은 bg-list-active(Continue ModelSelect의 `isSelected`) */
-.eo-copilot-model-menu [focusgroup~="menu"] button[role="menuitemradio"]:not([data-effort-choice])[aria-checked="true"] {
-  background: var(--copilot-listbox-active);
-  color: var(--copilot-listbox-active-foreground);
 }
 
 .eo-copilot-menu-item-body {
@@ -1212,71 +1205,71 @@
   flex: 1 1 auto;
 }
 
+/* 항목 이름 `truncate font-medium`, 설명 `text-muted-foreground truncate text-xs` */
 .eo-copilot-menu-item-title {
-  font-size: var(--copilot-font-listbox);
-  font-weight: 400;
-  line-height: normal;
+  font-weight: 500;
   color: inherit;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* ModelSelect의 보조 글자: `text-description-muted text-[10px] italic` */
 .eo-copilot-menu-item-sub {
-  font-size: var(--copilot-font-listbox-tiny);
-  font-style: italic;
+  font-size: var(--copilot-font-xs);
   font-weight: 400;
-  line-height: normal;
-  color: var(--copilot-description-muted);
+  line-height: var(--copilot-leading-xs);
+  color: var(--copilot-muted-foreground);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* ModelSelectorEffort: 줄 `border-t px-3 py-2`, 라벨 `text-muted-foreground text-xs`, 선택지 `rounded-md px-2 py-1 text-xs hover:bg-muted data-checked:bg-accent font-medium`, 묶음 `gap-0.5` */
 .eo-copilot-model-menu [focusgroup~="menu"] .eo-copilot-effort-group {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  align-items: center;
+  gap: var(--copilot-u-0_5);
+  padding: var(--copilot-u-1) var(--copilot-u-3) var(--copilot-u-2);
 }
 
 .eo-copilot-model-menu [focusgroup~="menu"] .eo-copilot-effort-group > button {
-  justify-content: center;
-  gap: 0;
-  text-align: center;
+  width: auto;
+  padding: var(--copilot-u-1) var(--copilot-u-2);
+  font-size: var(--copilot-font-xs);
+  line-height: var(--copilot-leading-xs);
+  color: var(--copilot-muted-foreground);
+  border-radius: var(--copilot-radius-md);
+}
+
+.eo-copilot-model-menu [focusgroup~="menu"] .eo-copilot-effort-group > button:hover {
+  background: var(--copilot-muted);
+  color: var(--copilot-foreground);
 }
 
 .eo-copilot-effort-label {
-  font-size: var(--copilot-font-listbox);
-  font-weight: 400;
-  line-height: normal;
+  font-size: var(--copilot-font-xs);
+  line-height: var(--copilot-leading-xs);
   color: inherit;
 }
 
 .eo-copilot-model-menu [focusgroup~="menu"] .eo-copilot-effort-group > button[aria-checked="true"] {
-  background: var(--copilot-listbox-active);
-  color: var(--copilot-listbox-active-foreground);
+  background: var(--copilot-accent);
+  color: var(--copilot-foreground);
+  font-weight: 500;
 }
 
 .eo-copilot-menu-action-label {
-  font-size: var(--copilot-font-listbox);
-  font-weight: 400;
-  line-height: normal;
-  color: var(--copilot-description);
-}
-
-.eo-copilot-menu-action:hover .eo-copilot-menu-action-label,
-.eo-copilot-menu-action:focus-visible .eo-copilot-menu-action-label {
-  color: inherit;
+  font-size: var(--copilot-font-sm);
+  line-height: var(--copilot-leading-sm);
+  color: var(--copilot-foreground);
 }
 
 .eo-copilot-menu-hint {
   margin-inline-start: auto;
   flex: none;
-  padding: var(--menu-hint-padding);
-  font-size: var(--copilot-font-listbox-tiny);
-  font-weight: 400;
-  line-height: normal;
-  color: var(--copilot-description-muted);
+  font-size: var(--copilot-font-xs);
+  line-height: var(--copilot-leading-xs);
+  color: var(--copilot-muted-foreground);
 }
 
 #copilot-model-dialog {

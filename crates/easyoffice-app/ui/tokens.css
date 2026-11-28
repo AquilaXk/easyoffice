@@ -227,6 +227,7 @@
   --copilot-u-7_5: 30px;
   --copilot-u-8: 32px;
   --copilot-u-10: 40px;
+  --copilot-u-9: 36px;
   --copilot-u-12: 48px;
   --copilot-u-14: 56px;
   --copilot-u-18: 72px;                           /* 사용자 메시지 왼쪽 단추 자리의 최소 폭(원본 minmax(72px,1fr)) */
@@ -239,7 +240,10 @@
   --copilot-font-chip: 12.8px;                    /* 원본 Button size sm의 text-[0.8rem] */
   --copilot-font-base: 16px;
   --copilot-leading-base: 24px;
-  --copilot-font-code: 13px;                      /* 원본 pre의 text-[13px] */
+  --copilot-font-2xl: 24px;
+  --copilot-leading-2xl: 32px;
+  --copilot-tracking-tight: -0.025em;
+  --copilot-font-code: 13px;                     /* 원본 pre의 text-[13px] */
   --copilot-leading-relaxed: 1.625;
   --copilot-inline-code-size: 0.85em;
   --copilot-radius-sm: 6px;
@@ -263,20 +267,14 @@
   --copilot-menu-blur: 4px;                       /* backdrop-blur-sm */
   --copilot-spin-duration: 0.6s;                  /* 도구 줄의 진행 아이콘 */
   --copilot-icon-stroke: 2;                       /* lucide 기본 선 굵기(앱 아이콘은 1.75) */
-  /* 모드·모델 선택은 Continue(Apache-2.0) `gui/src/components/ui/Listbox.tsx`·`ModeSelect.tsx`·`ModelSelect.tsx`의 값이다: 글자 = 편집기 글자 14px - 3, 단추·항목 안쪽 여백 px-1 py-0.5 / px-2 py-1, 메뉴 border 1px, 모서리 0.5rem, shadow-md, 폭 160~400px, 선택 항목은 bg-list-active */
-  --copilot-font-listbox: 11px;
-  --copilot-font-listbox-tiny: 10px;              /* ModelSelect의 text-[10px] 보조 글자 */
-  --copilot-listbox-min-width: 160px;
-  --copilot-listbox-max-width: 400px;
-  --copilot-model-button-height: 18px;            /* ModelSelect 단추 h-[18px] */
-  --copilot-listbox-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);  /* shadow-md */
-  --copilot-listbox-bg: var(--ui-surface-raised);   /* input-background */
-  --copilot-listbox-border: var(--ui-border-light); /* command-border */
-  --copilot-listbox-active: var(--ui-selected);     /* list-active */
-  --copilot-listbox-active-foreground: var(--ui-text);
-  --copilot-description: var(--ui-text-secondary);  /* description */
-  --copilot-description-muted: var(--ui-text-muted);
-  --copilot-mode-bg: color-mix(in srgb, var(--ui-text-hint) 20%, transparent);  /* bg-lightgray/20 (#999998) */
+  /* 모델·모드 선택은 기준 저장소의 ModelSelector(`packages/ui/.../model-selector.tsx`)와 Popover·Command(`ui/base/popover.tsx`, `command.tsx`) 값이다:
+     단추 ghost sm(h-8 px-2.5 py-1.5 gap-2 rounded-md text-xs, 쉐브론 size-4 opacity-50), 상자 w-72 rounded-xl p-0 text-sm ring-1 ring-foreground/10,
+     목록 max-h-[300px], 그룹 p-1, 항목 rounded-lg py-2 ps-3 pe-9 gap-2, 체크 end-3 top-2.5 size-4, 추론 수준 줄 border-t px-3 py-2 */
+  --copilot-u-72: 288px;                          /* w-72 */
+  --copilot-chevron-opacity: 0.5;
+  --copilot-popover-ring: 0 0 0 1px color-mix(in srgb, var(--copilot-foreground) 10%, transparent);  /* ring-1 ring-foreground/10 */
+  --copilot-list-max-height: 300px;
+  --copilot-duration-100: 100ms;                  /* Popover의 duration-100 */
   /* 싫어요 이유 목록은 LibreChat(MIT) `packages/chat/src/components/messages/Feedback.tsx`와 `packages/client/src/components/Button.tsx`(popover-option)의 값이다 */
   --copilot-radius-2xl: 16px;                     /* rounded-theme-popover = --theme-popover-radius 1rem */
   --copilot-radius-control: 12px;                 /* rounded-theme-control = --theme-control-radius 0.75rem */

@@ -113,24 +113,13 @@
       const trigger = byId("btn-copilot-model");
       if (!menu || !trigger || typeof trigger.getBoundingClientRect !== "function") return;
       const rect = trigger.getBoundingClientRect();
-      const vw = Number(host.innerWidth) || 1280;
       const vh = Number(host.innerHeight) || 800;
-      const menuWidth = Math.min(296, Math.max(220, vw - 24));
-      const left = Math.min(Math.max(12, Math.round(rect.left || (vw - menuWidth - 20))), vw - menuWidth - 12);
-      menu.style.left = left + "px";
+      // 높이는 자리가 넓은 쪽에 맞추고, 쪽은 flip(`copilot-popup-menu.js` `placeMenu`)이 정한다.
+      const availAbove = Math.max(220, Math.min(620, Math.round(rect.top - 18)));
+      const availBelow = Math.max(220, Math.min(620, Math.round(vh - rect.bottom - 18)));
+      menu.style.maxHeight = Math.max(availAbove, availBelow) + "px";
       menu.style.right = "auto";
-      if (rect.top > 240 || rect.top === 0) {
-        const bottom = rect.top > 0 ? Math.max(12, Math.round(vh - rect.top + 6)) : 72;
-        const availAbove = rect.top > 0 ? Math.max(220, Math.min(620, Math.round(rect.top - 18))) : 560;
-        menu.style.bottom = bottom + "px";
-        menu.style.top = "auto";
-        menu.style.maxHeight = availAbove + "px";
-      } else {
-        const availBelow = Math.max(220, Math.min(620, Math.round(vh - rect.bottom - 18)));
-        menu.style.top = Math.round(rect.bottom + 6) + "px";
-        menu.style.bottom = "auto";
-        menu.style.maxHeight = availBelow + "px";
-      }
+      host.__EASYOFFICE_COPILOT_POPUP__.placeMenu({ view: host, menu, box: rect, preferred: availAbove >= availBelow ? "up" : "down", align: "start" });
     }
 
     function applyMenuRolesFallback(groupEl) {
