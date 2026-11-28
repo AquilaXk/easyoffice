@@ -158,6 +158,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "native-menu-hwp.js",
     "number-stepper.js",
     "office-print.js",
+    "pages-commands.js",
     "pages-ui.js",
     "pdf-edit.js",
     "pii-dom-scrubber.js",

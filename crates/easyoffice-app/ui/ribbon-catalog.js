@@ -414,7 +414,15 @@
     { keys: "Ctrl+G", action: "slide-group", module: "SLIDE", notMac: true, bareKey: true },
     { keys: "Ctrl+Shift+G", action: "slide-ungroup", module: "SLIDE", notMac: true, bareKey: true },
     { keys: "Ctrl+Alt+G", action: "slide-group", module: "SLIDE", macOnly: true, bareKey: true },
-    { keys: "Ctrl+Alt+Shift+G", action: "slide-ungroup", module: "SLIDE", macOnly: true, bareKey: true },  ]);
+    { keys: "Ctrl+Alt+Shift+G", action: "slide-ungroup", module: "SLIDE", macOnly: true, bareKey: true },
+    // The reference Pages app's keys (PD-399); `flavor: "pages"` binds them in the Pages document window only. The browser keeps
+    // Ctrl+T, Ctrl+Shift+W and Ctrl+Shift+I, so they are bound inside the desktop shell. The page break is Ctrl+Enter above.
+    { keys: "Ctrl+T", action: "pages-font-window", module: "DOC", flavor: "pages", desktopOnly: true, notInField: true },
+    { keys: "Ctrl+Shift+H", action: "pages-highlight", module: "DOC", flavor: "pages", notInField: true },
+    { keys: "Ctrl+Alt+B", action: "pages-bookmark", module: "DOC", flavor: "pages", notInField: true },
+    { keys: "Ctrl+Shift+W", action: "pages-word-count", module: "DOC", flavor: "pages", desktopOnly: true, notInField: true },
+    { keys: "Ctrl+Shift+I", action: "pages-marks", module: "DOC", flavor: "pages", desktopOnly: true, notInField: true },
+  ]);
 
   // ---- menu bar -> ribbon command (PD-098) ----------------------------------------------------
   // Menu items carry `data-studio-menu-cmd`: either the suffix of a ribbon command id (`home-bold`,

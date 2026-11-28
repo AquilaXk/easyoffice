@@ -11,10 +11,12 @@ use super::QUIT_ID;
 
 mod bars;
 mod hwp;
+mod pages;
 pub use bars::layout;
 #[cfg(test)]
 pub use bars::table_ids;
 pub use hwp::hwp_submenu;
+pub use pages::pages_submenu;
 
 /// The kind of a window as far as its menu bar goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

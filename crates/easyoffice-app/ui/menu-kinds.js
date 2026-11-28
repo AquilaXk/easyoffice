@@ -15,6 +15,25 @@
     format: { DOC: "서식", PAGES: "포맷", HWP: "서식", SHEET: "서식", SLIDE: "서식" },
   };
 
+  // The order of the menus in a kind whose official menu bar differs from the shared row: the Pages window follows the reference
+  // app (파일, 편집, 삽입, 포맷, 정렬, 보기), then the app's own 도구 and 도움말 (PD-399). Menus the list does not name keep their order after it.
+  const KIND_MENU_ORDER = { PAGES: ["file", "edit", "insert", "format", "arrange", "view", "tool", "help"] };
+
+  function orderMenus(bar, kind) {
+    const menus = Array.from(bar.querySelectorAll(":scope > .menu-item"));
+    menus.forEach((menu, index) => {
+      if (menu.dataset.eoMenuOrder === undefined) menu.dataset.eoMenuOrder = String(index);
+    });
+    const custom = KIND_MENU_ORDER[kind];
+    const rank = (menu) => {
+      const own = Number(menu.dataset.eoMenuOrder);
+      const named = custom ? custom.indexOf(menu.dataset.menu) : -1;
+      return named >= 0 ? named : custom ? custom.length + own : own;
+    };
+    const sorted = [...menus].sort((a, b) => rank(a) - rank(b));
+    if (sorted.some((menu, index) => menu !== menus[index])) for (const menu of sorted) bar.appendChild(menu);
+  }
+
   // The menu kind of a command module: `HWP_EMBED` -> `HWP`; `DOC` with `eoDocFlavor === "pages"` -> `PAGES`.
   function menuKindOf(commandModule, doc) {
     if (commandModule === "HWP_EMBED") return "HWP";
@@ -51,6 +70,7 @@
       const embedHwpOnly = el.dataset.hwpSaveAs !== undefined && !hwpEmbed;
       el.hidden = !el.dataset.kinds.split(" ").includes(kind) || Boolean(el.disabled) || embedHwpOnly;
     }
+    orderMenus(bar, kind);
     for (const menu of bar.querySelectorAll(":scope > .menu-item")) {
       const titleMap = KIND_MENU_TITLES[menu.dataset.menu];
       if (titleMap) {

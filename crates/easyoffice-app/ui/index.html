@@ -85,7 +85,8 @@
               <div class="md-item" data-kinds="SHEET" data-sheet-act="print-area-clear" role="menuitem" tabindex="-1"><span class="md-label">인쇄 영역 해제</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="doc-properties" role="menuitem" tabindex="-1"><span class="md-label">문서 속성…</span></div>
               <div class="md-item" data-kinds="DOC" data-verify-act="print-preview" role="menuitem" tabindex="-1"><span class="md-label">인쇄 미리 보기</span></div>
-              <div class="md-item" data-kinds="PAGES SHEET SLIDE BASE BOARD PDF" data-verify-act="print-preview" role="menuitem" tabindex="-1"><span class="md-label">인쇄 미리 보기</span></div>
+              <div class="md-item" data-kinds="SHEET SLIDE BASE BOARD PDF" data-verify-act="print-preview" role="menuitem" tabindex="-1"><span class="md-label">인쇄 미리 보기</span></div>
+              <div class="md-item" data-kinds="PAGES" data-verify-act="print-preview" role="menuitem" tabindex="-1"><span class="md-label">프린트 미리 보기</span></div>
               <div class="md-item" data-kinds="DOC SHEET SLIDE BASE BOARD PDF" data-studio-menu-cmd="print" role="menuitem" tabindex="-1"><span class="md-label">인쇄…</span><span class="md-shortcut">Ctrl+P</span></div>
               <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="print" role="menuitem" tabindex="-1"><span class="md-label">프린트…</span><span class="md-shortcut">Ctrl+P</span></div>
               <div class="md-sep"></div>
@@ -167,7 +168,8 @@
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="ctrl-marks" role="menuitem" tabindex="-1"><span class="md-label">모든 서식 표시</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="ctrl-marks" role="menuitem" tabindex="-1"><span class="md-label">조판 부호</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="para-marks" role="menuitem" tabindex="-1"><span class="md-label">단락 표시</span></div>
-              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="para-marks" role="menuitem" tabindex="-1"><span class="md-label">보이지 않는 요소 보기</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="para-marks" role="menuitem" tabindex="-1"><span class="md-label">보이지 않는 요소 보기</span><span class="md-shortcut">Ctrl+Shift+I</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="review-stats" role="menuitem" tabindex="-1"><span class="md-label">단어 수 보기</span><span class="md-shortcut">Ctrl+Shift+W</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="para-marks" role="menuitem" tabindex="-1"><span class="md-label">문단 부호</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="doc-grid" role="menuitem" tabindex="-1"><span class="md-label">눈금선</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="doc-grid" role="menuitem" tabindex="-1"><span class="md-label">격자 설정</span></div>
@@ -180,6 +182,13 @@
               <div class="md-item" data-kinds="DOC HWP" data-studio-menu-cmd="insert-image" role="menuitem" tabindex="-1"><span class="md-label">그림</span></div>
               <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="insert-image" role="menuitem" tabindex="-1"><span class="md-label">이미지</span></div>
               <div class="md-item" data-kinds="DOC PAGES" data-studio-menu-cmd="insert-chart" role="menuitem" tabindex="-1"><span class="md-label">차트</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="insert-table" role="menuitem" tabindex="-1"><span class="md-label">표 삽입</span></div>
+              <div class="md-sep" data-kinds="PAGES"></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">링크</span><span class="md-shortcut">Ctrl+K</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="insert-bookmark" role="menuitem" tabindex="-1"><span class="md-label">북마크…</span><span class="md-shortcut">Ctrl+Alt+B</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="insert-datetime" role="menuitem" tabindex="-1"><span class="md-label">날짜 및 시간…</span></div>
+              <div class="md-sep" data-kinds="PAGES"></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="doc-mod-page-break" role="menuitem" tabindex="-1"><span class="md-label">페이지 나누기</span><span class="md-shortcut">Ctrl+Enter</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="mod-footnote" role="menuitem" tabindex="-1"><span class="md-label">각주</span></div>
               <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="mod-endnote" role="menuitem" tabindex="-1"><span class="md-label">미주</span></div>
@@ -196,7 +205,6 @@
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-caption" role="menuitem" tabindex="-1"><span class="md-label">캡션 삽입…</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-datetime" role="menuitem" tabindex="-1"><span class="md-label">날짜 및 시간…</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="field-update" role="menuitem" tabindex="-1"><span class="md-label">필드 업데이트</span><span class="md-shortcut">F9</span></div>
-              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">링크</span><span class="md-shortcut">Ctrl+K</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="DOC PAGES" data-studio-menu-cmd="doc-mod-toc" role="menuitem" tabindex="-1"><span class="md-label">자동 목차 생성</span></div>
@@ -256,6 +264,17 @@
               <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="home-strike" role="menuitem" tabindex="-1"><span class="md-label">취소선</span></div>
               <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="home-superscript" role="menuitem" tabindex="-1"><span class="md-label">위 첨자</span><span class="md-shortcut">Ctrl+Shift+=</span></div>
               <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="home-subscript" role="menuitem" tabindex="-1"><span class="md-label">아래 첨자</span><span class="md-shortcut">Ctrl+=</span></div>
+              <div class="md-sep" data-kinds="PAGES"></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="font-dialog" role="menuitem" tabindex="-1"><span class="md-label">서체 윈도우</span><span class="md-shortcut">Ctrl+T</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="home-highlight" role="menuitem" tabindex="-1"><span class="md-label">하이라이트</span><span class="md-shortcut">Ctrl+Shift+H</span></div>
+              <div class="md-sub" data-kinds="PAGES" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">대문자</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="대문자">
+                  <div class="md-item" data-studio-menu-cmd="text-case-none" role="menuitem" tabindex="-1"><span class="md-label">없음</span></div>
+                  <div class="md-item" data-studio-menu-cmd="text-case-all" role="menuitem" tabindex="-1"><span class="md-label">모두 대문자</span></div>
+                  <div class="md-item" data-studio-menu-cmd="text-case-small" role="menuitem" tabindex="-1"><span class="md-label">작은 대문자</span></div>
+                </div>
+              </div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="font-dialog" role="menuitem" tabindex="-1"><span class="md-label">글꼴…</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="para-dialog" role="menuitem" tabindex="-1"><span class="md-label">단락…</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="format-painter" role="menuitem" tabindex="-1"><span class="md-label">서식 복사</span><span class="md-shortcut">Ctrl+Shift+C</span></div>
@@ -291,6 +310,28 @@
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="indent-in" role="menuitem" tabindex="-1"><span class="md-label">한 수준 증가</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="indent-out" role="menuitem" tabindex="-1"><span class="md-label">들여쓰기 줄임</span></div>
               <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="indent-out" role="menuitem" tabindex="-1"><span class="md-label">들여쓰기 단계 감소</span></div>
+              <div class="md-sep" data-kinds="PAGES"></div>
+              <div class="md-sub" data-kinds="PAGES" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">표</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="표">
+                  <div class="md-item" data-studio-menu-cmd="table-row-above" role="menuitem" tabindex="-1"><span class="md-label">위에 행 추가</span></div>
+                  <div class="md-item" data-studio-menu-cmd="table-add-row" role="menuitem" tabindex="-1"><span class="md-label">아래에 행 추가</span></div>
+                  <div class="md-item" data-studio-menu-cmd="table-col-left" role="menuitem" tabindex="-1"><span class="md-label">앞에 열 추가</span></div>
+                  <div class="md-item" data-studio-menu-cmd="table-col-right" role="menuitem" tabindex="-1"><span class="md-label">뒤에 열 추가</span></div>
+                  <div class="md-item" data-studio-menu-cmd="table-row-delete" role="menuitem" tabindex="-1"><span class="md-label">행 삭제</span></div>
+                  <div class="md-item" data-studio-menu-cmd="table-col-delete" role="menuitem" tabindex="-1"><span class="md-label">열 삭제</span></div>
+                  <div class="md-sep"></div>
+                  <div class="md-item" data-studio-menu-cmd="table-split" role="menuitem" tabindex="-1"><span class="md-label">셀 병합 해제</span></div>
+                  <div class="md-item" data-studio-menu-cmd="table-merge" role="menuitem" tabindex="-1"><span class="md-label">셀 병합</span></div>
+                  <div class="md-item" data-studio-menu-cmd="table-col-equal" role="menuitem" tabindex="-1"><span class="md-label">같은 너비로 열 조절</span></div>
+                  <div class="md-sep"></div>
+                  <div class="md-item" data-studio-menu-cmd="table-border-bg" role="menuitem" tabindex="-1"><span class="md-label">테두리 및 음영</span></div>
+                  <div class="md-item" data-studio-menu-cmd="table-cell-props" role="menuitem" tabindex="-1"><span class="md-label">표 속성</span></div>
+                  <div class="md-sep"></div>
+                  <div class="md-item" data-studio-menu-cmd="table-sum" role="menuitem" tabindex="-1"><span class="md-label">블록 합계</span></div>
+                  <div class="md-item" data-studio-menu-cmd="data-sort" role="menuitem" tabindex="-1"><span class="md-label">오름차순·내림차순 정렬</span></div>
+                </div>
+              </div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="indent-out" role="menuitem" tabindex="-1"><span class="md-label">한 수준 감소</span></div>
               <div class="md-sep" data-kinds="SLIDE"></div>
               <div class="md-item" data-kinds="SLIDE" data-slide-act="bring-front" role="menuitem" tabindex="-1"><span class="md-label">맨 앞으로 가져오기</span></div>
@@ -491,6 +532,27 @@
               <div class="md-item" data-kinds="SHEET" data-sheet-numfmt="dialog" role="menuitem" tabindex="-1"><span class="md-label">셀 서식…</span><span class="md-shortcut">Ctrl+1</span></div>
             </div>
           </div>
+          <div class="menu-item" data-menu="arrange" data-kinds="PAGES">
+            <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="layout">정렬</button>
+            <div class="menu-dropdown" role="menu">
+              <div class="md-sub" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">텍스트 줄 바꿈</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="텍스트 줄 바꿈">
+                  <div class="md-item" data-studio-menu-cmd="image-wrap-inline" role="menuitem" tabindex="-1"><span class="md-label">줄 안</span></div>
+                  <div class="md-item" data-studio-menu-cmd="image-wrap-square" role="menuitem" tabindex="-1"><span class="md-label">정사각형</span></div>
+                  <div class="md-item" data-studio-menu-cmd="image-wrap-top-bottom" role="menuitem" tabindex="-1"><span class="md-label">위/아래</span></div>
+                  <div class="md-item" data-studio-menu-cmd="image-wrap-behind" role="menuitem" tabindex="-1"><span class="md-label">텍스트 뒤</span></div>
+                  <div class="md-item" data-studio-menu-cmd="image-wrap-front" role="menuitem" tabindex="-1"><span class="md-label">텍스트 앞</span></div>
+                </div>
+              </div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-studio-menu-cmd="image-crop" role="menuitem" tabindex="-1"><span class="md-label">자르기</span></div>
+              <div class="md-item" data-studio-menu-cmd="image-rotate-right" role="menuitem" tabindex="-1"><span class="md-label">오른쪽으로 90° 회전</span></div>
+              <div class="md-item" data-studio-menu-cmd="image-rotate-left" role="menuitem" tabindex="-1"><span class="md-label">왼쪽으로 90° 회전</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-studio-menu-cmd="layout-watermark" role="menuitem" tabindex="-1"><span class="md-label">워터마크…</span></div>
+            </div>
+          </div>
           <div class="menu-item" data-menu="page" data-kinds="DOC HWP PDF">
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="layout">레이아웃</button>
             <div class="menu-dropdown" role="menu">
@@ -573,29 +635,6 @@
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="slide-mod-transition" role="menuitem" tabindex="-1"><span class="md-label">전환 효과</span></div>
               <div class="md-item" data-studio-menu-cmd="slide-mod-presenter" role="menuitem" tabindex="-1"><span class="md-label">발표자 보기</span></div>
-            </div>
-          </div>
-          <div class="menu-item" data-menu="table-pages" data-kinds="PAGES">
-            <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="formulasAndData">표</button>
-            <div class="menu-dropdown" role="menu">
-              <div class="md-item" data-studio-menu-cmd="insert-table" role="menuitem" tabindex="-1"><span class="md-label">표 삽입</span></div>
-              <div class="md-sep"></div>
-              <div class="md-item" data-studio-menu-cmd="table-row-above" role="menuitem" tabindex="-1"><span class="md-label">위에 행 추가</span></div>
-              <div class="md-item" data-studio-menu-cmd="table-add-row" role="menuitem" tabindex="-1"><span class="md-label">아래에 행 추가</span></div>
-              <div class="md-item" data-studio-menu-cmd="table-col-left" role="menuitem" tabindex="-1"><span class="md-label">앞에 열 추가</span></div>
-              <div class="md-item" data-studio-menu-cmd="table-col-right" role="menuitem" tabindex="-1"><span class="md-label">뒤에 열 추가</span></div>
-              <div class="md-item" data-studio-menu-cmd="table-row-delete" role="menuitem" tabindex="-1"><span class="md-label">행 삭제</span></div>
-              <div class="md-item" data-studio-menu-cmd="table-col-delete" role="menuitem" tabindex="-1"><span class="md-label">열 삭제</span></div>
-              <div class="md-sep"></div>
-              <div class="md-item" data-studio-menu-cmd="table-split" role="menuitem" tabindex="-1"><span class="md-label">셀 병합 해제</span></div>
-              <div class="md-item" data-studio-menu-cmd="table-merge" role="menuitem" tabindex="-1"><span class="md-label">셀 병합</span></div>
-              <div class="md-item" data-studio-menu-cmd="table-col-equal" role="menuitem" tabindex="-1"><span class="md-label">같은 너비로 열 조절</span></div>
-              <div class="md-sep"></div>
-              <div class="md-item" data-studio-menu-cmd="table-border-bg" role="menuitem" tabindex="-1"><span class="md-label">테두리 및 음영</span></div>
-              <div class="md-item" data-studio-menu-cmd="table-cell-props" role="menuitem" tabindex="-1"><span class="md-label">표 속성</span></div>
-              <div class="md-sep"></div>
-              <div class="md-item" data-studio-menu-cmd="table-sum" role="menuitem" tabindex="-1"><span class="md-label">블록 합계</span></div>
-              <div class="md-item" data-studio-menu-cmd="data-sort" role="menuitem" tabindex="-1"><span class="md-label">오름차순·내림차순 정렬</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="table" data-kinds="DOC HWP">
@@ -697,14 +736,15 @@
               <div class="md-item" data-kinds="DOC PAGES HWP SHEET SLIDE PDF" data-studio-menu-cmd="scrub-pii" role="menuitem" tabindex="-1"><span class="md-label">개인정보 스캔/마스킹</span></div>
               <div class="md-item" data-kinds="DOC PAGES HWP SHEET SLIDE PDF" data-studio-menu-cmd="review-verify" role="menuitem" tabindex="-1"><span class="md-label">문서 보안 검사</span></div>
               <div class="md-item" data-kinds="DOC PAGES SLIDE" data-verify-act="doc-inspect" role="menuitem" tabindex="-1"><span class="md-label">문서 검사…</span></div>
-              <div class="md-item" data-kinds="DOC PAGES HWP SHEET SLIDE PDF" data-studio-menu-cmd="bench-run" role="menuitem" tabindex="-1"><span class="md-label">문서 엔진 성능 진단</span></div>
+              <div class="md-item" data-kinds="DOC HWP SHEET SLIDE PDF" data-studio-menu-cmd="bench-run" role="menuitem" tabindex="-1"><span class="md-label">문서 엔진 성능 진단</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="DOC PAGES SHEET" data-studio-menu-cmd="review-track" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="md-icon"></span><span class="md-label">변경 내용 추적</span></div>
               <div class="md-item" data-kinds="DOC PAGES" data-studio-menu-cmd="review-accept-all" role="menuitem" tabindex="-1"><span class="md-label">모든 변경 내용 수락</span></div>
               <div class="md-item" data-kinds="DOC PAGES" data-studio-menu-cmd="review-reject-all" role="menuitem" tabindex="-1"><span class="md-label">모든 변경 내용 거부</span></div>
-              <div class="md-item" data-kinds="DOC PAGES SHEET SLIDE" data-studio-menu-cmd="review-comment" role="menuitem" tabindex="-1"><span class="md-label">새 메모</span></div>
+              <div class="md-item" data-kinds="DOC SHEET SLIDE" data-studio-menu-cmd="review-comment" role="menuitem" tabindex="-1"><span class="md-label">새 메모</span></div>
+              <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="review-comment" role="menuitem" tabindex="-1"><span class="md-label">주석 추가</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="review-stats" role="menuitem" tabindex="-1"><span class="md-label">단어 수</span></div>
-              <div class="md-item" data-kinds="PAGES SLIDE PDF" data-studio-menu-cmd="review-stats" role="menuitem" tabindex="-1"><span class="md-label">문서 통계·글자 수</span></div>
+              <div class="md-item" data-kinds="SLIDE PDF" data-studio-menu-cmd="review-stats" role="menuitem" tabindex="-1"><span class="md-label">문서 통계·글자 수</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="PDF" data-studio-menu-cmd="pdf-mod-tooffice" role="menuitem" tabindex="-1"><span class="md-label">편집 문서 변환</span></div>
               <div class="md-sep"></div>
@@ -760,7 +800,7 @@
         </div>
         <span class="tb-sep" aria-hidden="true"></span>
         <div class="tb-group sb-viewmark-group">
-          <button id="btn-toggle-ctrl-marks" class="tb-btn" type="button" data-kinds="DOC PAGES HWP SLIDE PDF BASE BOARD START CONV" title="서식 기호 표시" aria-label="서식 기호 표시"><span class="tb-sprite icon-ctrl-mark"></span><span class="tb-label">서식<br/>기호</span></button>
+          <button id="btn-toggle-ctrl-marks" class="tb-btn" type="button" data-kinds="DOC HWP SLIDE PDF BASE BOARD START CONV" title="서식 기호 표시" aria-label="서식 기호 표시"><span class="tb-sprite icon-ctrl-mark"></span><span class="tb-label">서식<br/>기호</span></button>
           <button id="btn-toggle-para-marks" class="tb-btn active" type="button" aria-pressed="true" data-kinds="DOC PAGES HWP SLIDE PDF BASE BOARD START CONV" title="편집 기호 표시" aria-label="편집 기호 표시"><span class="tb-sprite icon-para-mark"></span><span class="tb-label">편집<br/>기호</span></button>
           <button id="btn-toggle-doc-grid" class="tb-btn" type="button" title="눈금선 보기" aria-label="눈금선 보기"><span class="tb-sprite icon-grid"></span><span class="tb-label">눈금선</span></button>
         </div>
@@ -3896,6 +3936,7 @@
     <script src="./doc-word-fields.js"></script>
     <script src="./doc-word-layout.js"></script>
     <script src="./doc-word-image.js"></script>
+    <script src="./pages-commands.js"></script>
     <script src="./doc-dialogs-ext.js"></script>
     <script src="./workspace-tools.js"></script>
     <script src="./workspace-panels.js"></script>

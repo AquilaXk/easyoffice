@@ -43,30 +43,35 @@ use tauri::{AppHandle, Manager, Runtime, Wry};
 mod build;
 mod items;
 mod items_hwp;
+mod items_pages;
 mod layout;
 pub use layout::MenuKind;
 
-/// The whole table: the items of every window kind, then the ones only the Hangul editor runs.
-pub const ITEMS: &[MenuItemSpec] = &join::<ITEM_COUNT>(items::BASE_ITEMS, items_hwp::HWP_ITEMS);
-const ITEM_COUNT: usize = items::BASE_ITEMS.len() + items_hwp::HWP_ITEMS.len();
+/// The whole table: the items of every window kind, then the ones only the Hangul editor runs, then the Pages window's.
+pub const ITEMS: &[MenuItemSpec] = &join::<ITEM_COUNT>(&[
+    items::BASE_ITEMS,
+    items_hwp::HWP_ITEMS,
+    items_pages::PAGES_ITEMS,
+]);
+const ITEM_COUNT: usize =
+    items::BASE_ITEMS.len() + items_hwp::HWP_ITEMS.len() + items_pages::PAGES_ITEMS.len();
 
-/// The two tables one after the other (a constant, so the table stays a static slice).
-const fn join<const N: usize>(
-    first: &[MenuItemSpec],
-    second: &[MenuItemSpec],
-) -> [MenuItemSpec; N] {
-    assert!(first.len() + second.len() == N);
-    let mut out = [first[0]; N];
+/// The tables one after the other (a constant, so the table stays a static slice).
+const fn join<const N: usize>(parts: &[&[MenuItemSpec]]) -> [MenuItemSpec; N] {
+    let mut out = [parts[0][0]; N];
     let mut at = 0;
-    while at < first.len() {
-        out[at] = first[at];
-        at += 1;
+    let mut part = 0;
+    while part < parts.len() {
+        let items = parts[part];
+        let mut next = 0;
+        while next < items.len() {
+            out[at] = items[next];
+            at += 1;
+            next += 1;
+        }
+        part += 1;
     }
-    let mut next = 0;
-    while next < second.len() {
-        out[first.len() + next] = second[next];
-        next += 1;
-    }
+    assert!(at == N);
     out
 }
 
@@ -112,6 +117,11 @@ fn accelerator_of(spec: &MenuItemSpec) -> Option<&'static str> {
 fn accelerator_for(kind: MenuKind, spec: &MenuItemSpec) -> Option<&'static str> {
     if kind == MenuKind::Hwp && matches!(spec.id, "insert:link" | "edit:replace" | "edit:goto") {
         return None;
+    }
+    if kind == MenuKind::Pages {
+        if let Some(accelerator) = items_pages::accelerator(spec.id) {
+            return Some(accelerator);
+        }
     }
     if kind == MenuKind::Sheet {
         return match spec.id {
@@ -163,11 +173,11 @@ const _: () = assert!(ITEMS.len() <= ItemMask::CAPACITY);
 
 /// A set of indexes of [`ITEMS`] (the items a window cannot use).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct ItemMask([u128; 3]);
+pub struct ItemMask([u128; 4]);
 
 impl ItemMask {
     /// How many indexes the set can hold.
-    pub const CAPACITY: usize = 3 * u128::BITS as usize;
+    pub const CAPACITY: usize = 4 * u128::BITS as usize;
 
     pub fn insert(&mut self, index: usize) {
         self.0[index / u128::BITS as usize] |= 1u128 << (index % u128::BITS as usize);
@@ -204,36 +214,8 @@ pub fn label_for(kind: MenuKind, spec: &MenuItemSpec) -> &'static str {
             return label;
         }
     } else if kind == MenuKind::Pages {
-        match spec.id {
-            "file:print" => return "프린트…",
-            "edit:redo" => return "실행 복귀",
-            "edit:cut" => return "오려두기",
-            "edit:replace" => return "찾기 및 대치",
-            "view:para-marks" => return "보이지 않는 요소 보기",
-            "insert:image" => return "이미지",
-            "insert:link" => return "링크",
-            "format:bold" => return "볼드체",
-            "format:italic" => return "이탤릭체",
-            "format:underline" => return "밑줄체",
-            "format:para-numbering" => return "번호 매기기",
-            "format:para-bullet" => return "글머리 기호",
-            "format:indent-in" => return "들여쓰기 단계 증가",
-            "format:indent-out" => return "들여쓰기 단계 감소",
-            "page:columns" => return "단",
-            "page:break" => return "페이지 나누기",
-            "table:insert" => return "표 삽입",
-            "table:row-above" => return "위에 행 추가",
-            "table:add-row" => return "아래에 행 추가",
-            "table:col-left" => return "앞에 열 추가",
-            "table:col-right" => return "뒤에 열 추가",
-            "table:row-delete" => return "행 삭제",
-            "table:col-delete" => return "열 삭제",
-            "table:split" => return "셀 병합 해제",
-            "table:merge" => return "셀 병합",
-            "table:col-equal" => return "같은 너비로 열 조절",
-            "table:border-bg" => return "테두리 및 음영",
-            "table:cell-props" => return "표 속성",
-            _ => {}
+        if let Some(label) = items_pages::label(spec.id) {
+            return label;
         }
     } else if kind == MenuKind::Doc {
         match spec.id {

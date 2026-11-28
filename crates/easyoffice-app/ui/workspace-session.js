@@ -873,9 +873,9 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
     // Browser-reserved combos (new/close window) are only bound inside the desktop shell; `macOnly`
     // combos only on macOS (the other systems keep the key for the editor). Of a combo's bindings the
-    // one for the window's module wins, then one for every module.
+    // one for the window's module wins, then one for every module. A `flavor: "pages"` binding is the Pages window's (PD-399).
     function bindingFor(combo) {
-      const module = getActiveModule(), list = bindingsByKeys.get(combo) || [];
+      const module = getActiveModule(), pages = module === "DOC" && document.getElementById("doc-editor")?.dataset?.eoDocFlavor === "pages", list = (bindingsByKeys.get(combo) || []).filter((b) => !b.flavor || pages);
       const binding = list.find((b) => b.module === module || b.modules?.includes(module)) || list.find((b) => !b.module && !b.modules) || list[0];
       if (!binding || binding.native || binding.external) return null;
       if (binding.macOnly && !isMacClient()) return null;

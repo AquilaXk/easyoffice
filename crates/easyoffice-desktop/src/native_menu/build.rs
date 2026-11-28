@@ -44,7 +44,7 @@ fn submenu<R: Runtime>(
 ) -> tauri::Result<Submenu<R>> {
     let mut builder = SubmenuBuilder::new(app, menu.title);
     for line in menu.lines {
-        if let Some(sub) = layout::hwp_submenu(line) {
+        if let Some(sub) = layout::hwp_submenu(line).or_else(|| layout::pages_submenu(line)) {
             builder = builder.item(&nested(app, kind, sub.title, sub.lines)?);
             continue;
         }

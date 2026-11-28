@@ -237,7 +237,8 @@
         hwp ? "한 수준\n감소" : isPages ? "들여쓰기\n감소" : "들여쓰기\n줄임",
         hwp ? "한 수준 감소" : isPages ? "들여쓰기 단계 감소" : "들여쓰기 줄임",
       );
-      btnText('#icon-toolbar #btn-toggle-ctrl-marks', hwp ? "조판\n부호" : isPages ? "서식\n기호" : "모든\n서식 표시", hwp ? "조판 부호 표시" : isPages ? "서식 기호 표시" : "모든 서식 표시");
+      // The Pages window has one button for the marks (the next one): 보이지 않는 요소 보기.
+      btnText('#icon-toolbar #btn-toggle-ctrl-marks', hwp ? "조판\n부호" : "모든\n서식 표시", hwp ? "조판 부호 표시" : "모든 서식 표시");
       btnText(
         '#icon-toolbar #btn-toggle-para-marks',
         hwp ? "문단\n부호" : isPages ? "보이지\n않는 요소" : "단락\n표시",
@@ -246,6 +247,8 @@
       btnText('#icon-toolbar #btn-toggle-doc-grid', hwp ? "격자\n보기" : "눈금선", hwp ? "격자 보기" : "눈금선 보기");
       btnText('#icon-toolbar [data-studio-cmd="insert-table"]', "표", hwp ? "표 만들기" : "표 삽입");
       btnText('#icon-toolbar [data-studio-cmd="insert-image"]', isPages ? "이미지" : "그림", isPages ? "이미지" : "그림");
+      btnText('#icon-toolbar [data-studio-cmd="insert-link"]', isPages ? "링크" : "하이퍼\n링크", isPages ? "링크" : "하이퍼링크");
+      syncPagesDialogTerms(isPages);
       const alignSuffix = hwp || isPages ? "정렬" : "맞춤";
       const justifyWord = hwp ? "양쪽 정렬" : isPages ? "좌우 정렬" : "양쪽 맞춤";
       for (const [id, text] of [
@@ -265,14 +268,35 @@
         el.setAttribute("title", title);
         el.setAttribute("aria-label", title);
       }
-      syncWordTerms(mod === "DOC" && !isPages, hwp);
+      syncWordTerms(mod === "DOC" && !isPages, hwp, isPages);
+    }
+
+    // The names the dialogs of the commands this window shares with the word processor take here (PD-399): the reference
+    // app's 북마크, 워터마크, 주석 and 프린트.
+    function syncPagesDialogTerms(isPages) {
+      const terms = [
+        ["#doc-font-dialog-title", "서체 윈도우", "글꼴"],
+        ["#doc-bookmark-title", "북마크", "책갈피"],
+        ['label[for="doc-bm-name"]', "북마크 이름(B)", "책갈피 이름(B)"],
+        ["#doc-wm-title", "워터마크", "인쇄된 워터마크"],
+        ["#doc-comment-dialog-title", "주석 추가", "새 메모"],
+        [".print-preview-title", "프린트 미리 보기", "인쇄 미리 보기"],
+        ["#btn-pp-print", "프린트", "인쇄"],
+      ];
+      for (const [selector, pagesText, base] of terms) {
+        const el = doc.querySelector(selector);
+        if (el) el.textContent = isPages ? pagesText : base;
+      }
+      doc.querySelector("#doc-bm-list")?.setAttribute("aria-label", isPages ? "북마크 목록" : "책갈피 목록");
+      doc.querySelector("#print-preview-pane")?.setAttribute("aria-label", isPages ? "프린트 미리 보기" : "인쇄 미리 보기");
     }
 
     // Word terms of the style bar, the zoom buttons and the header/footer tools (DOC only); the other products keep the base words.
-    function syncWordTerms(word, hwp) {
-      const colorWord = word ? "글꼴 색" : "글자 색";
-      const highlightWord = word ? "텍스트 강조 색" : "형광펜";
-      const sizeWord = hwp ? "글꼴 크기" : "글자 크기";
+    // The Pages window takes the reference app's words for the colors, the highlight, the size and the page number fields.
+    function syncWordTerms(word, hwp, pages = false) {
+      const colorWord = word ? "글꼴 색" : pages ? "텍스트 색상" : "글자 색";
+      const highlightWord = word ? "텍스트 강조 색" : pages ? "하이라이트" : "형광펜";
+      const sizeWord = hwp ? "글꼴 크기" : pages ? "서체 크기" : "글자 크기";
       const labels = [
         ["#btn-stylebar-textcolor", `${colorWord} 적용`, colorWord],
         ["#doc-textcolor-host .sb-color-arrow", `${colorWord} 선택`],
@@ -284,8 +308,8 @@
         ["#btn-size-down", `${sizeWord} 작게`],
         ["#btn-zoom-fit-width", word ? "페이지 너비" : "폭 맞춤"],
         ["#btn-zoom-fit-page", word ? "한 페이지" : "쪽 맞춤"],
-        ['[data-hf-action="page-number"]', word ? "페이지 번호 삽입" : "쪽 번호 삽입"],
-        ['[data-hf-action="total-pages"]', word ? "페이지 수 삽입" : "총 쪽수 삽입"],
+        ['[data-hf-action="page-number"]', word || pages ? "페이지 번호 삽입" : "쪽 번호 삽입"],
+        ['[data-hf-action="total-pages"]', word || pages ? "페이지 수 삽입" : "총 쪽수 삽입"],
       ];
       for (const [selector, label, title = label] of labels) {
         const el = doc.querySelector(selector);
@@ -293,7 +317,7 @@
         el.setAttribute("title", title);
         el.setAttribute("aria-label", label);
       }
-      for (const [action, text] of [["page-number", word ? "페이지 번호" : "쪽번호"], ["total-pages", word ? "페이지 수" : "총쪽수"]]) {
+      for (const [action, text] of [["page-number", word || pages ? "페이지 번호" : "쪽번호"], ["total-pages", word || pages ? "페이지 수" : "총쪽수"]]) {
         const label = doc.querySelector(`[data-hf-action="${action}"] .tb-label`);
         if (label) label.textContent = text;
       }

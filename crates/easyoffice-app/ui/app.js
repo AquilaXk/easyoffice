@@ -328,19 +328,19 @@
           const suffix = c.id.replace(/^[a-z]+-/, "");
           if (c.id.endsWith("-view-ribbon") || excluded?.has(suffix)) continue;
           if (isPages && ["layout-columns", "mod-symbol", "para-numbering", "para-bullet", "doc-mod-mailmerge"].includes(suffix)) continue;
-          const dispShortcut = fmt(ribbonCatalog.resolveRibbonShortcutLabel(c.id, c.shortcut));
-          const label = isPages && c.id === "document-layout-paper" ? "페이지 설정" : c.title;
+          const pages = isPages ? host.__EASYOFFICE_PAGES_COMMANDS__ : null, label = pages?.PALETTE_TITLES[suffix] ?? c.title;
+          const dispShortcut = fmt(pages?.PALETTE_KEYS[suffix] ?? ribbonCatalog.resolveRibbonShortcutLabel(c.id, c.shortcut));
           const extraKeys = c.id.endsWith("-insert-link") ? " 책갈피 링크 hyperlink" : "";
           items.push({ id: c.id, module: activeModule, title: label, shortcut: dispShortcut, searchKey: (koBadge + " " + label + extraKeys + " " + dispShortcut + " " + c.id + " " + activeModule).toLowerCase() });
         }
       }
     }
     if (activeModule === "DOC" && !isPages) items.push({ id: "doc-mod-toc-update", module: "DOC", title: "목차 업데이트", shortcut: "", searchKey: "입력 문서 목차 업데이트 toc" }, { id: "doc-mod-page-break", module: "DOC", title: "페이지 나누기", shortcut: fmt("⌘Enter"), searchKey: "레이아웃 문서 페이지 나누기 page break " + fmt("⌘Enter") });
-    if (isPages) items.push({ id: "doc-mod-toc-update", module: "DOC", title: "목차 업데이트", shortcut: "", searchKey: "삽입 문서 목차 업데이트 toc" });
-    if (activeModule === "DOC" || isHwp || activeModule === "SHEET") items.push({ id: "studio-cmd:find", module: activeModule, title: "찾기", shortcut: fmt("⌘F"), searchKey: "편집 찾기 find " + fmt("⌘F"), run: () => runNativeMenu("edit:find") }, { id: "studio-cmd:replace", module: activeModule, title: isHwp ? "찾아 바꾸기" : "찾기 및 바꾸기", shortcut: fmt(isHwp ? "⌘F2" : "⌃H"), searchKey: "편집 찾기 및 바꾸기 찾아 바꾸기 replace " + fmt(isHwp ? "⌘F2" : "⌃H"), run: () => runNativeMenu("edit:replace") });
+    if (isPages) items.push({ id: "doc-mod-toc-update", module: "DOC", title: "목차 업데이트", shortcut: "", searchKey: "삽입 문서 목차 업데이트 toc" }, ...host.__EASYOFFICE_PAGES_COMMANDS__.paletteItems(fmt, runNativeMenu));
+    if (activeModule === "DOC" || isHwp || activeModule === "SHEET") items.push({ id: "studio-cmd:find", module: activeModule, title: "찾기", shortcut: fmt("⌘F"), searchKey: "편집 찾기 find " + fmt("⌘F"), run: () => runNativeMenu("edit:find") }, { id: "studio-cmd:replace", module: activeModule, title: isHwp ? "찾아 바꾸기" : isPages ? "찾기 및 대치" : "찾기 및 바꾸기", shortcut: fmt(isHwp ? "⌘F2" : "⌃H"), searchKey: "편집 " + (isPages ? "찾기 및 대치" : "찾기 및 바꾸기 찾아 바꾸기") + " replace " + fmt(isHwp ? "⌘F2" : "⌃H"), run: () => runNativeMenu("edit:replace") });
     if (activeModule === "DOC" || isHwp) {
       const hfItems = isHwp || isPages ? [["mod-header", "머리말", "header", isHwp ? "page:header" : "page:doc-header"], ["mod-footer", "꼬리말", "footer", isHwp ? "page:footer" : "page:doc-footer"]] : [["mod-header", "머리글", "header", "page:doc-header"], ["mod-footer", "바닥글", "footer", "page:doc-footer"]];
-      for (const [cmd, title, english, menuId] of [...hfItems, ["para-checklist", "체크리스트", "checklist", "format:para-checklist"], ...(activeModule === "DOC" ? [["insert-image", "그림", "image picture", "insert:image"], ["mod-endnote", "미주", "endnote", "insert:endnote"], ["review-accept-all", "모든 변경 내용 수락", "accept all changes", "tool:review-accept-all"], ["review-reject-all", "모든 변경 내용 거부", "reject all changes", "tool:review-reject-all"], ["table-border-bg", "테두리 및 음영", "cell border background", "table:border-bg"], ["table-cell-props", "표 속성", "table cell properties", "table:cell-props"], ["table-col-equal", "열 너비를 같게", "equal column width", "table:col-equal"]] : [])]) {
+      for (const [cmd, title, english, menuId] of [...hfItems, ["para-checklist", "체크리스트", "checklist", "format:para-checklist"], ...(activeModule === "DOC" ? [["insert-image", isPages ? "이미지" : "그림", "image picture", "insert:image"], ["mod-endnote", "미주", "endnote", "insert:endnote"], ["review-accept-all", "모든 변경 내용 수락", "accept all changes", "tool:review-accept-all"], ["review-reject-all", "모든 변경 내용 거부", "reject all changes", "tool:review-reject-all"], ["table-border-bg", "테두리 및 음영", "cell border background", "table:border-bg"], ["table-cell-props", "표 속성", "table cell properties", "table:cell-props"], ["table-col-equal", isPages ? "같은 너비로 열 조절" : "열 너비를 같게", "equal column width", "table:col-equal"]] : [])]) {
         items.push({ id: "studio-cmd:" + cmd, module: activeModule, title, shortcut: "", searchKey: "쪽 " + title + " " + english, run: () => runNativeMenu(menuId) });
       }
     }
@@ -801,7 +801,7 @@
       "slide-move-down": () => slideStudio.moveDown(),
       "slide-delete": () => slideStudio.removeSlide(),
       "slide-group": () => slideStudio.runAct("group"),
-      "slide-ungroup": () => slideStudio.runAct("ungroup"),      palette: () => togglePaletteModal(modal, cmdSearchInput),
+      "slide-ungroup": () => slideStudio.runAct("ungroup"), ...host.__EASYOFFICE_PAGES_COMMANDS__.shortcutActions(runNativeMenu), palette: () => togglePaletteModal(modal, cmdSearchInput),
       "copilot-toggle": () => copilotUi.toggle(),
       "file-open": () => fileOpen.openFilePicker(),
       "recent-dialog": () => void windowBridge.chooseRecent().catch(() => {}),
