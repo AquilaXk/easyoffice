@@ -116,6 +116,8 @@
       say,
     }) ?? null;
     const textColumnsUi = host.__EASYOFFICE_CREATE_SHEET_TEXT_COLUMNS__?.({ ...deps, kit, say }) ?? null;
+    // 데이터 > 개요 > 부분합 (PD-391).
+    const subtotalUi = host.__EASYOFFICE_CREATE_SHEET_SUBTOTAL_UI__?.({ ...deps, kit, say, editAxis: (...args) => editAxis(...args) }) ?? null;
     const contextMenu = host.__EASYOFFICE_CREATE_SHEET_CONTEXT_MENU__?.({
       ...deps,
       kit,
@@ -567,6 +569,7 @@
       ...(noteUi?.actions || {}),
       ...(viewOptions?.actions || {}),
       ...(gotoUi?.actions || {}),
+      ...(subtotalUi?.actions || {}),
       "tab-add": () => tabs.insert(null),
       "tab-color": () => Promise.resolve(tabMenu.openColor(getActiveSheetName())),
       ...tabs.actions,

@@ -573,6 +573,7 @@
               <div class="md-item" data-sheet-act="hide-detail" role="menuitem" tabindex="-1"><span class="md-label">세부 정보 숨기기</span></div>
               <div class="md-item" data-sheet-act="show-detail" role="menuitem" tabindex="-1"><span class="md-label">세부 정보 표시</span></div>
               <div class="md-item" data-sheet-act="outline-clear" role="menuitem" tabindex="-1"><span class="md-label">윤곽 지우기</span></div>
+              <div class="md-item" data-sheet-act="subtotal" role="menuitem" tabindex="-1"><span class="md-label">부분합…</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-sheet-act="dedupe-dialog" role="menuitem" tabindex="-1"><span class="md-label">중복된 항목 제거…</span></div>
               <div class="md-item" data-sheet-act="text-to-columns" role="menuitem" tabindex="-1"><span class="md-label">텍스트 나누기…</span></div>
@@ -2454,6 +2455,28 @@
       </div>
     </dialog>
 
+    <dialog id="sheet-subtotal-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-subtotal-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-subtotal-title">부분합</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="sheet-subtotal-group">그룹화할 항목</label><select id="sheet-subtotal-group" class="sb-combo dialog-select"></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-subtotal-fn">사용할 함수</label><select id="sheet-subtotal-fn" class="sb-combo dialog-select"></select></div>
+          <div class="dialog-stack">
+            <span id="sheet-subtotal-columns-label" class="dialog-label">부분합 계산 항목</span>
+            <ul id="sheet-subtotal-columns" class="dialog-list sheet-check-list" aria-labelledby="sheet-subtotal-columns-label"></ul>
+          </div>
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="sheet-subtotal-replace" type="checkbox" checked /> 새로운 값으로 대치</label></div>
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="sheet-subtotal-below" type="checkbox" checked /> 데이터 아래에 요약 표시</label></div>
+          <p id="sheet-subtotal-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-subtotal-remove" type="button" class="dialog-btn">모두 제거</button>
+          <button id="btn-sheet-subtotal-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="sheet-goto-dialog" class="tool-dialog" aria-labelledby="sheet-goto-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="sheet-goto-title">이동</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -3558,6 +3581,8 @@
     <script src="./sheet-text-columns.js"></script>
     <script src="./sheet-special-cells.js"></script>
     <script src="./sheet-goto.js"></script>
+    <script src="./sheet-subtotal.js"></script>
+    <script src="./sheet-subtotal-ui.js"></script>
     <script src="./sheet-structure.js"></script>
     <script src="./sheet-cell-write.js"></script>
     <script src="./sheet-view-live.js"></script>

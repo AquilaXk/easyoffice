@@ -867,6 +867,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:hide-detail", "세부 정보 숨기기", "hide-detail"),
     sa!("sheet:show-detail", "세부 정보 표시", "show-detail"),
     sa!("sheet:outline-clear", "윤곽 지우기", "outline-clear"),
+    sa!("sheet:subtotal", "부분합…", "subtotal"),
     sa!("sheet:row-insert-above", "시트 행 삽입", "row-insert-above"),
     sa!("sheet:col-insert-left", "시트 열 삽입", "col-insert-left"),
     sa!("sheet:row-delete", "시트 행 삭제", "row-delete"),

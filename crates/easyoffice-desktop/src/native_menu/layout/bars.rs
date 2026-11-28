@@ -681,6 +681,7 @@ const DATA_SHEET: MenuSpec = menu(
         "sheet:hide-detail",
         "sheet:show-detail",
         "sheet:outline-clear",
+        "sheet:subtotal",
         S,
         "sheet:remove-duplicates",
         "sheet:text-to-columns",

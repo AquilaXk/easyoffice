@@ -311,6 +311,7 @@
     "sheet:hide-detail": "sheet-act:hide-detail",
     "sheet:show-detail": "sheet-act:show-detail",
     "sheet:outline-clear": "sheet-act:outline-clear",
+    "sheet:subtotal": "sheet-act:subtotal",
     "sheet:sort": "sheet-act:sort-dialog",
     "sheet:filter": "sheet-act:filter-toggle",
     "sheet:filter-reapply": "sheet-act:filter-reapply",

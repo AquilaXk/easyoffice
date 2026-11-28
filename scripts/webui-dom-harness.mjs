@@ -199,6 +199,8 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-text-columns.js",
   "../crates/easyoffice-app/ui/sheet-special-cells.js",
   "../crates/easyoffice-app/ui/sheet-goto.js",
+  "../crates/easyoffice-app/ui/sheet-subtotal.js",
+  "../crates/easyoffice-app/ui/sheet-subtotal-ui.js",
   "../crates/easyoffice-app/ui/sheet-structure.js",
   "../crates/easyoffice-app/ui/sheet-cell-write.js",
   "../crates/easyoffice-app/ui/sheet-view-live.js",

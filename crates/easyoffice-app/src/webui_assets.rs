@@ -232,6 +232,8 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "sheet-spill.js",
     "sheet-store.js",
     "sheet-structure.js",
+    "sheet-subtotal-ui.js",
+    "sheet-subtotal.js",
     "sheet-tab-menu.js",
     "sheet-tab-names.js",
     "sheet-tab-strip.js",

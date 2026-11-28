@@ -72,6 +72,7 @@ const SHEET_DIALOGS = [
   ["이름 관리자", "sheet-names-dialog", [click('[data-sheet-act="name-manage"]')]],
   ["이동", "sheet-goto-dialog", [click('[data-sheet-act="goto"]')]],
   ["이동 옵션", "sheet-special-dialog", [click('[data-sheet-act="goto"]'), click("#btn-sheet-goto-special")]],
+  ["부분합", "sheet-subtotal-dialog", [typeColumn, click('[data-sheet-act="subtotal"]')]],
   ["중복된 항목 제거", "sheet-table-dedupe-dialog", [typeColumn, click('[data-sheet-act="dedupe-dialog"]')]],
   ["텍스트 나누기", "sheet-text-columns-dialog", [typeColumn, click('[data-sheet-act="text-to-columns"]')]],
   ["피벗 테이블", "sheet-pivot-dialog", [typeColumn, click('[data-studio-menu-cmd="sheet-mod-pivot"]')]],
