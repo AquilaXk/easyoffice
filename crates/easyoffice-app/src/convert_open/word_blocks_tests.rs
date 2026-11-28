@@ -109,3 +109,50 @@ fn a_flood_of_tab_stops_equations_and_text_boxes_rejects_the_save() {
     );
     assert!(save(&flood).is_err());
 }
+
+fn math_payload(math: &str) -> String {
+    format!(
+        "{{\"targetFormat\":\"docx\",\"blocks\":[{{\"type\":\"paragraph\",\"runs\":[{{\"text\":\"x\",\"math\":\"{math}\"}}]}}]}}"
+    )
+}
+
+#[test]
+fn an_equation_that_closes_the_paragraph_or_the_body_rejects_the_save() {
+    for broken in [
+        "<m:oMath></m:oMath></w:p></w:body><m:oMath>",
+        "<m:oMath><m:r></m:oMath></m:r>",
+        "<m:oMath></m:oMath><m:oMath></m:oMath>",
+    ] {
+        assert!(save(&math_payload(broken)).is_err(), "{broken}");
+    }
+    let bytes = save(&math_payload("<m:oMath><m:r><m:t>x</m:t></m:r></m:oMath>")).unwrap();
+    assert!(reopen(&bytes).contains("\"math\":\"<m:oMath><m:r><m:t>x</m:t></m:r></m:oMath>\""));
+}
+
+#[test]
+fn a_style_name_is_taken_without_the_white_space_around_it_and_a_reserved_one_rejects_the_save() {
+    let styles = |name: &str| {
+        format!(
+            "{{\"targetFormat\":\"docx\",\"styles\":[{{\"name\":\"{name}\",\"lineSpacingKind\":\"exact\",\"lineSpacingTwips\":400}}],\"blocks\":[{{\"type\":\"paragraph\",\"runs\":[{{\"text\":\"x\"}}]}}]}}"
+        )
+    };
+    let json = reopen(&save(&styles("  내 스타일  ")).unwrap());
+    assert!(
+        json.contains("\"styles\":[{\"name\":\"내 스타일\""),
+        "{json}"
+    );
+    assert!(
+        json.contains("\"lineSpacingKind\":\"exact\",\"lineSpacingTwips\":400"),
+        "{json}"
+    );
+    for reserved in [
+        "Title",
+        "Outline 2",
+        "Heading_1",
+        "제목-1",
+        "toc 3",
+        "caption",
+    ] {
+        assert!(save(&styles(reserved)).is_err(), "{reserved}");
+    }
+}

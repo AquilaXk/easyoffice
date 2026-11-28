@@ -8,8 +8,9 @@ use crate::rich_image_layout::RichImageWrap;
 use crate::rich_word_blocks::{
     normalize_tab_stops, RichBorderLine, RichBorderStyle, RichColumnLook, RichDropCap,
     RichNarrowColumn, RichParaBorders, RichStyleDef, RichTabAlign, RichTabLeader, RichTabStop,
-    RichTextBox, MAX_BORDER_EIGHTHS, MAX_BORDER_SPACE_PT, MAX_COLUMNS, MAX_MATHS, MAX_MATH_BYTES,
-    MAX_MATH_DEPTH, MAX_MATH_NODES, MAX_TAB_STOPS, MAX_TEXT_BOXES, MAX_TEXT_BOX_PARAGRAPHS,
+    RichTextBox, MAX_BORDER_EIGHTHS, MAX_BORDER_SPACE_PT, MAX_COLUMNS, MAX_COLUMN_TWIPS, MAX_MATHS,
+    MAX_MATH_BYTES, MAX_MATH_DEPTH, MAX_MATH_NODES, MAX_TAB_STOPS, MAX_TEXT_BOXES,
+    MAX_TEXT_BOX_PARAGRAPHS,
 };
 use crate::{normalize_hex_color, RichAlignment};
 
@@ -116,18 +117,35 @@ fn omml_name(name: &str) -> bool {
 /// past a bound (size, depth, element count).
 pub(super) fn read_math(events: &[XmlEvent<'_>]) -> Option<(String, String)> {
     let (mut omml, mut text) = (String::new(), String::new());
-    let (mut depth, mut nodes, mut skipping) = (0usize, 0usize, 0usize);
+    // The open elements that were kept, so every end tag written closes the start tag written for it; `roots` counts the
+    // top-level elements (one `m:oMath` or `m:oMathPara`, nothing else).
+    let (mut open, mut roots): (Vec<&str>, usize) = (Vec::new(), 0);
+    let (mut nodes, mut skipping) = (0usize, 0usize);
     let mut in_text = false;
     for event in events {
         match event {
             XmlEvent::Start { name, attrs } => {
-                if skipping > 0 || !omml_name(name) {
+                if skipping > 0 {
                     skipping += 1;
                     continue;
                 }
-                depth += 1;
+                if !omml_name(name) {
+                    // Outside the equation nothing is skipped: a foreign element there is not one equation.
+                    if open.is_empty() {
+                        return None;
+                    }
+                    skipping += 1;
+                    continue;
+                }
+                if open.is_empty() {
+                    roots += 1;
+                    if roots > 1 || !matches!(*name, "m:oMath" | "m:oMathPara") {
+                        return None;
+                    }
+                }
+                open.push(name);
                 nodes += 1;
-                if depth > MAX_MATH_DEPTH || nodes > MAX_MATH_NODES {
+                if open.len() > MAX_MATH_DEPTH || nodes > MAX_MATH_NODES {
                     return None;
                 }
                 omml.push('<');
@@ -145,8 +163,12 @@ pub(super) fn read_math(events: &[XmlEvent<'_>]) -> Option<(String, String)> {
                     skipping -= 1;
                     continue;
                 }
-                omml.push_str(&format!("</{name}>"));
-                depth = depth.saturating_sub(1);
+                // The name written is the one that was opened; an end tag of anything else is not this equation's.
+                let opened = open.pop()?;
+                if opened != *name {
+                    return None;
+                }
+                omml.push_str(&format!("</{opened}>"));
                 in_text = false;
             }
             XmlEvent::Text(t) if skipping == 0 && in_text => {
@@ -159,7 +181,7 @@ pub(super) fn read_math(events: &[XmlEvent<'_>]) -> Option<(String, String)> {
             return None;
         }
     }
-    (!omml.is_empty()).then_some((omml, text))
+    (open.is_empty() && skipping == 0 && roots == 1 && !omml.is_empty()).then_some((omml, text))
 }
 
 /// The checked OMML and linear text of one equation given as text (a save request carries it): it has to be one `m:oMath` or
@@ -185,17 +207,18 @@ impl ColumnLookState {
     pub(super) fn push_width(&mut self, attrs: &Attrs<'_>) {
         if let (true, Some(w)) = (
             self.widths.len() < usize::from(MAX_COLUMNS),
-            attr(attrs, "w:w").and_then(|v| v.trim().parse::<u32>().ok()),
+            attr(attrs, "w:w").and_then(|v| v.trim().parse::<u64>().ok()),
         ) {
-            self.widths.push(w);
+            // A width past the widest page reads as the widest, so the comparison below cannot overflow.
+            self.widths.push(w.min(u64::from(MAX_COLUMN_TWIPS)) as u32);
         }
     }
 
     /// The look of the section: with two columns, the narrow one is the one that is two thirds or less of the other.
     pub(super) fn finish(&mut self) -> Option<RichColumnLook> {
         let narrow = match self.widths[..] {
-            [a, b] if a * 3 <= b * 2 => RichNarrowColumn::First,
-            [a, b] if b * 3 <= a * 2 => RichNarrowColumn::Last,
+            [a, b] if a != b && u64::from(a) * 3 <= u64::from(b) * 2 => RichNarrowColumn::First,
+            [a, b] if a != b && u64::from(b) * 3 <= u64::from(a) * 2 => RichNarrowColumn::Last,
             _ => RichNarrowColumn::None,
         };
         let look = RichColumnLook {
@@ -231,6 +254,9 @@ pub(super) fn apply_ppr(top: &mut ParaState, name: &str, attrs: &Attrs<'_>) {
     if name == "w:rPr" {
         top.in_mark_rpr = true;
     }
+    if name == "w:pBdr" {
+        top.in_pbdr = true;
+    }
     if top.in_mark_rpr {
         return;
     }
@@ -252,7 +278,8 @@ pub(super) fn apply_ppr(top: &mut ParaState, name: &str, attrs: &Attrs<'_>) {
                 top.word.tab_stops.push(stop);
             }
         }
-        "w:top" | "w:left" | "w:bottom" | "w:right" => {
+        // The sides are children of `w:pBdr` only: the `w:top` of a section's `w:pgBorders` is a page border.
+        "w:top" | "w:left" | "w:bottom" | "w:right" if top.in_pbdr => {
             let borders = top
                 .word
                 .borders
@@ -287,8 +314,10 @@ pub(super) fn apply_ppr(top: &mut ParaState, name: &str, attrs: &Attrs<'_>) {
 
 /// The end of a paragraph's `w:rPr`: what follows is the paragraph's again.
 pub(super) fn end_ppr_child(top: &mut ParaState, name: &str) {
-    if name == "w:rPr" {
-        top.in_mark_rpr = false;
+    match name {
+        "w:rPr" => top.in_mark_rpr = false,
+        "w:pBdr" => top.in_pbdr = false,
+        _ => {}
     }
 }
 
@@ -445,15 +474,17 @@ impl DocxWalker {
         let look = box_look(events);
         let mut inner = DocxWalker::default();
         let mut skipping = 0usize;
+        // A picture, a box, an equation or a table inside the box is not read; the document says so once.
+        let mut dropped = false;
         for event in &events[start + 1..] {
             match event {
                 XmlEvent::Start { name, attrs } => {
-                    if skipping > 0
-                        || matches!(
-                            *name,
-                            "w:drawing" | "w:pict" | "w:txbxContent" | "m:oMath" | "m:oMathPara"
-                        )
-                    {
+                    let foreign = matches!(
+                        *name,
+                        "w:drawing" | "w:pict" | "w:txbxContent" | "m:oMath" | "m:oMathPara"
+                    );
+                    dropped |= foreign && skipping == 0;
+                    if skipping > 0 || foreign {
                         skipping += 1;
                     } else if inner.on_start(name, attrs)? {
                         skipping = 1;
@@ -465,6 +496,15 @@ impl DocxWalker {
                 XmlEvent::Text(text) if skipping == 0 => inner.on_text(text)?,
                 XmlEvent::Text(_) => {}
             }
+        }
+        dropped |= inner
+            .blocks
+            .iter()
+            .any(|b| !matches!(b, RichBlock::Paragraph(_)));
+        if dropped {
+            self.warn_once(
+                "텍스트 상자 안의 그림·수식·표·텍스트 상자는 가져오지 않았습니다.".to_string(),
+            );
         }
         let paragraphs: Vec<RichParagraph> = inner
             .blocks
@@ -494,9 +534,10 @@ impl DocxWalker {
     /// An equation of a body paragraph: a run that holds its OMML and its linear text. An equation past a bound, or one past
     /// the number a document keeps, is read as its linear text alone.
     pub(super) fn on_math(&mut self, events: &[XmlEvent<'_>]) -> Result<(), EasyOfficeError> {
-        if self.tbl_depth > 0 || self.paras.is_empty() {
+        if self.paras.is_empty() {
             return Ok(());
         }
+        let in_cell = self.tbl_depth > 0;
         let linear = || -> String {
             events
                 .iter()
@@ -517,7 +558,8 @@ impl DocxWalker {
                 .flatten()
                 .collect()
         };
-        let math = (self.math_total < MAX_MATHS)
+        // A table cell keeps no equation (its paragraphs carry text only): the text of the equation stays.
+        let math = (!in_cell && self.math_total < MAX_MATHS)
             .then(|| read_math(events))
             .flatten();
         let (omml, text) = match math {
@@ -540,6 +582,23 @@ impl DocxWalker {
             });
         }
         Ok(())
+    }
+
+    /// A paragraph of a table cell: the cell keeps its text and the look of its runs, not the tab stops, border, shading, drop
+    /// cap or text box of PD-401 (the document says so once).
+    pub(super) fn note_cell_paragraph(&mut self, p: &RichParagraph) {
+        let w = &p.word;
+        if !w.tab_stops.is_empty()
+            || w.borders.is_some()
+            || w.shading.is_some()
+            || w.drop_cap.is_some()
+            || !w.text_boxes.is_empty()
+        {
+            self.warn_once(
+                "표 칸 안 문단의 탭 정지·테두리·음영·텍스트 상자는 가져오지 않았습니다."
+                    .to_string(),
+            );
+        }
     }
 
     /// A `w:br w:type="column"`: text after it starts the column, so a break before any text belongs to this paragraph and one
@@ -565,7 +624,17 @@ pub(super) struct StyleBuilder {
     fmt: CharFmt,
     in_ppr: bool,
     in_rpr: bool,
+    /// The style holds something the editor does not keep: a next or linked style, a base other than the normal style, a
+    /// paragraph or run property outside the look of [`RichStyleDef`].
+    pub(super) lossy: bool,
 }
+
+/// The paragraph and run properties of a style of the user that [`RichStyleDef`] keeps.
+const STYLE_PPR_KEPT: [&str; 3] = ["w:jc", "w:ind", "w:spacing"];
+const STYLE_RPR_KEPT: [&str; 11] = [
+    "w:rFonts", "w:sz", "w:szCs", "w:b", "w:bCs", "w:i", "w:iCs", "w:u", "w:color", "w:lang",
+    "w:kern",
+];
 
 impl StyleBuilder {
     /// A builder for a paragraph style the user made; `None` for any other style.
@@ -578,6 +647,7 @@ impl StyleBuilder {
             fmt: CharFmt::default(),
             in_ppr: false,
             in_rpr: false,
+            lossy: false,
         })
     }
 
@@ -588,15 +658,21 @@ impl StyleBuilder {
                     .map(Cow::into_owned)
                     .unwrap_or_default()
             }
+            "w:next" | "w:link" => self.lossy = true,
+            "w:basedOn" => self.lossy |= attr(attrs, "w:val").as_deref() != Some("Normal"),
             "w:pPr" => self.in_ppr = true,
             "w:rPr" => self.in_rpr = true,
             _ if self.in_ppr => {
+                self.lossy |= !STYLE_PPR_KEPT.contains(&name);
                 if name == "w:jc" {
                     self.para.jc = attr(attrs, "w:val").map(Cow::into_owned);
                 }
                 apply_para_layout(&mut self.para, name, attrs);
             }
-            _ if self.in_rpr => apply_run_property(&mut self.fmt, name, attrs),
+            _ if self.in_rpr => {
+                self.lossy |= !STYLE_RPR_KEPT.contains(&name);
+                apply_run_property(&mut self.fmt, name, attrs);
+            }
             _ => {}
         }
     }
@@ -612,6 +688,9 @@ impl StyleBuilder {
     /// The style, when its name and values are within bounds.
     pub(super) fn finish(self) -> Option<RichStyleDef> {
         let (p, f) = (self.para, self.fmt);
+        let mut def = self.def;
+        // White space around the name is not part of it.
+        def.name = def.name.trim().to_string();
         RichStyleDef {
             font: f.font,
             size_half_pt: f.size_half_pt,
@@ -625,10 +704,29 @@ impl StyleBuilder {
             space_before_twips: p.space_before,
             space_after_twips: p.space_after,
             line_spacing: p.line_spacing,
-            ..self.def
+            ..def
         }
         .checked()
     }
+}
+
+/// The notes of reading the styles: what the editor does not keep of a style of the user, and the styles past a bound.
+pub(super) fn style_warnings(
+    notes: StyleNotes,
+    styles: &HashMap<String, DocxStyle>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    if notes.lossy {
+        out.push("사용자 스타일의 다음 스타일·연결 스타일·기준 스타일과 글꼴·단락 모양 밖의 속성은 가져오지 않았습니다.".to_string());
+    }
+    let found = styles.values().filter(|s| s.custom.is_some()).count();
+    if notes.overflow || found > custom_styles(styles).len() {
+        out.push(format!(
+            "사용자 스타일은 이름이 겹치거나 기본 스타일 이름이거나 한도({})를 넘으면 가져오지 않았습니다.",
+            crate::rich_word_blocks::MAX_CUSTOM_STYLES
+        ));
+    }
+    out
 }
 
 /// The styles of the user in the order of the file: names that are not the word processor's own, one to a name, at most

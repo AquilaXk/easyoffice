@@ -43,6 +43,8 @@ pub const MAX_STYLE_NAME_CHARS: usize = 64;
 pub const MAX_DROP_CAP_LINES: u8 = 10;
 /// Most columns of a section.
 pub const MAX_COLUMNS: u8 = 16;
+/// Widest column, in twips (22 in, the widest page the model keeps).
+pub const MAX_COLUMN_TWIPS: u32 = 31_680;
 /// Largest border width, in eighths of a point (`w:sz`, ECMA-376 17.18.2: 2 to 96).
 pub const MAX_BORDER_EIGHTHS: u8 = 96;
 /// Largest distance of a border from the text, in points (`w:space`).

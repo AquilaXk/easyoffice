@@ -41,6 +41,8 @@ pub(super) struct ParaState {
     pub(super) sect_look: Option<crate::rich_word_blocks::RichColumnLook>,
     pub(super) column_break_after: bool,
     pub(super) in_mark_rpr: bool,
+    /// Inside the paragraph's `w:pBdr`.
+    pub(super) in_pbdr: bool,
     /// The ordinal of the section a `w:sectPr` in this paragraph closed (the section break after it, PD-395).
     pub(super) section_ordinal: Option<usize>,
     pub(super) zones: Vec<(String, Vec<RichRun>)>,
@@ -304,11 +306,28 @@ pub(crate) struct DocxStyle {
 
 /// styleId -> style metadata (`w:name`, `w:basedOn`, `w:outlineLvl`).
 /// Adapted from BSD-2-Clause and MIT reference implementations (see `THIRD_PARTY_NOTICES.md`).
+#[cfg(test)]
 pub(crate) fn read_styles(xml: &str) -> Result<HashMap<String, DocxStyle>, EasyOfficeError> {
+    read_styles_with_notes(xml).map(|(styles, _)| styles)
+}
+
+/// What reading the styles of the user left out (PD-401): a style past the bound of the reader, and a style that holds more
+/// than the look the editor keeps (a next or linked style, a base other than the normal one, other paragraph or run properties).
+#[derive(Default, Clone, Copy)]
+pub(super) struct StyleNotes {
+    pub(super) overflow: bool,
+    pub(super) lossy: bool,
+}
+
+/// [`read_styles`] with what it left out.
+pub(super) fn read_styles_with_notes(
+    xml: &str,
+) -> Result<(HashMap<String, DocxStyle>, StyleNotes), EasyOfficeError> {
     let mut out: HashMap<String, DocxStyle> = HashMap::new();
+    let mut notes = StyleNotes::default();
     let mut current: Option<String> = None;
     let mut builder: Option<super::word_blocks::StyleBuilder> = None;
-    let mut seen = 0usize;
+    let (mut seen, mut custom_seen) = (0usize, 0usize);
     for ev in XmlReader::new(xml) {
         let ev = ev?;
         match &ev {
@@ -330,8 +349,14 @@ pub(crate) fn read_styles(xml: &str) -> Result<HashMap<String, DocxStyle>, EasyO
                 attrs,
             } => {
                 seen += 1;
-                builder = super::word_blocks::StyleBuilder::start(&attrs)
-                    .filter(|_| seen <= crate::rich_word_blocks::MAX_CUSTOM_STYLES * 8);
+                builder = super::word_blocks::StyleBuilder::start(&attrs);
+                if builder.is_some() {
+                    custom_seen += 1;
+                    if custom_seen > crate::rich_word_blocks::MAX_CUSTOM_STYLES * 8 {
+                        builder = None;
+                        notes.overflow = true;
+                    }
+                }
                 if let Some(id) = attr(&attrs, "w:styleId") {
                     out.entry(id.to_string()).or_default();
                     current = Some(id.into_owned());
@@ -366,9 +391,9 @@ pub(crate) fn read_styles(xml: &str) -> Result<HashMap<String, DocxStyle>, EasyO
                 }
             }
             XmlEvent::End("w:style") => {
-                let def = builder
-                    .take()
-                    .and_then(super::word_blocks::StyleBuilder::finish);
+                let built = builder.take();
+                notes.lossy |= built.as_ref().is_some_and(|b| b.lossy);
+                let def = built.and_then(super::word_blocks::StyleBuilder::finish);
                 if let (Some(id), Some(def)) = (current.take(), def) {
                     out.entry(id).or_default().custom = Some((seen, def));
                 }
@@ -376,5 +401,5 @@ pub(crate) fn read_styles(xml: &str) -> Result<HashMap<String, DocxStyle>, EasyO
             _ => {}
         }
     }
-    Ok(out)
+    Ok((out, notes))
 }

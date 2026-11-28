@@ -16,7 +16,9 @@
   const DEFAULT_TAB_TWIPS = 720;
   const TAB_CLASS = "eo-tab";
   const MAX_PARAGRAPHS = 2000;
-  const ALIGN_NAMES = { left: "왼쪽", center: "가운데", right: "오른쪽", decimal: "소수점" };
+  // Most tab characters of one paragraph that are measured (a paragraph of more keeps the plain tab for the rest).
+  const MAX_TABS_PER_PARAGRAPH = 500;
+  const ALIGN_NAMES = { left: "왼쪽", center: "가운데", right: "오른쪽", decimal: "10진수" };
   const blocks = () => host.__EASYOFFICE_DOC_WORD_BLOCKS__;
   const feedback = (env, text) => {
     const el = env.document.getElementById("status-command-feedback");
@@ -52,10 +54,14 @@
         span.parentNode.removeChild(span);
       }
     }
+    let wrapped = p.querySelectorAll("." + TAB_CLASS).length;
     for (const node of ownTextNodes(p)) {
       if (node.parentNode?.classList?.contains(TAB_CLASS) || !node.nodeValue.includes("\t")) continue;
       let current = node;
       for (let at = current.nodeValue.indexOf("\t"); at >= 0; at = current.nodeValue.indexOf("\t")) {
+        // The tabs past the bound stay characters of the text.
+        if (wrapped >= MAX_TABS_PER_PARAGRAPH) return;
+        wrapped += 1;
         if (at > 0) current = current.splitText(at);
         const after = current.nodeValue.length > 1 ? current.splitText(1) : null;
         const span = doc.createElement("span");
@@ -102,25 +108,41 @@
   };
 
   function layoutTabs(doc, p, defaultTwips) {
-    const spans = Array.from(p.querySelectorAll("." + TAB_CLASS));
-    if (spans.length === 0 || typeof host.getComputedStyle !== "function") return;
+    const all = Array.from(p.querySelectorAll("." + TAB_CLASS));
+    if (all.length === 0 || typeof host.getComputedStyle !== "function") return;
+    // The tabs past the bound keep the plain tab of the editor.
+    const spans = all.slice(0, MAX_TABS_PER_PARAGRAPH);
+    for (const span of all.slice(MAX_TABS_PER_PARAGRAPH)) {
+      span.style.width = "";
+      delete span.dataset.eoLeader;
+    }
+    // One write (every tab at width 0), one read (where each tab begins and how wide the text after it is), then the widths
+    // are worked out from the numbers: a tab moves everything after it by its own width, so the place a tab begins at is where
+    // it began at width 0 plus the widths before it. This is one layout for the paragraph, not one per tab; a line that wraps
+    // is not followed (the stops are measured from the start of the text, as the renderer's rule does).
+    for (const span of spans) span.style.width = "0px";
     const cs = host.getComputedStyle(p);
-    const widthPx = p.getBoundingClientRect().width - parseFloat(cs.paddingRight || "0");
+    const box = p.getBoundingClientRect();
+    const widthPx = box.width - parseFloat(cs.paddingRight || "0");
+    const leftEdge = box.left + parseFloat(cs.paddingLeft || "0") + parseFloat(cs.borderLeftWidth || "0");
     const stops = stopsOf(p, widthPx, Math.max(8, defaultTwips / TWIPS_PER_PX));
-    const leftEdge = () => p.getBoundingClientRect().left + parseFloat(cs.paddingLeft || "0") + parseFloat(cs.borderLeftWidth || "0");
-    spans.forEach((span, i) => {
-      span.style.width = "0px";
-      const left = span.getBoundingClientRect().left - leftEdge();
+    const measured = spans.map((span, i) => ({
+      left: span.getBoundingClientRect().left - leftEdge,
+      text: widthOfText(doc, span, spans[i + 1] ?? null, p, false),
+      decimal: widthOfText(doc, span, spans[i + 1] ?? null, p, true),
+    }));
+    let shift = 0;
+    const widths = measured.map((m) => {
+      const left = m.left + shift;
       const stop = stops.find((s) => s.pos > left + 0.5);
-      let width = 1;
-      if (stop) {
-        const next = spans[i + 1] ?? null;
-        const mult = stop.align === "center" ? 0.5 : stop.align === "right" ? 1 : 0;
-        const text = stop.align === "left" ? 0 : widthOfText(doc, span, next, p, stop.align === "decimal");
-        width = Math.max(1, stop.pos - left - (stop.align === "decimal" ? text : mult * text));
-      }
-      span.style.width = width.toFixed(1) + "px";
-      span.dataset.eoLeader = stop?.leader ?? "none";
+      const take = stop?.align === "right" ? m.text : stop?.align === "center" ? m.text / 2 : stop?.align === "decimal" ? m.decimal : 0;
+      const width = stop ? Math.max(1, stop.pos - left - take) : 1;
+      shift += width;
+      return { width, leader: stop?.leader ?? "none" };
+    });
+    spans.forEach((span, i) => {
+      span.style.width = widths[i].width.toFixed(1) + "px";
+      span.dataset.eoLeader = widths[i].leader;
     });
   }
 

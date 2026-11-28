@@ -192,21 +192,40 @@
   // ---- the document settings in `eoWordMeta`
 
   // The names the word processor gives its own styles; the engine refuses them for a style of the user.
+  // The same rule as `is_reserved_style_name` and `heading_level_from_name` of the engine (`rich_word_blocks.rs`, `rich_xml.rs`):
+  // the names compare without regard to ASCII case, a heading is `Title` or `heading`, `outline`, `제목`, `개요` and a number up
+  // to 255 with white space, `_` or `-` between and around them, and `TOC` starts the table-of-contents styles.
   const RESERVED = ["표준", "본문", "normal", "caption", "hyperlink", "list bullet", "list number", "table normal", "header", "footer", "default paragraph font"];
-  const isReservedStyleName = (name) => RESERVED.includes(String(name).toLowerCase()) || /^(heading|제목|개요)\s*\d/i.test(name) || /^toc/i.test(name);
+  const asciiLower = (s) => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
+  const SEPARATORS = /^[\s_-]+|[\s_-]+$/g;
+  function isHeadingName(name) {
+    const s = String(name).replace(SEPARATORS, "");
+    if (asciiLower(s) === "title") return true;
+    const m = /^(?:heading|outline|제목|개요)[\s_-]*\+?(\d+)$/i.exec(s);
+    return Boolean(m) && Number(m[1]) <= 255;
+  }
+  const isReservedStyleName = (name) => RESERVED.includes(asciiLower(String(name))) || isHeadingName(name) || asciiLower(String(name)).startsWith("toc");
 
   const RUN_KEYS = ["font", "color", "align"];
+  const LINE_KINDS = ["atLeast", "exact", "between"];
   function cleanStyles(raw) {
     const out = [];
     for (const s of Array.isArray(raw) ? raw : []) {
-      const name = String(s?.name ?? "");
-      if (!name || name !== name.trim() || Array.from(name).length > MAX_STYLE_NAME || /[\u0000-\u001f\u007f]/.test(name) || isReservedStyleName(name) || out.some((o) => o.name === name)) continue;
+      // A name with white space around it is taken without it, as the engine does.
+      const name = String(s?.name ?? "").trim();
+      if (!name || Array.from(name).length > MAX_STYLE_NAME || /[\u0000-\u001f\u007f-\u009f]/.test(name) || isReservedStyleName(name) || out.some((o) => o.name === name)) continue;
       const style = { name };
       for (const key of RUN_KEYS) if (typeof s[key] === "string" && s[key]) style[key] = s[key].slice(0, 64);
       if (style.color && !hex(style.color)) delete style.color;
       if (!["left", "center", "right", "justify"].includes(style.align)) delete style.align;
       for (const [key, lo, hi] of [["sizeHalfPt", 2, 1638], ["leftIndentTwips", 0, 288000], ["firstLineIndentTwips", -288000, 288000], ["spaceBeforeTwips", 0, 8000], ["spaceAfterTwips", 0, 8000], ["lineSpacingPercent", 1, 1000]]) {
         if (int(s[key]) && s[key] >= lo && s[key] <= hi) style[key] = s[key];
+      }
+      // The other line spacing rules (at least, exactly, between lines) name their kind and give twips; a multiple has no kind.
+      if (LINE_KINDS.includes(s.lineSpacingKind) && int(s.lineSpacingTwips) && s.lineSpacingTwips >= 1 && s.lineSpacingTwips <= 31680) {
+        delete style.lineSpacingPercent;
+        style.lineSpacingKind = s.lineSpacingKind;
+        style.lineSpacingTwips = s.lineSpacingTwips;
       }
       for (const key of ["bold", "italic", "underline"]) if (s[key] === true) style[key] = true;
       out.push(style);

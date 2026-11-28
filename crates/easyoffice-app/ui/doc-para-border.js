@@ -37,6 +37,8 @@
         for (const side of SIDES) preview.style["border" + side[0].toUpperCase() + side.slice(1)] = sides.has(side) ? blocks().borderCss(line) : "";
         preview.style.backgroundColor = shade ? "#" + shade : "";
       }
+      const state = sides.size === 0 ? "none" : sides.size === SIDES.length ? "box" : "custom";
+      for (const btn of document.querySelectorAll("#doc-para-border-dialog [data-pb-preset]")) btn.setAttribute("aria-pressed", String(btn.dataset.pbPreset === state));
       for (const btn of document.querySelectorAll("#doc-para-border-dialog [data-pb-side]")) btn.setAttribute("aria-pressed", String(sides.has(btn.dataset.pbSide)));
       for (const item of document.querySelectorAll("#doc-para-border-dialog [data-pb-style]")) item.setAttribute("aria-checked", String(item.dataset.pbStyle === style));
     }
@@ -96,6 +98,8 @@
     }
     for (const btn of document.querySelectorAll("#doc-para-border-dialog [data-pb-preset]")) {
       btn.addEventListener("click", () => {
+        // 사용자 지정 names the state of the four side buttons; it changes nothing by itself.
+        if (btn.dataset.pbPreset === "custom") return;
         sides = new Set(btn.dataset.pbPreset === "box" ? SIDES : []);
         paint();
       });

@@ -247,7 +247,8 @@ pub(crate) fn parse_doc_styles(entries: &JsonObject) -> Result<Vec<RichStyleDef>
     for item in items {
         let obj = as_object(item, "styles")?;
         let def = RichStyleDef {
-            name: opt_str(obj, "name")?.unwrap_or_default().to_string(),
+            // White space around the name is not part of it (the page takes the name the same way).
+            name: opt_str(obj, "name")?.unwrap_or_default().trim().to_string(),
             font: opt_font(obj, "font")?,
             size_half_pt: opt_size_half_pt(obj)?,
             bold: opt_bool(obj, "bold")?,

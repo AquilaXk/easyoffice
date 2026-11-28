@@ -20,6 +20,8 @@
   const MML = "http://www.w3.org/1998/Math/MathML";
   const MAX_DEPTH = 24;
   const MAX_NODES = 2000;
+  // The engine's bound on one equation, in bytes of its OMML (an equation in characters is never longer than in bytes).
+  const MAX_OMML_CHARS = 32768;
   const TOKEN = /<(\/?)m:([A-Za-z]+)(?:\s+m:val="([^"]*)")?\s*>|([^<]+)/g;
   const ENTITIES = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"", "&apos;": "'" };
   const unescapeXml = (s) => s.replace(/&(?:amp|lt|gt|quot|apos);/g, (e) => ENTITIES[e]);
@@ -121,7 +123,7 @@
 
   // The MathML `math` element of an OMML string, or null when it is not an equation in the engine's form.
   function toMathML(doc, omml) {
-    if (typeof omml !== "string" || !omml.startsWith("<m:oMath")) return null;
+    if (typeof omml !== "string" || omml.length > MAX_OMML_CHARS || !omml.startsWith("<m:oMath")) return null;
     const tree = parseOmml(omml);
     const top = tree?.children[0];
     if (!top || tree.children.length !== 1) return null;

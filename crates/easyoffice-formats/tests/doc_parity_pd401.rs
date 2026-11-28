@@ -601,3 +601,179 @@ fn the_paragraph_features_are_a_loss_for_the_formats_that_have_none() {
         0
     );
 }
+
+// ---- review defects: each as it was reproduced
+
+fn decode_with_warnings(bytes: &[u8], name: &str) -> (RichDocument, Vec<String>) {
+    let decoded = UniversalFormatConverter::decode_rich(bytes, Some(name)).expect("decode");
+    match decoded.content {
+        DecodedContent::Document(doc) => (doc, decoded.warnings),
+        _ => panic!("document expected"),
+    }
+}
+
+#[test]
+fn an_equation_whose_tags_do_not_pair_is_refused_and_never_written() {
+    for broken in [
+        "<m:oMath></m:oMath></w:p></w:body><m:oMath>",
+        "<m:oMath><m:r></m:oMath></m:r>",
+        "<m:oMath></m:oMath><m:oMath></m:oMath>",
+        "<m:oMath></m:oMath></m:oMath>",
+        "<w:p><m:oMath></m:oMath></w:p>",
+        "<m:oMath><m:r><m:t>x</m:t></m:r>",
+        "</m:oMath>",
+    ] {
+        assert!(checked_omml(broken).is_none(), "{broken}");
+    }
+    let (omml, text) =
+        checked_omml("<m:oMathPara><m:oMath><m:r><m:t>a</m:t></m:r></m:oMath></m:oMathPara>")
+            .expect("one equation");
+    assert_eq!(
+        (
+            omml.matches("<m:oMath>").count(),
+            omml.matches("</m:oMath>").count(),
+            text.as_str()
+        ),
+        (1, 1, "a")
+    );
+    // The same file read: what comes out is XML that reads again.
+    let xml = format!("<w:p>{FRACTION_FOR_PAIRS}</w:p>");
+    let doc = decode(&body(&xml), "p.docx");
+    let again = decode(&encode(&doc, DocumentFormat::Docx), "p2.docx");
+    assert_eq!(
+        paragraphs(&again)[0]
+            .runs
+            .iter()
+            .find_map(|r| r.math.as_deref()),
+        Some(FRACTION_FOR_PAIRS)
+    );
+}
+
+const FRACTION_FOR_PAIRS: &str = "<m:oMath><m:f><m:num><m:r><m:t>1</m:t></m:r></m:num><m:den><m:r><m:t>2</m:t></m:r></m:den></m:f></m:oMath>";
+
+#[test]
+fn the_sides_of_a_page_border_in_a_section_are_not_paragraph_borders() {
+    let xml = "<w:p><w:pPr><w:sectPr><w:pgBorders><w:top w:val=\"single\" w:sz=\"4\" w:space=\"24\"/><w:left w:val=\"single\" w:sz=\"4\"/></w:pgBorders><w:cols w:num=\"2\"/></w:sectPr></w:pPr><w:r><w:t>끝</w:t></w:r></w:p><w:p><w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"4\"/></w:pBdr></w:pPr><w:r><w:t>밑줄</w:t></w:r></w:p><w:p><w:pPr><w:pBdr><w:top w:val=\"single\" w:sz=\"4\"/></w:pBdr></w:pPr><w:r><w:t>위</w:t></w:r></w:p>";
+    let doc = decode(&body(xml), "b.docx");
+    let all = paragraphs(&doc);
+    assert!(
+        all[0].word.borders.is_none(),
+        "the page border is not the paragraph's"
+    );
+    let bottom = all[1].word.borders.as_ref().expect("bottom");
+    assert!(bottom.bottom.is_some() && bottom.top.is_none());
+    let top = all[2].word.borders.as_ref().expect("top");
+    assert!(
+        top.top.is_some() && top.bottom.is_none(),
+        "a side of the last paragraph is not the one before"
+    );
+    let saved = part(&encode(&doc, DocumentFormat::Docx), "word/document.xml");
+    assert_eq!(saved.matches("<w:pBdr>").count(), 2, "{saved}");
+}
+
+#[test]
+fn column_widths_at_the_edge_of_the_number_range_do_not_overflow() {
+    for widths in [
+        ("4294967295", "1"),
+        ("1", "4294967295"),
+        ("18446744073709551615", "18446744073709551615"),
+        ("0", "0"),
+    ] {
+        let xml = format!(
+            "<w:p><w:r><w:t>x</w:t></w:r></w:p><w:sectPr><w:cols w:num=\"2\" w:equalWidth=\"0\"><w:col w:w=\"{}\"/><w:col w:w=\"{}\"/></w:cols></w:sectPr>",
+            widths.0, widths.1
+        );
+        let doc = decode(&body(&xml), "w.docx");
+        let look = paragraphs(&doc)[0].word.column_look;
+        match widths {
+            ("4294967295", "1") => assert_eq!(look.map(|l| l.narrow), Some(RichNarrowColumn::Last)),
+            ("1", "4294967295") => {
+                assert_eq!(look.map(|l| l.narrow), Some(RichNarrowColumn::First))
+            }
+            _ => assert!(
+                look.is_none_or(|l| l.narrow == RichNarrowColumn::None),
+                "{widths:?}"
+            ),
+        }
+    }
+}
+
+#[test]
+fn a_style_name_with_white_space_around_it_is_taken_without_it_and_what_is_lost_is_said() {
+    let styles = "<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:style w:type=\"paragraph\" w:customStyle=\"1\" w:styleId=\"A\"><w:name w:val=\"  앞뒤  \"/><w:basedOn w:val=\"Other\"/><w:next w:val=\"A\"/><w:pPr><w:keepNext/><w:jc w:val=\"center\"/></w:pPr></w:style></w:styles>";
+    let entries: Vec<(String, Vec<u8>)> = vec![
+        ("[Content_Types].xml".to_string(), b"<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"xml\" ContentType=\"application/xml\"/></Types>".to_vec()),
+        ("_rels/.rels".to_string(), b"<?xml version=\"1.0\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/></Relationships>".to_vec()),
+        ("word/document.xml".to_string(), format!("<w:document {W}><w:body><w:p><w:pPr><w:pStyle w:val=\"A\"/></w:pPr><w:r><w:t>글</w:t></w:r></w:p></w:body></w:document>").into_bytes()),
+        ("word/styles.xml".to_string(), styles.as_bytes().to_vec()),
+    ];
+    let (doc, warnings) = decode_with_warnings(
+        &ZipArchiveCodec::pack_compressed(&entries).expect("pack"),
+        "s.docx",
+    );
+    assert_eq!(
+        doc.styles
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect::<Vec<_>>(),
+        ["앞뒤"]
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("사용자 스타일") && w.contains("다음 스타일")),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn styles_of_the_user_past_the_bound_say_so() {
+    let many: String = (0..70)
+        .map(|i| format!("<w:style w:type=\"paragraph\" w:customStyle=\"1\" w:styleId=\"S{i}\"><w:name w:val=\"스타일{i}\"/></w:style>"))
+        .collect();
+    let styles = format!("<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">{many}</w:styles>");
+    let entries: Vec<(String, Vec<u8>)> = vec![
+        ("[Content_Types].xml".to_string(), b"<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"xml\" ContentType=\"application/xml\"/></Types>".to_vec()),
+        ("_rels/.rels".to_string(), b"<?xml version=\"1.0\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/></Relationships>".to_vec()),
+        ("word/document.xml".to_string(), format!("<w:document {W}><w:body><w:p><w:r><w:t>글</w:t></w:r></w:p></w:body></w:document>").into_bytes()),
+        ("word/styles.xml".to_string(), styles.into_bytes()),
+    ];
+    let (doc, warnings) = decode_with_warnings(
+        &ZipArchiveCodec::pack_compressed(&entries).expect("pack"),
+        "s.docx",
+    );
+    assert_eq!(doc.styles.len(), 64);
+    assert!(
+        warnings.iter().any(|w| w.contains("한도(64)")),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn what_a_text_box_or_a_table_cell_does_not_keep_is_said() {
+    let boxed = "<w:p><w:r><w:t>앞</w:t></w:r><w:r><w:pict><v:shape style=\"width:100pt;height:20pt\"><v:textbox><w:txbxContent><w:p><m:oMath><m:r><m:t>x</m:t></m:r></m:oMath></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>칸</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:txbxContent></v:textbox></v:shape></w:pict></w:r></w:p>";
+    let (doc, warnings) = decode_with_warnings(&body(boxed), "t.docx");
+    assert_eq!(paragraphs(&doc)[0].word.text_boxes.len(), 1);
+    assert!(
+        warnings.iter().any(|w| w.contains("텍스트 상자 안의")),
+        "{warnings:?}"
+    );
+    let cell = "<w:tbl><w:tr><w:tc><w:p><w:pPr><w:tabs><w:tab w:val=\"left\" w:pos=\"720\"/></w:tabs></w:pPr><w:r><w:t>칸</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p><w:r><w:t>끝</w:t></w:r></w:p>";
+    let (_, warnings) = decode_with_warnings(&body(cell), "c.docx");
+    assert!(
+        warnings.iter().any(|w| w.contains("표 칸 안 문단")),
+        "{warnings:?}"
+    );
+    let eq = format!("<w:tbl><w:tr><w:tc><w:p>{FRACTION_FOR_PAIRS}</w:p></w:tc></w:tr></w:tbl><w:p><w:r><w:t>끝</w:t></w:r></w:p>");
+    let (doc, warnings) = decode_with_warnings(&body(&eq), "e.docx");
+    assert!(warnings.iter().any(|w| w.contains("수식")), "{warnings:?}");
+    let text: String = doc
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            RichBlock::Table(t) => Some(t.rows.iter().flatten().cloned().collect::<String>()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(text, "12", "the text of the equation stays in the cell");
+}

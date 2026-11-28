@@ -594,6 +594,11 @@ impl DocxWalker {
                     word_blocks::end_ppr_child(top, name);
                 }
             }
+            "w:pBdr" if self.in_ppr => {
+                if let Some(top) = self.paras.last_mut() {
+                    word_blocks::end_ppr_child(top, name);
+                }
+            }
             "w:pPr" => self.in_ppr = false,
             "w:r" => {
                 if let Some((field, written)) = self.simple_field {
@@ -762,6 +767,7 @@ impl DocxWalker {
         let images = std::mem::take(&mut p.images);
         if self.tbl_depth > 0 {
             let para = resolver.finish(p);
+            self.note_cell_paragraph(&para);
             let extra = para.runs.iter().fold(0usize, |acc, r| {
                 acc.saturating_add(run_extra_metadata_bytes(r))
             });
@@ -878,9 +884,9 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
             "DOCX 필수 엔트리 'word/document.xml'이 누락되었습니다.".to_string(),
         )
     })?;
-    let styles = match checked_part(&parts, "word/styles.xml") {
-        Some(xml) => read_styles(xml)?,
-        None => HashMap::new(),
+    let (styles, style_notes) = match checked_part(&parts, "word/styles.xml") {
+        Some(xml) => read_styles_with_notes(xml)?,
+        None => Default::default(),
     };
     let numbering = match checked_part(&parts, "word/numbering.xml") {
         Some(xml) => read_numbering(xml)?,
@@ -957,6 +963,7 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
     walker.apply_section_breaks();
     let properties = word::read_properties(checked_part(&parts, "docProps/core.xml"));
     let mut warnings = walker.warnings;
+    warnings.extend(word_blocks::style_warnings(style_notes, &styles));
     for note in frame_warnings {
         if !warnings.contains(&note) {
             warnings.push(note);

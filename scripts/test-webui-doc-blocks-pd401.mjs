@@ -336,3 +336,31 @@ test("the settings in eoWordMeta are cleaned: hostile styles and columns are dro
   assert.deepEqual(out.styles[0], { name: "좋음" });
   assert.equal(out.docColumnGap, undefined);
 });
+
+test("the names the page refuses for a style are the names the engine refuses", async () => {
+  const h = await createRunHarness([p("a")]);
+  const api = blocksApi(h);
+  // Names of `is_reserved_style_name` and `heading_level_from_name` (rich_word_blocks.rs, rich_xml.rs).
+  for (const name of ["표준", "본문", "NORMAL", "Caption", "caption", "Hyperlink", "List Bullet", "list number", "Table Normal", "Header", "FOOTER", "Default Paragraph Font", "Title", "title", "_TITLE-", "Heading 1", "heading2", "Heading_1", "Heading-6", "HEADING 255", "Outline 2", "outline3", "제목 1", "제목-1", "제목_3", "개요 6", "개요 0", "TOC 1", "toc", "Toc Heading", "Heading +3"]) {
+    assert.equal(api.isReservedStyleName(name), true, name);
+  }
+  for (const name of ["Subtitle", "Headings", "Heading 256", "Heading x", "Outlines", "제목", "제목 가", "본문 강조", "내 스타일", "Total", "Heading 1a"]) {
+    assert.equal(api.isReservedStyleName(name), false, name);
+  }
+  const cleaned = api.cleanStyles([{ name: "  앞뒤 공백  ", lineSpacingKind: "exact", lineSpacingTwips: 400, lineSpacingPercent: 150 }, { name: "x\u0085y" }, { name: "Title" }, { name: "다른", lineSpacingKind: "exact", lineSpacingTwips: 0 }]);
+  assert.deepEqual(cleaned, [{ name: "앞뒤 공백", lineSpacingKind: "exact", lineSpacingTwips: 400 }, { name: "다른" }]);
+});
+
+test("a page with a hundred tab characters in a paragraph wraps no more than the bound and a hostile equation text is not drawn", async () => {
+  const h = await createRunHarness([p("a")]);
+  const tabs = h.host.__EASYOFFICE_DOC_WORD_TABS__;
+  const para = h.editor.firstChild;
+  para.dataset.eoTabs = "7200:right:dot";
+  para.textContent = "x\t".repeat(700);
+  tabs.wrapTabs(h.document, para);
+  assert.equal(para.querySelectorAll(".eo-tab").length, 500);
+  assert.equal(para.textContent, "x\t".repeat(700), "the text is the same");
+  const math = h.host.__EASYOFFICE_DOC_WORD_MATH__;
+  const doc = { createElementNS: (ns, name) => ({ ns, name, children: [], setAttribute() {}, appendChild(c) { this.children.push(c); } }), createTextNode: (text) => ({ text }) };
+  assert.equal(math.toMathML(doc, "<m:oMath><m:r><m:t>" + "가".repeat(40000) + "</m:t></m:r></m:oMath>"), null);
+});

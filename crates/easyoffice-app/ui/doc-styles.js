@@ -46,7 +46,10 @@
       block.style.textIndent = Math.round(def.firstLineIndentTwips / TWIPS_PER_PX) + "px";
       block.dataset.eoFirstLineTwips = String(def.firstLineIndentTwips);
     }
-    if (def.lineSpacingPercent !== undefined) {
+    const lines = host.__EASYOFFICE_DOC_LINE_SPACING__;
+    const rule = def.lineSpacingKind ? lines?.fromJson?.(def) : null;
+    if (rule) lines.applyToSpec({ style: block.style, data: block.dataset }, rule);
+    else if (def.lineSpacingPercent !== undefined) {
       block.style.lineHeight = String(def.lineSpacingPercent / 100);
       block.dataset.eoLineSpacing = String(def.lineSpacingPercent);
     }
@@ -160,7 +163,7 @@
     };
     const openForm = (def) => {
       editing = def ?? null;
-      byId("doc-st-title").textContent = def ? "스타일 수정" : "새 스타일 만들기";
+      byId("doc-st-title").textContent = def ? "스타일 수정" : "서식에서 새 스타일 만들기";
       byId("doc-st-name").readOnly = Boolean(def);
       showForm(kit, def);
       kit.openDialog("doc-style-edit-dialog");
