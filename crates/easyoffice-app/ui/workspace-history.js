@@ -60,10 +60,21 @@
       weightOf: snapshotBytes,
     });
 
+    // While a group is open the records of the steps inside it are not kept (the epoch still moves): the one who opened the group pushes a
+    // single record for the whole group when it ends. The copilot's pointer works the real controls of the app, and each of them records
+    // its own step; one turn of the copilot is one step (PD-392).
+    let grouped = false;
+    const beginGroup = () => {
+      grouped = true;
+    };
+    const endGroup = () => {
+      grouped = false;
+    };
+
     function pushRecord(record) {
       if (!record) return;
       bumpEpoch();
-      stacks.record(record);
+      if (!grouped) stacks.record(record);
     }
 
     // A step that was recorded for a change that did not happen (a cell entry cancelled with Esc).
@@ -159,6 +170,8 @@
     return {
       pushRecord,
       retractRecord,
+      beginGroup,
+      endGroup,
       clear,
       getEpoch,
       bumpEpoch,

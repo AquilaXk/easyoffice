@@ -57,6 +57,8 @@
       restoreWorkspaceSnapshot,
       commitDeferredUndoSnapshot,
       getHistoryMutationEpoch,
+      beginHistoryGroup,
+      endHistoryGroup,
       noteActivity,
       extractEditableDocumentText,
       localScrubPii,
@@ -110,6 +112,29 @@
       hwpApi: { isEmbed: () => Boolean(extOps.getEmbedHwpHost()), frame: extOps.getHwpFrame, paragraphRect: extOps.hwpParagraphRect },
       boardApi: { existing: extOps.boardExistingFrames, frames: extOps.boardNewFrames },
       goToPdfPage: (page) => extOps.locatePdfTarget({ page }),
+    });
+
+    // 실제 조작(PD-392): 포인터가 화면 요소에 실제 이벤트를 보내 앱의 처리기가 변경을 만든다. 모듈별 계획 표는 `copilot-real-*.js`에 있다.
+    const realTurn = host.__EASYOFFICE_COPILOT_REAL_TURN__.createRealPerformance({
+      ...deps,
+      document,
+      performer,
+      docBlocksOf,
+      blockText: preview.blockText,
+      buildDocBlockElement,
+      isEmbedHwp: () => Boolean(extOps.getEmbedHwpHost()),
+      boardApi: { existing: extOps.boardExistingFrames, frames: extOps.boardNewFrames },
+      createCursor: () => cursorApi.createCopilotCursor({ document, win: host }),
+      applyOperations: (...args) => applyOperations(...args),
+      commit: (beforeSnap, turnId) => {
+        commitDeferredUndoSnapshot(beforeSnap);
+        noteActivity?.();
+        lastUndoEntry = { turnId, snapshot: beforeSnap, epoch: getHistoryMutationEpoch?.() };
+      },
+      setActiveRun: (run) => {
+        activeRun = run;
+      },
+      endRun,
     });
 
     function getSelectionLabel(mod = getActiveModule()) {
@@ -762,7 +787,8 @@
         throw err;
       }
 
-      if (!options.dryRun) {
+      // `noCommit`: 한 턴의 되돌리기 한 단계는 부르는 쪽이 마지막에 한 번 남긴다(실제 조작과 섞어 적용할 때).
+      if (!options.dryRun && !options.noCommit) {
         commitDeferredUndoSnapshot(beforeSnap);
         noteActivity?.();
         lastUndoEntry = { turnId, snapshot: beforeSnap, epoch: getHistoryMutationEpoch?.() };
@@ -807,6 +833,9 @@
       if (!canApply(mod, mode, operations)) return { applied: false, locations: [] };
       // 내장 한글 편집기는 되돌리기를 편집기가 맡는다(`applyOperations`가 그 경로를 탄다): 작업공간 스냅숏이 필요 없다.
       const beforeSnap = mod === "HWP" && extOps.getEmbedHwpHost() ? undefined : captureWorkspaceSnapshot(false);
+      // 포인터가 실제 화면 요소를 조작하는 구간이 있으면 그 흐름이 맡는다. 움직임 줄이기가 켜져 있으면 조작도 연출도 없이 바로 적용한다.
+      const segments = isReducedMotion() ? [] : realTurn.segment(mod, operations);
+      if (segments.some((segment) => segment.real)) return realTurn.apply(mod, mode, operations, turnId, segments, beforeSnap);
       const run = performer.perform(mod, operations);
       activeRun = run;
       let result;

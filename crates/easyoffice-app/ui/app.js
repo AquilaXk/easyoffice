@@ -253,7 +253,7 @@
     getSheetController: () => sheetController, getWorkspacePanels: () => workspacePanels, getPdfEdit: () => pdfEdit, getHwpHost: () => hwpHost,
     activatePane: (mod) => ribbonHistory.activatePane(mod), captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
     restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot, commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
-    getHistoryMutationEpoch: ribbonHistory.getHistoryMutationEpoch,
+    getHistoryMutationEpoch: ribbonHistory.getHistoryMutationEpoch, beginHistoryGroup: ribbonHistory.beginHistoryGroup, endHistoryGroup: ribbonHistory.endHistoryGroup,
     noteActivity: () => workspaceSession?.noteActivity(), extractEditableDocumentText, localScrubPii, isImeComposing: docIme.isComposing, setStatusFeedback,
   });
 

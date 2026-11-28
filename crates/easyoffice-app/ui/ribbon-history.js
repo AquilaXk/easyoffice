@@ -967,6 +967,8 @@
     return {
       enqueueWorkspaceHistoryOp,
       getHistoryMutationEpoch,
+      beginHistoryGroup: () => workspaceHistory.beginGroup(),
+      endHistoryGroup: () => workspaceHistory.endGroup(),
       sheetHistory,
       pushRawUndoSnapshot,
       commitDeferredUndoSnapshot,

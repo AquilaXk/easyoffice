@@ -446,6 +446,33 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## user-event (MIT, release v14.6.1)
+
+Source: https://github.com/testing-library/user-event (tag `v14.6.1`, commit `d42954be66484bcf78486a298cc37f8a7c9e4bea`, Copyright (c) 2020 Giorgio Polvara). Nothing is vendored or linked at runtime. Only the order in which the events of a pointer and a key come was followed, and the code of `crates/easyoffice-app/ui/copilot-actuator.js` (`PD-392`) was written for the Copilot's pointer: a move sends pointerout/leave, pointerover/enter, pointermove and then the mouse events in the same order (`src/system/pointer/index.ts:129-134`), a press sends pointerdown and, when it was not cancelled, mousedown, then the focus and the start of a selection (`src/system/pointer/index.ts:105-108`, `pointer.ts:93-108`, `mouse.ts:114-143`, a right button also sends contextmenu), a release sends pointerup, mouseup and click on the common ancestor, and dblclick after the second click (`src/system/pointer/index.ts:158-179`, `pointer.ts:110-122`, `mouse.ts:146-198`), a key sends keydown and, when it was not cancelled, keypress, the text and keyup (`src/system/keyboard.ts:121-185`).
+
+```
+The MIT License (MIT)
+Copyright (c) 2020 Giorgio Polvara
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## typed.js (MIT, release v2.1.0)
 
 Source: https://github.com/mattboldt/typed.js (tag `v2.1.0`, commit `3daa3a4760dff3c563964ef0935b64ccfb0b22f8`, Copyright (c) 2023 Matt Boldt). Later releases are under the GPL-3.0 and are not used. Nothing is vendored or linked at runtime. The typing loop (`src/typed.js:30-57` stop and start, `:89-110` begin, `:112-196` typewrite, `:198-217` keepTyping, `:219-241` doneTyping, `:318-325` setPauseStatus, `:329-345` toggleBlinking, `:347-353` humanizer) was ported into `crates/easyoffice-app/ui/copilot-typing.js` (`PD-268`) as a callback loop that works on code points. The `^N` pause and the backtick skip syntax were left out because they would eat those characters from a document's text.
