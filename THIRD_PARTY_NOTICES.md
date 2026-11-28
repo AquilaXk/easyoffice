@@ -10762,6 +10762,36 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## Copilot panel input, mode menu and feedback (`PD-387`)
+
+Nothing here is vendored or linked at runtime. Each part is a short port into plain JavaScript, with the source named in the header of the file.
+
+- Feedback ratings and reasons (LibreChat, MIT, Copyright (c) 2026 LibreChat): `packages/data-provider/src/feedback.ts` lines 3-14 (the two ratings and the reason keys), 103-105 (`getTagsForRating`), 110-125 (a reason must fit its rating), 135-145 (`toMinimalFeedback`). Ported to `crates/easyoffice-app/ui/copilot-feedback.js`. Changed to fit: four fixed Korean reasons for the thumbs-down only (`inaccurate`, `not_matched` and `other` keep the key; `too_long` is this app's), the record lives only in the thread, and the rating becomes one line at the end of the next question (`withFeedbackNote` in `copilot-context-compact.js`).
+- Auto-height input (react-textarea-autosize, MIT, Copyright (c) 2013 Andrey Popp): `src/calculateNodeHeight.ts` lines 56-72 (row height, then the height clamped between `minRows` and `maxRows`). The chat library assistant-ui (MIT, Copyright (c) 2026 AgentbaseAI Inc.) uses it for its composer input in `packages/react/src/primitives/composer/ComposerInput.tsx` lines 17-20, 131 and 482. Ported to `crates/easyoffice-app/ui/copilot-composer-input.js`; the hidden measuring textarea is not ported, the input's own `scrollHeight` and computed line height give the same numbers.
+- Mode menu (Continue, Apache-2.0, Copyright Continue Dev, Inc.): `gui/src/components/ModeSelect/ModeSelect.tsx` lines 90-165 (a button showing the current mode over a list of options with a check on the chosen one). Ported to `crates/easyoffice-app/ui/copilot-popup-menu.js` and the mode menu of `index.html`. The full Apache License 2.0 text of the Continue entry above applies identically.
+
+```
+MIT License (LibreChat: Copyright (c) 2026 LibreChat; react-textarea-autosize: Copyright (c) 2013 Andrey Popp)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Copilot token optimization open-source references (`PD-364`)
 
 Nothing in this section is vendored or linked at runtime; only cache key normalization, multi-provider usage parsing, spreadsheet grid/isomorphic formula compression, and read-tool receipt compaction rules were adapted into `crates/easyoffice-app/src/copilot/{cache,usage,compact}.rs` and `crates/easyoffice-app/ui/copilot-context-compact.js`.

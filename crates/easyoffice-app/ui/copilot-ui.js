@@ -79,6 +79,7 @@
   }
 
   const TITLE_MAX_CHARS = 40;
+  const MAX_INPUT_ROWS = 5;
 
   function createCopilotUi(deps) {
     const {
@@ -92,6 +93,8 @@
     const copilotActions = deps.copilotActions || host.__EASYOFFICE_CREATE_COPILOT_ACTIONS__(deps);
     const editMode = host.__EASYOFFICE_COPILOT_EDIT_MODE__;
     const icons = host.__EASYOFFICE_ICONS__;
+    const compact = host.__EASYOFFICE_COPILOT_CONTEXT_COMPACT__;
+    const feedback = host.__EASYOFFICE_COPILOT_FEEDBACK__;
 
     const byId = (id) => document.getElementById(id);
     let isOpen = false;
@@ -106,6 +109,7 @@
     let dragState = null;
     let moreMenu = null;
     let plusMenu = null;
+    let modeMenu = null;
     const messages = [];
 
     const modelUi = host.__EASYOFFICE_CREATE_COPILOT_MODEL_UI__({
@@ -254,7 +258,10 @@
       const curMode = effectiveMode(mod);
 
       if (modeBtn) {
-        modeBtn.textContent = curMode === "edit" ? "편집" : "질문";
+        byId("copilot-mode-btn-text").textContent = curMode === "edit" ? "편집" : "질문";
+        for (const item of byId("copilot-mode-menu").querySelectorAll("[data-mode-choice]")) {
+          item.setAttribute("aria-checked", item.dataset.modeChoice === curMode ? "true" : "false");
+        }
         modeBtn.dataset.mode = curMode;
         modeBtn.disabled = running || ASK_ONLY_MODULES.has(mod);
         modeBtn.setAttribute("title", curMode === "edit" ? "현재 문서를 직접 편집" : "읽기 전용 질문");
@@ -342,14 +349,15 @@
       titleEl.title = text;
     }
 
-    function renderThread() {
+    function renderThread({ keepScroll = false } = {}) {
       const threadEl = byId("copilot-thread");
       if (!threadEl) return;
+      const bodyEl = byId("copilot-body");
+      const scrollTop = bodyEl ? bodyEl.scrollTop : 0;
       threadEl.replaceChildren(...messages.map((msg) => threadView.renderTurn(msg)));
       syncTitle();
       renderWelcome();
-      const bodyEl = byId("copilot-body");
-      if (bodyEl) bodyEl.scrollTop = bodyEl.scrollHeight || 0;
+      if (bodyEl) bodyEl.scrollTop = keepScroll ? scrollTop : bodyEl.scrollHeight || 0;
     }
 
     function syncPanelChrome() {
@@ -362,6 +370,7 @@
         modelUi.closeMenu(false);
         moreMenu?.close();
         plusMenu?.close();
+        modeMenu?.close();
       }
       if (shell) shell.hidden = !visible;
       if (panel) panel.hidden = !visible;
@@ -396,9 +405,8 @@
 
     function autoGrowTextarea(textarea) {
       if (!textarea) return;
-      const lines = String(textarea.value || "").split("\n").length;
-      const rows = Math.min(6, Math.max(2, lines));
-      textarea.setAttribute("rows", String(rows));
+      // 한 줄에서 시작해 내용만큼 늘고 MAX_INPUT_ROWS줄에서 멈춘다.
+      host.__EASYOFFICE_COPILOT_COMPOSER_INPUT__.fitTextareaHeight(textarea, { minRows: 1, maxRows: MAX_INPUT_ROWS });
     }
 
     const anchorApi = host.__EASYOFFICE_COPILOT_SESSION_ANCHOR__;
@@ -452,6 +460,8 @@
       }
       turnCounter += 1;
       const turnId = "turn-" + turnCounter;
+      // 직전 답변의 평가 한 줄. 선택 영역 명령은 이력 없이 따로 묻는 요청이라 붙이지 않는다.
+      const feedbackNote = request.command ? "" : request.feedbackNote ?? feedback.feedbackNote(messages.at(-1));
       const startedAt = Date.now();
       messages.push({ id: turnId + "-u", role: "user", text: request.prompt, at: startedAt });
       const assistantEntry = {
@@ -480,7 +490,7 @@
       activeRequestId = newRequestId();
       renderThread();
       syncComposerControls();
-      return { assistantEntry, turnId, mod, mode, selection, frozenSelection, context, history, token: activeRunToken, requestId: activeRequestId, request };
+      return { assistantEntry, turnId, mod, mode, selection, frozenSelection, context, history, token: activeRunToken, requestId: activeRequestId, request, feedbackNote };
     }
 
     // 답이 끝난(또는 멈춘) 때를 적는다. 머리 접힘 줄의 "N초 동안 작업"과 아래 행의 상대 시간이 이 값을 쓴다.
@@ -567,7 +577,7 @@
           promptCacheKey: resolved.promptCacheKey,
           mode,
           module: mod,
-          prompt: turn.request.prompt,
+          prompt: compact.withFeedbackNote(turn.request.prompt, turn.feedbackNote, MAX_PROMPT_BYTES),
           history: turn.history,
           selection,
           context: resolved.context,
@@ -725,6 +735,7 @@
         isBusy: () => running || regenerating,
         resend: (msg) => void runTurn({ prompt: msg.text }),
         notify: (text) => setStatusFeedback?.(text),
+        rerender: () => renderThread({ keepScroll: true }),
       },
     });
 
@@ -751,6 +762,8 @@
         modelUi.openDialog(undefined, undefined, "전송하기 전에 API 키를 입력하거나 로컬 모델을 선택해 주세요.");
         return;
       }
+      // 싫어요를 누르고 다시 생성하면 그 평가가 새 요청에 실린다(지워지는 답변의 평가).
+      const feedbackNote = feedback.feedbackNote(last);
       regenerating = true;
       syncMessageActions();
       try {
@@ -774,7 +787,7 @@
       } finally {
         regenerating = false;
       }
-      await runTurn(last.request);
+      await runTurn({ ...last.request, feedbackNote });
     }
 
     function stopActiveRun() {
@@ -877,11 +890,14 @@
         renderThread();
         syncComposerControls();
       });
-      byId("btn-copilot-mode")?.addEventListener("click", () => {
-        if (running || ASK_ONLY_MODULES.has(getActiveModule())) return;
-        preferredMode = preferredMode === "edit" ? "ask" : "edit";
+      // 모드는 드롭다운에서 고른다(질문=ask, 편집=edit). 읽기 전용 모듈(PDF)과 실행 중에는 열리지 않는다.
+      byId("copilot-mode-menu").addEventListener("click", (ev) => {
+        const choice = ev.target?.closest?.("[data-mode-choice]")?.dataset.modeChoice;
+        if (!choice || running || ASK_ONLY_MODULES.has(getActiveModule())) return;
+        preferredMode = choice;
         syncComposerControls();
       });
+      modeMenu = createPopupMenu({ document, trigger: byId("btn-copilot-mode"), menu: byId("copilot-mode-menu"), placement: "up", align: "start" });
       byId("btn-copilot-send")?.addEventListener("click", () => {
         if (running) stopActiveRun();
         else void submitPrompt();
@@ -933,7 +949,7 @@
         const syncGhostBtn = () => {
           const on = copilotGhost.isEnabled();
           ghostBtn.setAttribute("aria-pressed", on ? "true" : "false");
-          ghostBtn.classList.toggle("active", on);
+          ghostBtn.setAttribute("aria-checked", on ? "true" : "false");
         };
         syncGhostBtn();
         ghostBtn.addEventListener("click", () => {

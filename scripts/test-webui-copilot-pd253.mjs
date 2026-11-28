@@ -250,7 +250,7 @@ test("질문 모드는 시트를 변경하지 않으며 PDF 모듈은 질문 모
   await selectLocalOllama(document, userClick);
   const modeBtn = document.getElementById("btn-copilot-mode");
   assert.equal(modeBtn.textContent.trim(), "편집");
-  userClick(modeBtn);
+  userClick(document.querySelector('#copilot-mode-menu [data-mode-choice="ask"]'));
   assert.equal(modeBtn.textContent.trim(), "질문");
 
   const input = document.getElementById("copilot-input");
@@ -268,7 +268,7 @@ test("질문 모드는 시트를 변경하지 않으며 PDF 모듈은 질문 모
   switchModule(document, "PDF");
   await flushAsyncTurns(6);
   assert.equal(modeBtn.textContent.trim(), "질문");
-  userClick(modeBtn);
+  userClick(document.querySelector('#copilot-mode-menu [data-mode-choice="edit"]'));
   assert.equal(modeBtn.textContent.trim(), "질문", "PDF locks mode to ask");
 });
 

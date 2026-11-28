@@ -26,6 +26,7 @@
    */
   function createThreadView({ document, copilotActions, editMode, mkEl, hooks }) {
     const icons = host.__EASYOFFICE_ICONS__;
+    const feedback = host.__EASYOFFICE_COPILOT_FEEDBACK__;
 
     function iconButton(className, icon, label, onClick) {
       const btn = mkEl("button", className);
@@ -68,13 +69,29 @@
       btn.dataset.feedback = value;
       btn.setAttribute("aria-pressed", msg.feedback === value ? "true" : "false");
       btn.addEventListener("click", () => {
-        // 표시만 로컬에 남긴다(어디로도 보내지 않는다).
-        msg.feedback = msg.feedback === value ? null : value;
-        for (const peer of btn.parentElement.querySelectorAll("[data-feedback]")) {
-          peer.setAttribute("aria-pressed", msg.feedback === peer.dataset.feedback ? "true" : "false");
-        }
+        // 평가는 대화 기록(`msg`)에 남고 다음 요청의 평가 줄이 된다(`copilot-context-compact.js`). 어디로도 따로 보내지 않는다.
+        feedback.rate(msg, value);
+        hooks.rerender();
       });
       return btn;
+    }
+
+    // 싫어요 아래 한 줄: 이유 칩(하나만 고른다)과 다시 생성 권유
+    function reasonRow(msg) {
+      const row = mkEl("div", "eo-copilot-chip-row eo-copilot-reasons");
+      for (const tag of feedback.getTagsForRating(msg.feedback)) {
+        const chip = mkEl("button", "eo-copilot-reason-chip", tag.label);
+        chip.type = "button";
+        chip.dataset.tag = tag.key;
+        chip.setAttribute("aria-pressed", msg.feedbackTag === tag.key ? "true" : "false");
+        chip.addEventListener("click", () => {
+          feedback.pickTag(msg, tag.key);
+          hooks.rerender();
+        });
+        row.appendChild(chip);
+      }
+      if (hooks.isLastTurn(msg)) row.appendChild(chipButton("eo-copilot-chip-btn", "다시 생성", { turn: msg, action: "regenerate", onClick: () => void hooks.regenerate() }));
+      return row;
     }
 
     function stepsFold(msg) {
@@ -111,7 +128,8 @@
       const locs = Array.isArray(msg.locations) ? msg.locations : [];
       const reviewButtons = editMode.reviewActions(msg.change);
       const showUndo = !msg.undone && copilotActions.hasUndoEntry(msg.id) && msg.change?.state !== "draft";
-      const showRegenerate = !msg.pending && Boolean(msg.request) && hooks.isLastTurn(msg);
+      // 싫어요를 누르면 이유 칩 줄이 다시 생성을 권한다.
+      const showRegenerate = !msg.pending && Boolean(msg.request) && hooks.isLastTurn(msg) && msg.feedback !== "down";
       if (locs.length === 0 && !showUndo && !showRegenerate && reviewButtons.length === 0) return null;
       const row = mkEl("div", "eo-copilot-chip-row");
       for (const [action, label] of reviewButtons) {
@@ -165,6 +183,7 @@
           timeLabel(msg),
         );
         row.appendChild(meta);
+        if (msg.feedback === "down") row.appendChild(reasonRow(msg));
       }
       return row;
     }

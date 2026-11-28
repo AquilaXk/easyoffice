@@ -1,3 +1,7 @@
+// 참조 구현: continuedev/continue (Apache-2.0, Copyright Continue Dev, Inc., see THIRD_PARTY_NOTICES.md)
+// `gui/src/components/ModeSelect/ModeSelect.tsx` 90-165: 현재 모드를 보이는 단추와 그 아래 선택지 목록(고른 항목에 체크 표시, 127·144·163).
+// 같은 모양을 모드 선택(질문·편집)에 쓰고, 헤드리스 Listbox 대신 `aria-checked` 항목으로 옮겼다. 모델 선택 메뉴는 `copilot-model-ui.js`다.
+
 (function (host) {
   "use strict";
 
@@ -9,7 +13,7 @@
     const view = document.defaultView || host;
     let open = false;
 
-    const items = () => Array.from(menu.querySelectorAll("button:not(:disabled)"));
+    const items = () => Array.from(menu.querySelectorAll("button")).filter((btn) => !btn.disabled && !btn.hidden);
 
     function position() {
       const box = trigger.getBoundingClientRect();

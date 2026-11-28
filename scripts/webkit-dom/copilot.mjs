@@ -220,9 +220,12 @@ export const copilotDocSteps = [
     await page.click(PANEL_MODEL);
     await page.click('#copilot-model-menu button[data-quick-kind="ollama"]');
 
+    // 텍스트 예측은 ⋮ 메뉴의 켜기/끄기 항목이다(PD-387).
+    await page.click("#btn-copilot-more");
     assert.equal((await page.textContent("#btn-copilot-ghost")).trim(), "텍스트 예측");
     await page.click("#btn-copilot-ghost");
     assert.equal(await page.getAttribute("#btn-copilot-ghost", "aria-pressed"), "true");
+    assert.equal(await page.getAttribute("#btn-copilot-ghost", "aria-checked"), "true");
 
     await page.evaluate(() => {
       const ed = document.getElementById("doc-editor");
@@ -264,6 +267,7 @@ export const copilotDocSteps = [
     assert.equal(await page.$eval("#doc-editor p", (p) => p.querySelectorAll("br").length), 0);
 
     await page.click("#btn-copilot-mode");
+    await page.click('#copilot-mode-menu [data-mode-choice="ask"]');
     await page.fill("#copilot-input", "표로 요약해 주세요");
     await page.click("#btn-copilot-send");
     await page.waitForSelector("#copilot-thread .eo-copilot-md-table-wrap");

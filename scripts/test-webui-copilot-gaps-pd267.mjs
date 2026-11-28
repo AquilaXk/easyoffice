@@ -175,7 +175,7 @@ test("a text selection shows the selection commands and runs the chosen one on t
   assert.match(assistants()[0].textContent, /다듬음/);
 
   // Ask mode has no edits, so no commands.
-  userClick(document.getElementById("btn-copilot-mode"));
+  userClick(document.querySelector('#copilot-mode-menu [data-mode-choice="ask"]'));
   document.dispatchEvent({ type: "keyup" });
   await flushAsyncTurns(3);
   assert.equal(row.hidden, true);
@@ -219,7 +219,7 @@ test("BASE and BOARD support both edit and ask modes and send table and board co
     const modeBtn = document.getElementById("btn-copilot-mode");
     assert.equal(modeBtn.textContent.trim(), "편집", module);
     assert.equal(modeBtn.disabled, false, module);
-    userClick(modeBtn);
+    userClick(document.querySelector('#copilot-mode-menu [data-mode-choice="ask"]'));
     await flushAsyncTurns(2);
     assert.equal(modeBtn.textContent.trim(), "질문", module);
     await send("현재 내용을 요약해 주세요");

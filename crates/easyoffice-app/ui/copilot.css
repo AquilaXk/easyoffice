@@ -623,8 +623,7 @@
 .eo-copilot-textarea {
   width: 100%;
   min-height: var(--textarea-min-height);
-  max-height: 120px;
-  padding: 0;
+  padding: var(--space-2) var(--space-1);
   border: 0;
   outline: none;
   resize: none;
@@ -1210,14 +1209,47 @@ del.eo-copilot-del {
   display: none;
 }
 
-.eo-copilot-ghost-btn[aria-pressed="true"] {
+/* 켜기/끄기 메뉴 항목: 켜져 있으면 오른쪽에 체크 */
+.eo-copilot-popup-item[aria-checked="true"]::after {
+  content: "✓";
+  float: right;
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+
+:root[data-theme-effective="dark"] .eo-copilot-popup-item[aria-checked="true"]::after {
+  color: var(--accent-strong);
+}
+
+/* 싫어요 이유 칩 */
+.eo-copilot-reason-chip {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-4);
+  font-family: var(--font-family-ui);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--ui-text-secondary);
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--copilot-chip-radius);
+  cursor: pointer;
+}
+
+.eo-copilot-reason-chip:hover {
+  background: var(--ui-hover);
+  color: var(--ui-text);
+}
+
+.eo-copilot-reason-chip[aria-pressed="true"] {
   background: var(--ui-accent-bg);
   color: var(--accent-ink);
   border-color: var(--accent-primary);
 }
 
-:root[data-theme-effective="dark"] .eo-copilot-ghost-btn[aria-pressed="true"] {
-  color: var(--accent-strong);
+:root[data-theme-effective="dark"] .eo-copilot-reason-chip[aria-pressed="true"] {
+  color: var(--ui-text);
 }
 
 .eo-copilot-ghost-overlay {
