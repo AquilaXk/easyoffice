@@ -123,6 +123,8 @@
     // 데이터 > 고급 필터 and 데이터 > 가상 분석 > 목표값 찾기 (PD-400).
     const advFilter = host.__EASYOFFICE_CREATE_SHEET_ADV_FILTER__?.({ ...deps, kit, say, getFilter: () => filter }) ?? null;
     const goalSeek = host.__EASYOFFICE_CREATE_SHEET_GOAL_SEEK__?.({ ...deps, kit, say }) ?? null;
+    // 서식 > 셀 스타일 (PD-400).
+    const cellStyles = host.__EASYOFFICE_CREATE_SHEET_CELL_STYLES__?.({ ...deps, kit, say }) ?? null;
     // 편집 > 지우기 (PD-400).
     const clearUi = host.__EASYOFFICE_CREATE_SHEET_CLEAR_UI__?.({ ...deps, say, getNoteUi: () => noteUi }) ?? null;
     const pickList = host.__EASYOFFICE_CREATE_SHEET_PICK_LIST__?.({ ...deps, say }) ?? null;
@@ -585,6 +587,7 @@
       ...(painter?.actions || {}),
       ...(advFilter?.actions || {}),
       ...(goalSeek?.actions || {}),
+      ...(cellStyles?.actions || {}),
       "tab-add": () => tabs.insert(null),
       "tab-color": () => Promise.resolve(tabMenu.openColor(getActiveSheetName())),
       ...tabs.actions,

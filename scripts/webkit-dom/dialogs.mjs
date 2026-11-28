@@ -76,6 +76,7 @@ const SHEET_DIALOGS = [
   ["중복된 항목 제거", "sheet-table-dedupe-dialog", [typeColumn, click('[data-sheet-act="dedupe-dialog"]')]],
   ["텍스트 나누기", "sheet-text-columns-dialog", [typeColumn, click('[data-sheet-act="text-to-columns"]')]],
   ["고급 필터", "sheet-advfilter-dialog", [typeColumn, click('[data-sheet-act="adv-filter"]')]],
+  ["셀 스타일", "sheet-cellstyle-dialog", [click('[data-sheet-act="cell-styles"]')]],
   ["목표값 찾기", "sheet-goalseek-dialog", [typeColumn, click('[data-sheet-act="goal-seek"]')]],
   ["피벗 테이블", "sheet-pivot-dialog", [typeColumn, click('[data-studio-menu-cmd="sheet-mod-pivot"]')]],
   ["차트", "sheet-chart-dialog", [typeColumn, click('[data-studio-menu-cmd="insert-chart"]')]],

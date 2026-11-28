@@ -199,6 +199,53 @@ test("고급 필터 in place keeps the rows of the criteria rows and clears with
   assert.deepEqual(layout.get(sheetName(h)).filter.hidden, [[3, 3], [5, 5]], "다른 부서 (row 3) and the repeat of row 2 (row 5) go");
 });
 
+const { __EASYOFFICE_SHEET_CELL_STYLES__: cellStyles } = loadUiModule(ui("sheet-cell-styles.js"), {});
+
+test("the cell style list is the program's default list: 47 styles in five groups with the standard's ids and colors", () => {
+  assert.deepEqual(cellStyles.GROUPS.map((g) => [g.title, g.styles.length]), [["좋음, 나쁨 및 중립", 4], ["데이터 및 모델", 8], ["제목 및 표제", 6], ["주제 셀 스타일", 24], ["숫자 서식", 5]]);
+  const ids = cellStyles.GROUPS.flatMap((g) => g.styles.map((s) => s.id)).sort((a, b) => a - b);
+  assert.deepEqual(ids, [0, 3, 4, 5, 6, 7, 10, 11, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, ...Array.from({ length: 24 }, (_, i) => 29 + i), 53], "builtinId of ECMA-376 18.8.7");
+  const good = cellStyles.keysOf(cellStyles.BY_NAME.get("좋음"));
+  assert.deepEqual([good.fill, good.fontColor], ["c6efce", "006100"]);
+  assert.equal(cellStyles.keysOf(cellStyles.BY_NAME.get("표준")), null, "표준 takes the format off");
+  assert.equal(cellStyles.mix("4472C4", 0.8), "dae3f3", "20% - 강조색1 is the accent moved 80% toward white");
+  assert.equal(cellStyles.keysOf(cellStyles.BY_NAME.get("제목 1")).fontSize, "20px", "15 pt");
+  assert.equal(cellStyles.keysOf(cellStyles.BY_NAME.get("백분율")).numFmt, "0%");
+});
+
+test("셀 스타일 lists the styles, applies the chosen one to the selection in one undo step, and 표준 takes it off", async () => {
+  const h = await openSheet();
+  await clearDemo(h);
+  await type(h, "A1", "x");
+  await type(h, "B1", "y");
+  await select(h, "A1:B1");
+  await act(h, "cell-styles");
+  assert.equal(get(h, "sheet-cellstyle-dialog").open, true);
+  assert.equal(get(h, "sheet-cellstyle-list").querySelectorAll("[data-cell-style]").length, 47);
+  h.userClick(get(h, "btn-sheet-cellstyle-ok"));
+  await flushAsyncTurns(10);
+  assert.equal(get(h, "sheet-cellstyle-status").textContent, "적용할 스타일을 고르세요");
+  get(h, "sheet-cellstyle-list").querySelector('[data-cell-style="좋음"]').click();
+  h.userClick(get(h, "btn-sheet-cellstyle-ok"));
+  await flushAsyncTurns(30);
+  assert.equal(get(h, "sheet-cellstyle-dialog").open, false);
+  assert.deepEqual([cellAt(h, "A1")._st?.fill, cellAt(h, "B1")._st?.fontColor], ["c6efce", "006100"]);
+  assert.equal(cellAt(h, "A1").textContent, "x", "the text stays");
+  h.userClick(h.document.querySelector('[data-studio-menu-cmd="studio-undo"]'));
+  await flushAsyncTurns(30);
+  assert.equal(cellAt(h, "A1")._st?.fill, undefined, "one undo step");
+  await act(h, "cell-styles");
+  get(h, "sheet-cellstyle-list").querySelector('[data-cell-style="입력"]').click();
+  h.userClick(get(h, "btn-sheet-cellstyle-ok"));
+  await flushAsyncTurns(30);
+  assert.equal(cellAt(h, "A1")._st?.border?.t, "thin:7f7f7f");
+  await act(h, "cell-styles");
+  get(h, "sheet-cellstyle-list").querySelector('[data-cell-style="표준"]').click();
+  h.userClick(get(h, "btn-sheet-cellstyle-ok"));
+  await flushAsyncTurns(30);
+  assert.deepEqual([cellAt(h, "A1")._st?.fill, cellAt(h, "A1")._st?.border], [undefined, undefined].map((v) => v), "표준 clears the format");
+});
+
 // A sheet whose A1 is `=B1*3+2` for the engine: the answer is read from the value of B1 in the request.
 async function openLinearSheet() {
   const harness = await createWorkspaceHarness({

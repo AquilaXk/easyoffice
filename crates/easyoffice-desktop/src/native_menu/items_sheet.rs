@@ -22,4 +22,5 @@ pub const SHEET_ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:view-formulas", "수식 표시", "view-formulas"),
     sa!("sheet:adv-filter", "고급 필터…", "adv-filter"),
     sa!("sheet:goal-seek", "목표값 찾기…", "goal-seek"),
+    sa!("sheet:cell-styles", "셀 스타일…", "cell-styles"),
 ];

@@ -391,6 +391,7 @@ const FORMAT_SHEET: MenuSpec = menu(
         "sheet:unmerge",
         BORDER,
         CF,
+        "sheet:cell-styles",
         S,
         SHEET_ROW,
         SHEET_COL,

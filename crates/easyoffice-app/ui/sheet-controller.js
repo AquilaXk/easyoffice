@@ -709,6 +709,7 @@
       clearExtras: () => input.clearExtras(),
       runClipboardCommand: (cmd) => input.runClipboardCommand(cmd),
       openPasteSpecial: () => input.openPasteSpecial(),
+      format,
       copyFormats: (range) => input.copyFormats(range),
       pasteFormats: (snap, range) => input.pasteFormats(snap, range),
       openFormatDialog: () => document.querySelector('#menu-bar .md-item[data-sheet-numfmt="dialog"]')?.click(),

@@ -19,6 +19,7 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
             "sheet:unmerge",
             layout::BORDER,
             layout::CF,
+            "sheet:cell-styles",
             s,
             layout::SHEET_ROW,
             layout::SHEET_COL,
