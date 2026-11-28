@@ -13,13 +13,17 @@
   // slides; (3) the cue rule of reveal.js's `cueAutoSlide` and its loop condition are ported, without fragments, media and the
   // pause state the editor has no counterpart for.
   const MAX_WAIT_MS = 86_400_000;
+  // A wait of 0 moves on at once, as the presentation program does, but never faster than this: a one-slide show that repeats
+  // with a tiny wait would otherwise draw the slide again in a loop without a pause.
+  const MIN_WAIT_MS = 100;
 
-  // The wait before `slide` moves on by itself; `0` when there is none (manual advance, no wait, last slide of a show that does not repeat).
+  // The wait before `slide` moves on by itself; `0` when there is none (manual advance, no wait set, last slide of a show that does
+  // not repeat). A set wait is at least `MIN_WAIT_MS`.
   function waitFor(slide, { manual, loop, isLast }) {
     const ms = Number(slide?.advanceAfterMs);
-    if (manual || !Number.isFinite(ms) || ms < 0 || slide?.advanceAfterMs === null || slide?.advanceAfterMs === "") return 0;
+    if (manual || !Number.isFinite(ms) || ms < 0 || slide?.advanceAfterMs === null || slide?.advanceAfterMs === "" || slide?.advanceAfterMs === undefined) return 0;
     if (isLast && !loop) return 0;
-    return Math.min(ms, MAX_WAIT_MS);
+    return Math.max(MIN_WAIT_MS, Math.min(ms, MAX_WAIT_MS));
   }
 
   // The index the show shows after `idx`: the next shown slide, the first one again when the show repeats, or `-1` at its end.

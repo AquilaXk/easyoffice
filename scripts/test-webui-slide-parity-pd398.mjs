@@ -112,6 +112,9 @@ test("서식 > 글꼴 opens the font dialog on the selected text and writes the 
   assert.equal($(h.document, "doc-font-tab-advanced").hidden, true, "the 고급 tab has nothing to set on a slide");
   assert.equal($(h.document, "doc-font-strike").disabled, true);
   assert.equal($(h.document, "btn-doc-font-default").hidden, true);
+  assert.equal($(h.document, "doc-font-underline-color-host").style.display, "none", "the underline color has no slide property and is not shown");
+  const fxNorm = h.host.__EASYOFFICE_SLIDE_FX__.normalize({ font: "Ar\u0085ial\u007f\u0000<b>", eastFont: "맑은\u009f 고딕" }, "textbox");
+  assert.deepEqual([fxNorm.font, fxNorm.eastFont], ["Arialb", "맑은 고딕"], "control characters of C0 and C1 are dropped, as the file engine does");
   $(h.document, "doc-font-size").value = "40";
   $(h.document, "doc-font-style").value = "굵게 기울임꼴";
   $(h.document, "doc-font-latin").value = "Georgia";
@@ -134,6 +137,13 @@ test("보기 > 슬라이드 정렬 shows every slide as a thumbnail, a drag move
   const cells = () => Array.from(sorter.querySelectorAll(".slide-sorter-cell"));
   assert.equal(cells().length, 4);
   assert.ok(cells()[0].querySelector(".slide-sorter-thumb .slide-show-frame"), "a cell draws the slide as the show does");
+  // An arrow key moves the selection mark only: the cells and their frames stay the same objects.
+  const frameBefore = cells()[1].querySelector(".slide-show-frame");
+  const cellBefore = cells()[1];
+  cells()[0].dispatchEvent({ type: "keydown", key: "ArrowRight", target: cells()[0], preventDefault() {} });
+  assert.equal(cells()[1], cellBefore, "the cell is not made again");
+  assert.equal(cells()[1].querySelector(".slide-show-frame"), frameBefore, "the frame is drawn once");
+  assert.equal(cells()[1].className.includes("active"), true, "the selection mark moved");
   const first = cells()[0];
   first.dispatchEvent({ type: "dragstart", target: first, dataTransfer: { setData() {} } });
   const last = cells()[3];
@@ -158,7 +168,7 @@ test("화면 전환 sets the effect, its side and the advance on the slide, and 
   h.userClick($(h.document, "btn-slide-trans-ok"));
   const slide = h.host.__EASYOFFICE_SLIDE_CANVAS__.currentSlide();
   assert.deepEqual([slide.transition, slide.transitionDir, slide.noClickAdvance, slide.advanceAfterMs], ["wipe", "top", true, 2500]);
-  assert.match($(h.document, "slide-meta-status").textContent, /전환: 지우기/);
+  assert.match($(h.document, "slide-meta-status").textContent, /전환: 닦아내기/);
   const wire = h.host.__EASYOFFICE_SLIDE_CANVAS_CODEC__.serializeDeckPayload([slide], h.document, null).slides[0];
   assert.deepEqual([wire.transition, wire.transitionDir, wire.noClickAdvance, wire.advanceAfterMs], ["wipe", "top", true, 2500]);
   const hostile = h.host.__EASYOFFICE_SLIDE_EXT__.normalize({ transitionDir: "sideways", advanceAfterMs: 9e15, noClickAdvance: "yes" }, new Set());
@@ -195,6 +205,8 @@ test("the auto advance cues the slide's own wait, stops at the last slide unless
   assert.equal(waitFor({ advanceAfterMs: 9e15 }, { manual: false, loop: false, isLast: false }), 86_400_000);
   assert.equal(waitFor({ advanceAfterMs: -5 }, { manual: false, loop: false, isLast: false }), 0);
   assert.equal(waitFor({}, { manual: false, loop: false, isLast: false }), 0);
+  assert.equal(waitFor({ advanceAfterMs: 0 }, { manual: false, loop: false, isLast: false }), 100, "advTm 0 moves on at once, but not faster than the floor");
+  assert.equal(waitFor({ advanceAfterMs: 1 }, { manual: false, loop: true, isLast: true }), 100, "a tiny wait on a repeating show has a floor");
   const shown = (from) => from; // no slide is hidden
   assert.equal(nextIndex(1, 3, false, shown), 2);
   assert.equal(nextIndex(2, 3, false, shown), -1);

@@ -94,9 +94,10 @@
     return out;
   }
 
-  // A typeface name: one line of at most 64 characters, no markup characters.
+  // A typeface name: one line of at most 64 characters, no control characters (C0 and C1, as the file engine's `clean_face`
+  // drops them) and no markup characters.
   function normalizeFace(raw) {
-    const face = String(raw ?? "").replace(/[\u0000-\u001f<>"&]/g, "").trim();
+    const face = String(raw ?? "").replace(/[\u0000-\u001f\u007f-\u009f<>"&]/g, "").trim();
     return [...face].length > 0 ? [...face].slice(0, MAX_FACE_CHARS).join("") : "";
   }
 

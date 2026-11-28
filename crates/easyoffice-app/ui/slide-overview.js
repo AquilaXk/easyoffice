@@ -43,14 +43,19 @@
 
     const isActive = () => $("slide-sorter") !== null && !$("slide-sorter").hidden;
 
-    function buildCell(slide, idx, active) {
+    // The cells drawn so far, in deck order: `{ slide, sig, cell }`. A thumbnail is drawn once and again only when its slide is a
+    // different object or its content changed; moving the selection, or moving a slide, only updates marks and numbers.
+    let entries = [];
+    let selectionOnly = false;
+
+    // What a thumbnail shows of a slide: when this text is the same the frame is the same.
+    // A slide number in the footer makes the position part of it.
+    const sigOf = (s, i) => JSON.stringify([s.title, s.lower, s.hidden, s.layout, s.elements, s.background, s.footer, s.insertedNodes, s.titleStyle, s.footer?.number ? i : 0]);
+
+    function buildCell(slide, idx) {
       const cell = document.createElement("button");
       cell.type = "button";
       cell.draggable = true;
-      cell.className = "slide-sorter-cell" + (active ? " active" : "") + (slide.hidden ? " is-hidden-slide" : "");
-      cell.dataset.slideIdx = String(idx);
-      cell.setAttribute("aria-label", idx + 1 + "번 슬라이드" + (slide.hidden ? "(숨김)" : "") + ": " + (String(slide.title || "").trim() || "(제목 없음)"));
-      if (active) cell.setAttribute("aria-current", "true");
       const thumb = document.createElement("span");
       thumb.className = "slide-sorter-thumb";
       thumb.dataset.aspect = ops.deckAspect();
@@ -58,22 +63,43 @@
       thumb.appendChild(ops.buildFrame(slide, idx));
       const num = document.createElement("span");
       num.className = "slide-sorter-num";
-      num.textContent = String(idx + 1);
       cell.appendChild(thumb);
       cell.appendChild(num);
       return cell;
     }
 
-    // Draws the grid again: the cell width follows the window, the columns follow the cell width.
-    function render() {
+    // Number, label and selection mark of one cell.
+    function mark({ slide, cell }, idx, active) {
+      cell.className = "slide-sorter-cell" + (active ? " active" : "") + (slide.hidden ? " is-hidden-slide" : "");
+      cell.dataset.slideIdx = String(idx);
+      cell.setAttribute("aria-label", idx + 1 + "번 슬라이드" + (slide.hidden ? "(숨김)" : "") + ": " + (String(slide.title || "").trim() || "(제목 없음)"));
+      if (active) cell.setAttribute("aria-current", "true");
+      else cell.removeAttribute("aria-current");
+      const num = cell.querySelector(".slide-sorter-num");
+      if (num) num.textContent = String(idx + 1);
+    }
+
+    // Brings the grid up to date. `full` also draws the frames of the changed slides and follows the window width.
+    function render(full = true) {
       const sorter = $("slide-sorter");
       if (!sorter) return;
-      const vmin = Math.min(env.innerWidth || 1280, env.innerHeight || 800);
-      const cell = Math.round(thumbWidth(vmin));
-      sorter.style.setProperty("--slide-sorter-cell", cell + "px");
-      cols = columnsFor(sorter.clientWidth || env.innerWidth || 1280, cell);
       const active = getActiveSlideIndex();
-      sorter.replaceChildren(...deck.map((s, i) => buildCell(s, i, i === active)));
+      if (full) {
+        const vmin = Math.min(env.innerWidth || 1280, env.innerHeight || 800);
+        const width = Math.round(thumbWidth(vmin));
+        sorter.style.setProperty("--slide-sorter-cell", width + "px");
+        cols = columnsFor(sorter.clientWidth || env.innerWidth || 1280, width);
+        const before = new Map(entries.map((e) => [e.slide, e]));
+        entries = deck.map((s, i) => {
+          const sig = sigOf(s, i);
+          const kept = before.get(s);
+          return kept && kept.sig === sig ? kept : { slide: s, sig, cell: buildCell(s, i) };
+        });
+        if (entries.length !== sorter.children.length || entries.some((e, i) => sorter.children[i] !== e.cell)) {
+          sorter.replaceChildren(...entries.map((e) => e.cell));
+        }
+      }
+      entries.forEach((e, i) => mark(e, i, i === active));
     }
 
     function focusCell(idx) {
@@ -82,7 +108,9 @@
 
     function select(idx) {
       if (!deck[idx]) return;
+      selectionOnly = true;
       getPanels().switchToSlideIndex(idx);
+      selectionOnly = false;
       focusCell(idx);
     }
 
@@ -102,6 +130,7 @@
       $("slide-sorter").hidden = true;
       $("slide-workspace").hidden = false;
       $("slide-sorter").replaceChildren();
+      entries = [];
     }
 
     function cellOf(ev) {
@@ -178,7 +207,7 @@
     }
 
     // Every slide render (switch, move, undo) draws the grid again while it is shown.
-    return { bind, run, closeAll: close, isActive, render, onRender: () => { if (isActive()) render(); } };
+    return { bind, run, closeAll: close, isActive, render, onRender: () => { if (isActive()) render(!selectionOnly); } };
   }
 
   host.__EASYOFFICE_SLIDE_OVERVIEW_MATH__ = { thumbWidth, columnsFor, stepTarget };

@@ -25,7 +25,7 @@
   });
   // The slide transitions by their file name, with the names of the Korean presentation program's 화면 전환 list.
   const TRANSITION_LABELS = Object.freeze({
-    none: "없음", fade: "페이드", push: "밀어내기", wipe: "지우기", split: "나누기", cover: "덮기", pull: "벗기기", zoom: "확대/축소", randomBar: "무작위 선",
+    none: "없음", fade: "페이드", push: "밀기", wipe: "닦아내기", split: "분할", cover: "덮기", pull: "벗기기", zoom: "확대/축소", randomBar: "무작위 선",
   });
   const TRANSITIONS = new Set(Object.keys(TRANSITION_LABELS));
   const ELEMENT_KINDS = new Set(["textbox", "shape", "image", "table", "chart"]);

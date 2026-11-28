@@ -354,7 +354,7 @@ test("PD-257: 마스터 레이아웃·화면비·전환 효과·발표자 도구
   userClick(commandItem(document, "slide-mod-transition"));
   await flushAsyncTurns(4);
   assert.equal(transSel.value, "push");
-  assert.equal(transSel.parentElement.querySelector(".custom-select-value").textContent, "밀어내기");
+  assert.equal(transSel.parentElement.querySelector(".custom-select-value").textContent, "밀기");
 
   // Presenter tool command starts slideshow with presenter panel immediately visible
   userClick(commandItem(document, "slide-mod-presenter"));

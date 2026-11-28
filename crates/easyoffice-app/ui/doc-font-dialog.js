@@ -176,6 +176,11 @@
     for (const el of dialog.querySelectorAll(LIMITED_OFF)) el.disabled = limited || el.hasAttribute("data-pending");
     for (const o of dialog.querySelectorAll("#doc-font-underline-style option")) o.hidden = limited && !LIMITED_ULINE.has(o.value);
     for (const el of [dialog.querySelector("#doc-font-tab-advanced"), document.getElementById("btn-doc-font-default")]) if (el) el.hidden = limited;
+    // The underline color has no slide property: its label and color box leave the dialog (the color picker redraws its button, so
+    // disabling it is not enough).
+    for (const el of [dialog.querySelector('label[for="doc-font-underline-color"]'), dialog.querySelector("#doc-font-underline-color-host")]) {
+      if (el) el.style.display = limited ? "none" : "";
+    }
   }
 
   function open(runs, document, options = {}) {
