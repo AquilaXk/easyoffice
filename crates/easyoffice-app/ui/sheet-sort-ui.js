@@ -184,6 +184,36 @@
       });
     }
 
+    // 정렬 > 오름차순 or 내림차순 of the cell menu: the range around the active cell sorted by its column, the first row left
+    // out when it looks like a header, as one undoable step.
+    function quick(asc) {
+      commitIfEditing();
+      const name = getActiveSheetName();
+      sheetDataStore[name] = snapshotDomSheetCells();
+      const range = targetRange();
+      if (range.r2 <= range.r1) {
+        const fb = document.getElementById("status-command-feedback");
+        if (fb) fb.textContent = "정렬할 두 행 이상의 데이터 없음";
+        return Promise.resolve(false);
+      }
+      const active = getRange().c1;
+      const col = active >= range.c1 && active <= range.c2 ? active : range.c1;
+      const spec = {
+        range: { ...range, keyCol: col },
+        keys: [{ col, asc }],
+        hasHeader: sortCore.detectHeader(sheetDataStore[name] || {}, range, refOf, sortCore.numberOf),
+        caseSensitive: false,
+      };
+      return enqueueWorkspaceHistoryOp(async () => {
+        await drainInFlightSheetWork();
+        sheetDataStore[getActiveSheetName()] = snapshotDomSheetCells();
+        const change = sheetHistory.begin({ range: spec.range });
+        const moved = await sortRange(spec);
+        if (moved) sheetHistory.commit(change);
+        return moved;
+      });
+    }
+
     function bind() {
       if (state.bound) return;
       state.bound = true;
@@ -197,7 +227,7 @@
       $("sheet-sort-header")?.addEventListener("change", render);
     }
 
-    return { open, apply, bind, state: () => state };
+    return { open, apply, quick, bind, state: () => state };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_SORT_UI__ = createSheetSortUi;

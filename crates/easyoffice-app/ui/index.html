@@ -3374,10 +3374,33 @@
       <div class="md-item" data-sheet-ctx="cell-delete" role="menuitem" tabindex="-1"><span class="md-label">삭제…</span></div>
       <div class="md-item" data-sheet-ctx="clear-contents" role="menuitem" tabindex="-1"><span class="md-label">내용 지우기</span></div>
       <div class="md-sep"></div>
-      <div class="md-item" data-sheet-ctx="cell-format" role="menuitem" tabindex="-1"><span class="md-label">셀 서식…</span></div>
+      <div class="md-sub" role="menuitem" aria-haspopup="menu" tabindex="-1">
+        <span class="md-label">필터</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+        <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="필터">
+          <div class="md-item" data-sheet-ctx="filter-clear" role="menuitem" tabindex="-1"><span class="md-label">필터 지우기</span></div>
+          <div class="md-item" data-sheet-ctx="filter-reapply" role="menuitem" tabindex="-1"><span class="md-label">다시 적용</span></div>
+          <div class="md-sep"></div>
+          <div class="md-item" data-sheet-ctx="filter-by-value" role="menuitem" tabindex="-1"><span class="md-label">선택한 셀의 값으로 필터링</span></div>
+          <div class="md-item" data-sheet-ctx="filter-by-fill" role="menuitem" tabindex="-1"><span class="md-label">선택한 셀의 색으로 필터링</span></div>
+          <div class="md-item" data-sheet-ctx="filter-by-font" role="menuitem" tabindex="-1"><span class="md-label">선택한 셀의 글꼴 색으로 필터링</span></div>
+        </div>
+      </div>
+      <div class="md-sub" role="menuitem" aria-haspopup="menu" tabindex="-1">
+        <span class="md-label">정렬</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+        <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="정렬">
+          <div class="md-item" data-sheet-ctx="sort-asc" role="menuitem" tabindex="-1"><span id="sheet-ctx-sort-asc" class="md-label">텍스트 오름차순 정렬</span></div>
+          <div class="md-item" data-sheet-ctx="sort-desc" role="menuitem" tabindex="-1"><span id="sheet-ctx-sort-desc" class="md-label">텍스트 내림차순 정렬</span></div>
+          <div class="md-sep"></div>
+          <div class="md-item" data-sheet-ctx="sort-custom" role="menuitem" tabindex="-1"><span class="md-label">사용자 지정 정렬…</span></div>
+        </div>
+      </div>
+      <div class="md-sep"></div>
       <div class="md-item" data-sheet-ctx="note-insert" role="menuitem" tabindex="-1"><span class="md-label">메모 삽입</span></div>
+      <div class="md-item" data-sheet-ctx="cell-format" role="menuitem" tabindex="-1"><span class="md-label">셀 서식…</span></div>
+      <div class="md-item" data-sheet-ctx="pick-list" role="menuitem" tabindex="-1"><span class="md-label">드롭다운 목록에서 선택…</span></div>
       <div class="md-item" data-sheet-ctx="link-edit" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크…</span></div>
     </div>
+    <div id="sheet-pick-menu" class="context-menu" role="listbox" aria-label="드롭다운 목록" hidden></div>
     <div id="sheet-totals-menu" class="context-menu" role="menu" aria-label="요약 행 함수" hidden></div>
     <div id="sheet-tab-menu" class="context-menu" role="menu" aria-label="시트 탭 메뉴" hidden>
       <div class="md-item" data-tab-act="insert" role="menuitem" tabindex="-1"><span class="md-label">시트 삽입</span></div>
@@ -3585,6 +3608,7 @@
     <script src="./sheet-text-columns.js"></script>
     <script src="./sheet-special-cells.js"></script>
     <script src="./sheet-goto.js"></script>
+    <script src="./sheet-pick-list.js"></script>
     <script src="./sheet-subtotal.js"></script>
     <script src="./sheet-subtotal-ui.js"></script>
     <script src="./sheet-structure.js"></script>

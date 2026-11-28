@@ -209,6 +209,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "sheet-page.js",
     "sheet-paste-core.js",
     "sheet-paste-ui.js",
+    "sheet-pick-list.js",
     "sheet-pivot-model.js",
     "sheet-pivot-ui.js",
     "sheet-point-ui.js",

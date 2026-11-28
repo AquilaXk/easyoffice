@@ -243,8 +243,8 @@ test("general cell and header right-click context menus open, dismiss cleanly, a
   cell(h, "B1").dispatchEvent({ type: "contextmenu", target: cell(h, "B1"), button: 2, clientX: 50, clientY: 50, bubbles: true });
   assert.equal(cellMenu.hidden, false);
   assert.equal(hdrMenu.hidden, true);
-  const labels = [...cellMenu.querySelectorAll(".md-item")].map((el) => el.textContent);
-  assert.deepEqual(labels, ["잘라내기", "복사", "붙여넣기", "선택하여 붙여넣기…", "삽입…", "삭제…", "내용 지우기", "셀 서식…", "메모 삽입", "하이퍼링크…"]);
+  const labels = [...cellMenu.querySelectorAll(":scope > .md-item")].map((el) => el.textContent);
+  assert.deepEqual(labels, ["잘라내기", "복사", "붙여넣기", "선택하여 붙여넣기…", "삽입…", "삭제…", "내용 지우기", "메모 삽입", "셀 서식…", "드롭다운 목록에서 선택…", "하이퍼링크…"]);
 
   // Escape dismisses menu
   h.document.dispatchEvent({ type: "keydown", key: "Escape", bubbles: true });

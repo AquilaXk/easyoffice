@@ -30,6 +30,9 @@
       openPasteSpecial,
       openFormatDialog,
       clearSelectionContents,
+      filter,
+      quickSort,
+      pickList,
       say,
     } = deps;
     const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
@@ -40,12 +43,15 @@
     let shiftMode = "insert";
     let shiftBound = false;
 
-    const visibleItems = () => Array.from(menuEl()?.querySelectorAll(".md-item") || []).filter((el) => !el.hidden);
+    // The lines of the menu itself; the items of a submenu are reached through its line (ArrowRight).
+    const visibleItems = () => Array.from(menuEl()?.querySelectorAll(":scope > .md-item, :scope > .md-sub") || []).filter((el) => !el.hidden && el.getAttribute("aria-disabled") !== "true");
+    const subItems = (sub) => Array.from(sub.querySelectorAll(".md-sub-panel .md-item")).filter((el) => el.getAttribute("aria-disabled") !== "true");
 
     function close(refocus) {
       const el = menuEl();
       if (!el || el.hidden) return;
       el.hidden = true;
+      for (const sub of el.querySelectorAll(".md-sub.open")) sub.classList.remove("open");
       if (refocus) focusAnchor();
     }
 
@@ -67,6 +73,7 @@
       const el = menuEl();
       if (!el) return false;
       host.__EASYOFFICE_CLOSE_MENUS__?.(document);
+      syncSortLabels();
       el.hidden = false;
       place(el, x, y);
       visibleItems()[0]?.focus();
@@ -104,10 +111,45 @@
       openAt(box ? box.left + 8 : 20, box ? box.bottom : 20);
     }
 
+    // Inside a submenu the arrows walk its items, Left and Escape go back to its line.
+    function onSubKeydown(ev, sub) {
+      const items = subItems(sub);
+      const index = items.indexOf(document.activeElement);
+      const move = (to) => {
+        ev.preventDefault();
+        items[(to + items.length) % items.length]?.focus();
+      };
+      if (ev.key === "ArrowDown") move(index + 1);
+      else if (ev.key === "ArrowUp") move(index - 1);
+      else if (ev.key === "Home") move(0);
+      else if (ev.key === "End") move(-1);
+      else if (ev.key === "ArrowLeft" || ev.key === "Escape") {
+        ev.preventDefault();
+        ev.stopPropagation?.();
+        sub.classList.remove("open");
+        sub.focus?.();
+      } else if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        document.activeElement?.click?.();
+      }
+    }
+
     function onMenuKeydown(ev) {
+      const inSub = document.activeElement?.closest?.(".md-sub");
+      if (inSub && document.activeElement !== inSub && menuEl()?.contains(inSub)) {
+        onSubKeydown(ev, inSub);
+        return;
+      }
       const items = visibleItems();
       if (items.length === 0) return;
       const index = items.indexOf(document.activeElement);
+      const line = document.activeElement;
+      if (line?.classList?.contains("md-sub") && (ev.key === "ArrowRight" || ev.key === "Enter" || ev.key === " ")) {
+        ev.preventDefault();
+        line.classList.add("open");
+        subItems(line)[0]?.focus();
+        return;
+      }
       const move = (to) => {
         ev.preventDefault();
         items[(to + items.length) % items.length]?.focus();
@@ -223,7 +265,44 @@
       $("btn-sheet-cell-shift-ok")?.addEventListener("click", submitShiftDialog);
     }
 
+    // 필터 > 선택한 셀의 값, 색, 글꼴 색으로 필터링: the filter turns on for the region around the cell when it is off, and the
+    // column of the active cell keeps the rows that look like it.
+    async function filterBy(kind) {
+      commitIfEditing();
+      const sel = getSelection();
+      const entry = snapshotDomSheetCells()[grid.refOf(sel.ar, sel.ac)];
+      const text = String(entry?.value ?? "");
+      const rgb = String(entry?.style?.[kind === "font" ? "fontColor" : "fill"] ?? "").replace(/^#/, "").toLowerCase();
+      const criteria =
+        kind === "value"
+          ? text === "" ? { blank: true, values: [] } : { values: [text] }
+          : { color: { ...(kind === "font" ? { font: true } : {}), ...(rgb ? { rgb } : {}) } };
+      if (!filter.current() && !(await filter.run("filter-toggle"))) return false;
+      return filter.setCriteria(sel.ac, criteria);
+    }
+
+    // A column of numbers sorts "smallest to largest"; any other, as text.
+    function syncSortLabels() {
+      const sel = getSelection();
+      const entry = sheetDataStore[getActiveSheetName()]?.[grid.refOf(sel.ar, sel.ac)];
+      const numeric =Boolean(entry) && !entry.formula && String(entry.value ?? "").trim() !== "" && Number.isFinite(Number(String(entry.value).replaceAll(",", "")));
+      const labels = numeric ? ["가장 작은 값에서 가장 큰 값으로 정렬", "가장 큰 값에서 가장 작은 값으로 정렬"] : ["텍스트 오름차순 정렬", "텍스트 내림차순 정렬"];
+      for (const [id, text] of [["sheet-ctx-sort-asc", labels[0]], ["sheet-ctx-sort-desc", labels[1]]]) {
+        const el = $(id);
+        if (el) el.textContent = text;
+      }
+    }
+
     const ACTIONS = {
+      "filter-clear": () => void runStructureAct("filter-clear"),
+      "filter-reapply": () => void runStructureAct("filter-reapply"),
+      "filter-by-value": () => void filterBy("value"),
+      "filter-by-fill": () => void filterBy("fill"),
+      "filter-by-font": () => void filterBy("font"),
+      "sort-asc": () => void quickSort(true),
+      "sort-desc": () => void quickSort(false),
+      "sort-custom": () => void runStructureAct("sort-dialog"),
+      "pick-list": () => void pickList.open(),
       "clip-cut": () => void runClipboardCommand("clip-cut"),
       "clip-copy": () => void runClipboardCommand("clip-copy"),
       "clip-paste": () => void runClipboardCommand("clip-paste"),

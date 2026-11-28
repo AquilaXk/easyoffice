@@ -118,9 +118,13 @@
     const textColumnsUi = host.__EASYOFFICE_CREATE_SHEET_TEXT_COLUMNS__?.({ ...deps, kit, say }) ?? null;
     // 데이터 > 개요 > 부분합 (PD-391).
     const subtotalUi = host.__EASYOFFICE_CREATE_SHEET_SUBTOTAL_UI__?.({ ...deps, kit, say, editAxis: (...args) => editAxis(...args) }) ?? null;
+    const pickList = host.__EASYOFFICE_CREATE_SHEET_PICK_LIST__?.({ ...deps, say }) ?? null;
     const contextMenu = host.__EASYOFFICE_CREATE_SHEET_CONTEXT_MENU__?.({
       ...deps,
       kit,
+      filter,
+      quickSort: (asc) => sortUi.quick(asc),
+      pickList: pickList ?? { open: () => false },
       runStructureAct: (act) => run(act),
       editAxis,
       say,
@@ -760,6 +764,7 @@
       sizeDialogs?.ensureBound();
       textColumnsUi?.ensureBound();
       contextMenu?.bind();
+      pickList?.bind();
       host.__EASYOFFICE_ON_MENUS_CLOSED__?.(document, () => closeMenu(false));
       const viewport = document.getElementById("sheet-viewport");
       viewport?.addEventListener("dblclick", onDblClick);
