@@ -148,7 +148,10 @@ fn breaks_within(breaks: &[u32], limit: u32) -> bool {
 
 /// `breaks` made valid: out of the sheet or repeated entries go, the rest is sorted and cut at the bound.
 pub(crate) fn clean_breaks(breaks: impl IntoIterator<Item = u32>, limit: u32) -> Vec<u32> {
-    let mut out: Vec<u32> = breaks.into_iter().filter(|b| (1..limit).contains(b)).collect();
+    let mut out: Vec<u32> = breaks
+        .into_iter()
+        .filter(|b| (1..limit).contains(b))
+        .collect();
     out.sort_unstable();
     out.dedup();
     out.truncate(MAX_PAGE_BREAKS);

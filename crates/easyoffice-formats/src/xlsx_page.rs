@@ -8,11 +8,11 @@ use std::fmt::Write;
 use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_balanced_elements, write_col_letters,
 };
-use crate::sheet_page::{inches_to_mils, mils_text, PageMargins, PageScale, SheetPage};
 use crate::sheet_page::{
     clean_breaks, MAX_FIT_PAGES, MAX_MARGIN_MILS, MAX_PAGE_BREAKS, MAX_PAPER_CODE, MAX_TITLE_COLS,
     MAX_TITLE_ROWS,
 };
+use crate::sheet_page::{inches_to_mils, mils_text, PageMargins, PageScale, SheetPage};
 use crate::xml_stream::{Attrs, XmlEvent};
 use crate::{CellBox, OoxmlCodec, SheetStyling, XmlSanitizer};
 
@@ -133,7 +133,10 @@ impl PageScan {
             // Only the breaks a user set (`man`) count; the ones the program worked out are its own to recompute. Anything
             // past the bound of the model is left out.
             "brk" if flag(attrs, "man") => {
-                let id = attrs.get("id").as_deref().and_then(|v| v.trim().parse::<u32>().ok());
+                let id = attrs
+                    .get("id")
+                    .as_deref()
+                    .and_then(|v| v.trim().parse::<u32>().ok());
                 match (self.in_breaks, id) {
                     (Some(true), Some(id)) if self.page.row_breaks.len() < MAX_PAGE_BREAKS => {
                         self.page.row_breaks.push(id);
@@ -165,8 +168,10 @@ impl PageScan {
 
     /// The setup read, each part within its bounds (a scale or a page count out of range is the default).
     pub(crate) fn finish(mut self) -> SheetPage {
-        self.page.row_breaks = clean_breaks(std::mem::take(&mut self.page.row_breaks), LAST_ROW + 1);
-        self.page.col_breaks = clean_breaks(std::mem::take(&mut self.page.col_breaks), LAST_COL + 1);
+        self.page.row_breaks =
+            clean_breaks(std::mem::take(&mut self.page.row_breaks), LAST_ROW + 1);
+        self.page.col_breaks =
+            clean_breaks(std::mem::take(&mut self.page.col_breaks), LAST_COL + 1);
         let (width, height) = (self.fit.0.unwrap_or(1), self.fit.1.unwrap_or(1));
         self.page.scale = if self.fit_to_page && width <= MAX_FIT_PAGES && height <= MAX_FIT_PAGES {
             PageScale::Fit { width, height }

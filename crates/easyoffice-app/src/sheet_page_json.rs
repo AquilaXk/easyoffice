@@ -224,7 +224,10 @@ fn page_json(page: &SheetPage) -> String {
     if let Some((a, b)) = page.title_cols {
         put(&mut out, format!("\"titleCols\":[{},{}]", a + 1, b + 1));
     }
-    for (key, breaks) in [("rowBreaks", &page.row_breaks), ("colBreaks", &page.col_breaks)] {
+    for (key, breaks) in [
+        ("rowBreaks", &page.row_breaks),
+        ("colBreaks", &page.col_breaks),
+    ] {
         if !breaks.is_empty() {
             let items: Vec<String> = breaks.iter().map(|b| (b + 1).to_string()).collect();
             put(&mut out, format!("\"{key}\":[{}]", items.join(",")));
@@ -264,7 +267,11 @@ pub(crate) fn moved_page_json(
         }
         breaks
             .iter()
-            .filter_map(|&b| easyoffice_sheet::shift_runs(&[(b, b)], edit).first().map(|run| run.0))
+            .filter_map(|&b| {
+                easyoffice_sheet::shift_runs(&[(b, b)], edit)
+                    .first()
+                    .map(|run| run.0)
+            })
             .collect()
     };
     page.row_breaks = moved(&page.row_breaks, easyoffice_sheet::Axis::Row);
@@ -381,7 +388,10 @@ mod tests {
         ] {
             assert!(read(text).is_err(), "{text}");
         }
-        let many = (2..=1030).map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+        let many = (2..=1030)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
         assert!(read(&format!("{{\"page\":{{\"rowBreaks\":[{many}]}}}}")).is_err());
     }
 

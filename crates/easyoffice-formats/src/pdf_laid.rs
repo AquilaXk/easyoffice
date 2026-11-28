@@ -311,7 +311,11 @@ fn cut(
     while i < sizes.len() {
         let repeated = !groups.is_empty() && title.is_some_and(|(_, b)| i > b);
         let room = budget - if repeated { title_size } else { 0.0 };
-        let stop = breaks.iter().copied().find(|&b| b > i).unwrap_or(sizes.len());
+        let stop = breaks
+            .iter()
+            .copied()
+            .find(|&b| b > i)
+            .unwrap_or(sizes.len());
         let mut j = i + 1;
         while j < sizes.len() && j < stop && prefix[j + 1] - prefix[i] <= room {
             j += 1;

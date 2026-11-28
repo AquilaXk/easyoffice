@@ -153,7 +153,9 @@ test("index.html menu and tooltip shortcut labels map 1:1 onto registered handle
   const bound = new Set(catalog.WORKSPACE_SHORTCUT_BINDINGS.map((b) => b.keys));
   for (const b of catalog.WORKSPACE_SHORTCUT_BINDINGS) {
     // Only the desktop shell (which owns its windows) binds new/close window; see PD-088.
-    assert.ok(!BROWSER_RESERVED_SHORTCUTS.has(b.keys) || b.desktopOnly === true, "registry must not bind reserved key " + b.keys);
+    // Ctrl+H (바꾸기, PD-391) is the browser's history key too: the app is a desktop shell that owns its windows, and on macOS the
+    // binding is the Control key itself (`macControl`).
+    assert.ok(!BROWSER_RESERVED_SHORTCUTS.has(b.keys) || b.desktopOnly === true || b.macControl === true, "registry must not bind reserved key " + b.keys);
     if (SLIDE_SCOPED_BROWSER_KEYS.has(b.keys)) {
       assert.equal(b.module, "SLIDE", b.keys + " may only be taken over inside the slide module");
       assert.equal(b.bareKey, true, b.keys + " must never fire from a text field");
@@ -164,7 +166,7 @@ test("index.html menu and tooltip shortcut labels map 1:1 onto registered handle
   for (const { where, raw } of labels) {
     const norm = normalizeShortcutLabel(catalog, raw);
     assert.ok(!norm.includes(","), `${where} label "${raw}" advertises an unsupported chord sequence`);
-    const desktopOnly = catalog.WORKSPACE_SHORTCUT_BINDINGS.some((b) => b.keys === norm && b.desktopOnly === true);
+    const desktopOnly = catalog.WORKSPACE_SHORTCUT_BINDINGS.some((b) => b.keys === norm && (b.desktopOnly === true || b.macControl === true));
     assert.ok(!BROWSER_RESERVED_SHORTCUTS.has(norm) || desktopOnly, `${where} label "${raw}" is browser-reserved`);
     assert.ok(bound.has(norm), `${where} label "${raw}" (${norm}) has no registered handler`);
   }

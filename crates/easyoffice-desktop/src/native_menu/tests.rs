@@ -572,7 +572,10 @@ fn only_the_spreadsheet_tool_menu_has_the_protection_items_and_they_run_the_page
     // The three sit together between the review items and the command search, as on the page.
     let at = |id: &str| tools.iter().position(|line| *line == id).unwrap();
     assert!(at("tool:review-comment") < at("sheet:protect"));
-    assert!(!tools.contains(&"tool:review-stats"), "word counts are not a spreadsheet command");
+    assert!(
+        !tools.contains(&"tool:review-stats"),
+        "word counts are not a spreadsheet command"
+    );
     assert!(at("sheet:protect") + 1 == at("sheet:protect-workbook"));
     assert!(at("sheet:protect-workbook") + 1 == at("sheet:protect-ranges"));
     assert!(at("sheet:protect-ranges") < at("tool:palette"));

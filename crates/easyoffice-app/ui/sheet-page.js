@@ -381,9 +381,9 @@
       "page-setup": () => Promise.resolve(open()),
       "print-area-set": setPrintArea,
       "print-area-clear": clearPrintArea,
-      "page-break-insert": insertPageBreak,
-      "page-break-remove": removePageBreak,
-      "page-break-reset": resetPageBreaks,
+      "break-insert": insertPageBreak,
+      "break-remove": removePageBreak,
+      "break-reset": resetPageBreaks,
     };
     return { actions, open, apply, bind, setPrintArea, clearPrintArea };
   }

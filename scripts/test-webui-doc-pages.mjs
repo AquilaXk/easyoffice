@@ -377,5 +377,6 @@ test("the 레이아웃 menu of a DOC document has 페이지 나누기 with Ctrl+
   const sheetInput = sheet.document.getElementById("cmd-search-input");
   sheetInput.value = "페이지 나누기";
   sheetInput.dispatchEvent({ type: "input" });
-  assert.equal(sheet.document.querySelectorAll("#cmd-palette-list .cp-item").length, 0);
+  const sheetFound = [...sheet.document.querySelectorAll("#cmd-palette-list .cp-item")].map((li) => li.querySelector(".cp-item-label").textContent);
+  assert.deepEqual(sheetFound, ["페이지 나누기 삽입", "페이지 나누기 제거", "모든 페이지 나누기 원래대로"], "the sheet has its own page break commands (PD-391), not the document's");
 });

@@ -120,7 +120,11 @@ fn only_the_breaks_a_user_set_are_read_and_a_hostile_list_is_bounded() {
         <brk id=\"5\" max=\"16383\" man=\"1\"/><brk id=\"5\" man=\"1\"/><brk id=\"0\" man=\"1\"/><brk id=\"9999999\" man=\"1\"/></rowBreaks>\
         <colBreaks><brk id=\"3\" man=\"1\"/></colBreaks></worksheet>";
     let page = read(&replace_part(&bytes, "xl/worksheets/sheet1.xml", sheet)).remove(0);
-    assert_eq!(page.row_breaks, vec![5, 10], "sorted, once, without the program's own and the ones outside the sheet");
+    assert_eq!(
+        page.row_breaks,
+        vec![5, 10],
+        "sorted, once, without the program's own and the ones outside the sheet"
+    );
     assert_eq!(page.col_breaks, vec![3]);
     let many: String = (1..=3000)
         .map(|i| format!("<brk id=\"{i}\" man=\"1\"/>"))

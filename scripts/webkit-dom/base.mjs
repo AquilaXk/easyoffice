@@ -471,7 +471,7 @@ export const baseSteps = [
     await page.keyboard.press("Escape");
     await page.waitForFunction(() => !document.getElementById("find-dialog")?.open);
 
-    await page.keyboard.press("Control+F2");
+    await page.keyboard.press("Control+H");
     await page.waitForSelector("#find-replacement", { state: "visible" });
     await page.fill("#find-replacement", "고친_오프스크린_값");
     await page.click("#btn-find-replace");
