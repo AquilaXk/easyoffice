@@ -27,19 +27,26 @@
   const inRect = (r, row, col) => row >= r.r1 && row <= r.r2 && col >= r.c1 && col <= r.c2;
   const inAny = (rects, row, col) => rects.some((r) => inRect(r, row, col));
 
-  // Joins cells (`[row, col]` pairs) into rectangles: the runs of each row, then runs with the same columns on the next row.
+  // A cell is one number, `row * STRIDE + col` (the sheet has 16,384 columns), so a list of cells is a flat array of numbers
+  // that sorts by row and then column with one subtraction, and a found cell costs no pair of its own.
+  const STRIDE = 32768;
+  const keyOf = (row, col) => row * STRIDE + col;
+  const rowOfKey = (key) => Math.floor(key / STRIDE);
+
+  // Joins cells (keys of `keyOf`) into rectangles: the runs of each row, then runs with the same columns on the next row.
   function rectsOf(cells) {
-    const sorted = [...cells].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const sorted = cells.slice().sort((a, b) => a - b);
     const open = new Map();
     const done = [];
     let rowStart = 0;
     while (rowStart < sorted.length) {
-      const row = sorted[rowStart][0];
+      const row = rowOfKey(sorted[rowStart]);
+      const rowLimit = (row + 1) * STRIDE;
       let rowEnd = rowStart;
-      while (rowEnd < sorted.length && sorted[rowEnd][0] === row) rowEnd += 1;
+      while (rowEnd < sorted.length && sorted[rowEnd] < rowLimit) rowEnd += 1;
       const runs = [];
       for (let i = rowStart; i < rowEnd; i += 1) {
-        const col = sorted[i][1];
+        const col = sorted[i] - row * STRIDE;
         const last = runs[runs.length - 1];
         if (last && last.c2 === col - 1) last.c2 = col;
         else if (!last || last.c2 !== col) runs.push({ c1: col, c2: col });
@@ -80,25 +87,37 @@
   }
 
   // The region around a cell: the bounding box of the filled cells that touch it, each other or the box (the Ctrl+* region).
+  // The box is the smallest one that holds the cell and has no filled cell on the line just outside it (corners included), so
+  // each side grows as long as its next line holds one, and the sides repeat until none grows. A side that grew one line per
+  // pass made a block of N rows cost N passes of a scan along the whole left and right edge, quadratic in the block's height.
   function regionAround(view, row, col) {
-    let box = { r1: row, c1: col, r2: row, c2: col };
+    const box = { r1: row, c1: col, r2: row, c2: col };
     const filledAt = (r, c) => r >= 1 && c >= 1 && r <= view.maxRows && c <= view.maxCols && view.isFilled(r, c);
+    const rowHolds = (at, from, to) => {
+      for (let c = Math.max(1, from); c <= to; c += 1) if (filledAt(at, c)) return true;
+      return false;
+    };
+    const colHolds = (at, from, to) => {
+      for (let r = Math.max(1, from); r <= to; r += 1) if (filledAt(r, at)) return true;
+      return false;
+    };
     for (let grew = true; grew; ) {
       grew = false;
-      const edges = [
-        [box.r1 - 1, box.c1 - 1, box.c2 + 1, "r1", -1, true],
-        [box.r2 + 1, box.c1 - 1, box.c2 + 1, "r2", 1, true],
-        [box.c1 - 1, box.r1 - 1, box.r2 + 1, "c1", -1, false],
-        [box.c2 + 1, box.r1 - 1, box.r2 + 1, "c2", 1, false],
-      ];
-      for (const [at, from, to, side, dir, isRow] of edges) {
-        for (let i = Math.max(1, from); i <= to; i += 1) {
-          if (isRow ? filledAt(at, i) : filledAt(i, at)) {
-            box = { ...box, [side]: box[side] + dir };
-            grew = true;
-            break;
-          }
-        }
+      while (rowHolds(box.r1 - 1, box.c1 - 1, box.c2 + 1)) {
+        box.r1 -= 1;
+        grew = true;
+      }
+      while (rowHolds(box.r2 + 1, box.c1 - 1, box.c2 + 1)) {
+        box.r2 += 1;
+        grew = true;
+      }
+      while (colHolds(box.c1 - 1, box.r1 - 1, box.r2 + 1)) {
+        box.c1 -= 1;
+        grew = true;
+      }
+      while (colHolds(box.c2 + 1, box.r1 - 1, box.r2 + 1)) {
+        box.c2 += 1;
+        grew = true;
       }
     }
     return box;
@@ -115,8 +134,7 @@
     const keepTypes = new Set(types);
     const cells = [];
     const take = (row, col) => {
-      cells.push([row, col]);
-      return cells.length <= MAX_SCAN_CELLS;
+      cells.push(keyOf(row, col));
     };
 
     if (kind === "region") {
@@ -152,10 +170,10 @@
       for (const r of bounds) {
         for (let row = r.r1; row <= r.r2; row += 1) {
           for (let col = r.c1; col <= r.c2; col += 1) {
-            const key = row * (view.maxCols + 1) + col;
+            const key = keyOf(row, col);
             if (seen.has(key) || view.isFilled(row, col)) continue;
             seen.add(key);
-            take(row, col);
+            cells.push(key);
           }
         }
       }
@@ -163,24 +181,26 @@
     }
 
     // Notes, constants and formulas are looked for in the whole sheet when nothing but one cell is selected.
-    const searched = scope && scope.length > 0 ? scope : [{ r1: 1, c1: 1, r2: view.maxRows, c2: view.maxCols }];
-    const seen = new Set();
+    const searched = scope && scope.length > 0 ? scope : null;
+    const wantFormula = kind === "formulas";
+    // Every entry of the sheet is visited once; only the notes search visits a cell twice (as an entry and as a note).
+    const seen = kind === "notes" ? new Set() : null;
     const visit = (row, col, entry) => {
-      if (!inAny(searched, row, col)) return;
-      const key = row * (view.maxCols + 1) + col;
-      if (seen.has(key)) return;
-      seen.add(key);
-      if (kind === "notes") {
+      if (searched && !inAny(searched, row, col)) return;
+      if (seen) {
+        const key = keyOf(row, col);
+        if (seen.has(key)) return;
+        seen.add(key);
         if (view.hasNote(row, col)) take(row, col);
         return;
       }
       if (!isFilled(entry)) return;
       const isFormula = Boolean(entry.formula);
-      if (isFormula !== (kind === "formulas")) return;
+      if (isFormula !== wantFormula) return;
       if (keepTypes.has(valueTypeOf(entry, view.inferTag))) take(row, col);
     };
     view.forEachEntry(visit);
-    if (kind === "notes") view.forEachNote?.((row, col) => visit(row, col, null));
+    if (seen) view.forEachNote?.((row, col) => visit(row, col, null));
     return rectsResult(cells);
   }
 

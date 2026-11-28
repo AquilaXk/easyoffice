@@ -132,6 +132,8 @@
       const [c2, r2] = m[4] ? [colIndex(m[4].toUpperCase()), Number(m[5])] : [c1, r1];
       if (overlaps(Math.min(r1, r2), Math.min(c1, c2), Math.max(r1, r2), Math.max(c1, c2))) return true;
     }
+    // Whole column and whole row references (`A:A`, `2:5`) hold a colon; most formulas have none.
+    if (!source.includes(":")) return false;
     for (const m of source.matchAll(COL_REF)) {
       if (!same(m[1])) continue;
       const [a, b] = [colIndex(m[2].toUpperCase()), colIndex(m[3].toUpperCase())];
