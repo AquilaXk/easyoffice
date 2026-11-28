@@ -106,6 +106,12 @@
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="clip-copy" role="menuitem" tabindex="-1"><span class="md-label">복사하기</span><span class="md-shortcut">Ctrl+C</span></div>
               <div class="md-item" data-kinds="DOC PAGES SHEET SLIDE BASE BOARD START CONV" data-studio-menu-cmd="clip-paste" role="menuitem" tabindex="-1"><span class="md-label">붙여넣기</span><span class="md-shortcut">Ctrl+V</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="clip-paste" role="menuitem" tabindex="-1"><span class="md-label">붙이기</span><span class="md-shortcut">Ctrl+V</span></div>
+              <div class="md-sub" data-kinds="DOC" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">붙여넣기 옵션</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="붙여넣기 옵션">
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="paste-text-only" role="menuitem" tabindex="-1"><span class="md-label">텍스트만 유지</span></div>
+                </div>
+              </div>
               <div class="md-item" data-kinds="SHEET" data-sheet-paste="special" role="menuitem" tabindex="-1"><span class="md-label">선택하여 붙여넣기…</span><span class="md-shortcut">Ctrl+Alt+V</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="DOC PAGES HWP SHEET SLIDE BASE BOARD PDF" data-studio-menu-cmd="find" role="menuitem" tabindex="-1"><span class="md-label">찾기</span><span class="md-shortcut">Ctrl+F</span></div>
@@ -179,7 +185,7 @@
               <div class="md-sub" data-kinds="DOC" role="menuitem" aria-haspopup="menu" tabindex="-1">
                 <span class="md-label">기호</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
                 <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="기호">
-                  <div class="md-item" data-studio-menu-cmd="mod-symbol" role="menuitem" tabindex="-1"><span class="md-label">기타 기호…</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="mod-symbol" role="menuitem" tabindex="-1"><span class="md-label">기타 기호…</span></div>
                 </div>
               </div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="mod-symbol" role="menuitem" tabindex="-1"><span class="md-label">문자표</span></div>
@@ -246,6 +252,8 @@
               <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="home-subscript" role="menuitem" tabindex="-1"><span class="md-label">아래 첨자</span><span class="md-shortcut">Ctrl+=</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="font-dialog" role="menuitem" tabindex="-1"><span class="md-label">글꼴…</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="para-dialog" role="menuitem" tabindex="-1"><span class="md-label">단락…</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="format-painter" role="menuitem" tabindex="-1"><span class="md-label">서식 복사</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="format-clear" role="menuitem" tabindex="-1"><span class="md-label">모든 서식 지우기</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="home-style" role="menuitem" tabindex="-1"><span class="md-label">스타일 적용</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="para-shape" role="menuitem" tabindex="-1"><span class="md-label">양쪽 맞춤</span></div>
@@ -3540,6 +3548,7 @@
     <script src="./doc-status-text.js"></script>
     <script src="./doc-word-count.js"></script>
     <script src="./doc-word-commands.js"></script>
+    <script src="./doc-format-tools.js"></script>
     <script src="./doc-dialogs-ext.js"></script>
     <script src="./workspace-tools.js"></script>
     <script src="./workspace-panels.js"></script>

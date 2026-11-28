@@ -82,6 +82,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/doc-status-text.js",
   "../crates/easyoffice-app/ui/doc-word-count.js",
   "../crates/easyoffice-app/ui/doc-word-commands.js",
+  "../crates/easyoffice-app/ui/doc-format-tools.js",
   "../crates/easyoffice-app/ui/doc-dialogs-ext.js",
   "../crates/easyoffice-app/ui/doc-notes.js",
   "../crates/easyoffice-app/ui/doc-notes-ui.js",

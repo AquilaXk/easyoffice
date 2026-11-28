@@ -29,6 +29,7 @@
   const MSG_TEXT_TOO_LARGE = "붙여넣을 내용이 너무 큽니다";
   const MSG_NO_CONTENT = "붙일 클립보드 내용이 없습니다";
   const MSG_DONE = "붙여넣기 완료";
+  const MSG_TEXT_ONLY_DONE = "텍스트만 유지하고 붙여넣기 완료";
 
   const tagOf = (el) => String(el?.tagName || "").toUpperCase();
   const isElement = (node) => node?.nodeType === 1;
@@ -731,11 +732,31 @@
       return pasteText(text, MSG_DONE, range);
     }
 
-    function bind() {
-      editor()?.addEventListener("paste", onPaste);
+    // 붙여넣기 옵션 > 텍스트만 유지: the clipboard's plain text only, in the look of the place it goes to.
+    async function pasteTextOnly(fallbackRange, fallbackReadText) {
+      const root = editor();
+      if (!root || !isDocModule()) return false;
+      const { range } = activeEditorRange(root, fallbackRange);
+      let text = "";
+      try {
+        text = (await env.navigator?.clipboard?.readText?.()) ?? "";
+      } catch {
+        // Permission denied: the caller's reader (the system clipboard of the shell) is the fallback.
+      }
+      if (!text && typeof fallbackReadText === "function") text = await fallbackReadText();
+      if (!text) {
+        setFeedback?.(MSG_NO_CONTENT);
+        return false;
+      }
+      return pasteText(text, MSG_TEXT_ONLY_DONE, range);
     }
 
-    return { bind, onPaste, insertModel, pasteFromClipboard };
+    function bind() {
+      editor()?.addEventListener("paste", onPaste);
+      host.__EASYOFFICE_DOC_WORD_COMMANDS__?.register("paste-text-only", () => void pasteTextOnly(null, null));
+    }
+
+    return { bind, onPaste, insertModel, pasteFromClipboard, pasteTextOnly };
   }
 
   host.__EASYOFFICE_CREATE_DOC_PASTE__ = createDocPaste;
