@@ -31,6 +31,8 @@ mod legacy_ole2_codec;
 pub mod native_package;
 pub mod odf_hwpx_codecs;
 mod odf_package;
+mod odp_ext_read;
+mod odp_ext_write;
 pub mod odp_rich;
 mod odp_rich_read;
 mod odt_notes_writer;
@@ -58,6 +60,8 @@ pub mod pdf_slide;
 mod pdf_stream_parser;
 mod pdf_text_wrap;
 mod pdf_writer;
+mod pptx_ext_read;
+mod pptx_ext_write;
 mod pptx_master;
 pub mod pptx_rich;
 mod pptx_rich_read;
@@ -98,6 +102,7 @@ mod rich_rtf_table;
 mod rich_rtf_writer;
 mod rich_run_writers;
 pub mod rich_slide;
+pub mod rich_slide_ext;
 mod rich_table;
 mod rich_table_cells;
 mod rich_table_style;
@@ -186,6 +191,7 @@ pub use rich_notes::{
 };
 pub use rich_readers::{DecodedContent, DecodedDocument, DecodedSlide};
 pub use rich_slide::*;
+pub use rich_slide_ext::*;
 pub use rich_table::{
     CellMerge, CellSpan, RichTable, SpanMap, TableCellLink, MAX_MERGE_SPAN, MAX_TABLE_LINKS,
 };

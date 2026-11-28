@@ -159,6 +159,28 @@ pub(crate) fn two_column_placeholder_specs(
     )
 }
 
+/// Date, footer and slide-number placeholders (bottom row of a 16:9 master, scaled to the slide size).
+pub(crate) fn footer_placeholder_specs(emu_w: u64, emu_h: u64) -> [PlaceholderSpec; 3] {
+    let row = |x| EmuBox::new(x, 6_356_350, 2_743_200, 365_125).scaled(emu_w, emu_h);
+    [
+        PlaceholderSpec {
+            name: "Date Placeholder 1",
+            ph_xml: "<p:ph type=\"dt\" sz=\"half\" idx=\"10\"/>",
+            emu: row(838_200),
+        },
+        PlaceholderSpec {
+            name: "Footer Placeholder 2",
+            ph_xml: "<p:ph type=\"ftr\" sz=\"quarter\" idx=\"11\"/>",
+            emu: EmuBox::new(4_038_600, 6_356_350, 4_114_800, 365_125).scaled(emu_w, emu_h),
+        },
+        PlaceholderSpec {
+            name: "Slide Number Placeholder 3",
+            ph_xml: "<p:ph type=\"sldNum\" sz=\"quarter\" idx=\"12\"/>",
+            emu: row(8_610_600),
+        },
+    ]
+}
+
 /// Returns `(emit_title, emit_body)` visibility flags for slide placeholders.
 #[inline]
 pub(crate) fn slide_placeholder_visibility(slide: &RichSlide) -> (bool, bool) {

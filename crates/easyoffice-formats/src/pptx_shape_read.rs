@@ -28,6 +28,12 @@ pub(crate) enum ParsedSp {
         paragraphs: Vec<String>,
     },
     LooseText(Vec<String>),
+    /// Date, footer or slide-number placeholder; `field` is the type of its `a:fld`, when it has one.
+    Footer {
+        ph_type: String,
+        text: String,
+        field: Option<String>,
+    },
     Element(SlideElement),
 }
 
@@ -246,6 +252,7 @@ pub(crate) fn parse_sp(
     let (mut paras, mut cur_p) = (Vec::new(), String::new());
     let (mut d, mut end_para_d, mut rpr_d, mut rpr_is_def) = (0usize, None, None, false);
     let (mut in_p, mut in_t, mut saw_run) = (false, false, false);
+    let mut fld_type: Option<String> = None;
     let mut st = SpStyleScan::default();
 
     for ev in events {
@@ -282,7 +289,12 @@ pub(crate) fn parse_sp(
                         saw_run = false;
                         cur_p.clear();
                     }
-                    "r" | "fld" if in_p => saw_run = true,
+                    "r" | "fld" if in_p => {
+                        saw_run = true;
+                        if ln == "fld" && fld_type.is_none() {
+                            fld_type = attr(attrs, "type").map(|s| s.into_owned());
+                        }
+                    }
                     "pPr" if in_p && align.is_none() => {
                         align = attr(attrs, "algn").and_then(|a| SlideTextAlign::parse(&a));
                     }
@@ -352,6 +364,13 @@ pub(crate) fn parse_sp(
 
     if has_ph && !tx_box {
         let _ = &ph_idx;
+        if let Some(t @ ("dt" | "ftr" | "sldNum")) = ph_type.as_deref() {
+            return Ok(ParsedSp::Footer {
+                ph_type: t.to_string(),
+                text: paras.join("\n"),
+                field: fld_type,
+            });
+        }
         if is_chrome_ph(ph_type.as_deref()) {
             return Ok(ParsedSp::Ignore);
         }

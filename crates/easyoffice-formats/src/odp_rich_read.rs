@@ -6,6 +6,11 @@ use crate::decode_budget::DecodeBudget;
 use crate::odf_package::{
     extract_odp_rich_parts, parse_odp_aspect, parse_odp_chart_xml, parse_odp_layout,
 };
+use crate::odp_ext_read::{
+    apply_footer_frame, parse_timeline, parse_transform, place_from_transform, scan_para,
+    OdpExtStyles,
+};
+use crate::pptx_ext_read::{finish_ext, ExtAccum, Member, PendingGroup};
 use crate::rich_document::normalize_hex_color;
 use crate::rich_image::safe_package_path;
 use crate::rich_slide::{
@@ -14,11 +19,13 @@ use crate::rich_slide::{
     DEFAULT_SLIDE_FONT_PT, DEFAULT_SLIDE_STROKE_PT, MAX_SLIDES_PER_DECK, MAX_SLIDE_FONT_PT,
     MAX_SLIDE_STROKE_PT, MAX_SLIDE_TABLE_COLS, MAX_SLIDE_TABLE_ROWS, MIN_SLIDE_FONT_PT,
 };
+use crate::rich_slide_ext::{ElementFx, SlideOutline};
 use crate::rtf_xml_helpers::{extract_attr, extract_tag_bodies};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{EasyOfficeError, RichImage, XmlSanitizer, ZipArchiveEntry};
 
 const MAX_ODP_XML_EVENTS: usize = 512_000;
+const MAX_GROUP_DEPTH: usize = 16;
 
 #[inline]
 fn loc(name: &str) -> &str {
@@ -46,17 +53,25 @@ fn parse_odp_rect(
     sx: f64,
     sy: f64,
 ) -> Result<Option<SlideBox>, EasyOfficeError> {
-    let (Some(xs), Some(ys), Some(ws), Some(hs)) = (
+    let (xs, ys) = (
         attr(attrs, "svg:x").or_else(|| attr(attrs, "x")),
         attr(attrs, "svg:y").or_else(|| attr(attrs, "y")),
+    );
+    let transform = parse_transform(attrs);
+    let (Some(ws), Some(hs)) = (
         attr(attrs, "svg:width").or_else(|| attr(attrs, "width")),
         attr(attrs, "svg:height").or_else(|| attr(attrs, "height")),
     ) else {
         return Ok(None);
     };
+    if (xs.is_none() || ys.is_none()) && transform.as_ref().is_none_or(|t| t.translate.is_none()) {
+        return Ok(None);
+    }
+    let corner =
+        |s: &Option<std::borrow::Cow<'_, str>>| s.as_deref().map_or(Some(0.0), parse_length_pt);
     let (Some(x), Some(y), Some(w), Some(h)) = (
-        parse_length_pt(&xs),
-        parse_length_pt(&ys),
+        corner(&xs),
+        corner(&ys),
         parse_length_pt(&ws),
         parse_length_pt(&hs),
     ) else {
@@ -64,7 +79,10 @@ fn parse_odp_rect(
             "ODP 개체 좌표/크기 단위 형식이 올바르지 않습니다.".to_string(),
         ));
     };
-    let raw = SlideBox { x, y, w, h };
+    let mut raw = SlideBox { x, y, w, h };
+    if let Some(t) = &transform {
+        raw = place_from_transform(raw, xs.is_some() && ys.is_some(), t);
+    }
     raw.validate()?;
     let scaled = raw.scaled(sx, sy);
     scaled.validate()?;
@@ -77,6 +95,7 @@ struct OdpStyleMaps {
     graphics: HashMap<String, OdfGraphicStyle>,
     paras: HashMap<String, SlideTextAlign>,
     texts: HashMap<String, OdfTextStyle>,
+    x: OdpExtStyles,
 }
 
 fn collect_odp_styles(sub: &[XmlEvent<'_>], maps: &mut OdpStyleMaps) {
@@ -238,8 +257,16 @@ fn parse_text_runs(
 }
 
 enum OdpItem {
-    Placeholder { is_title: bool, paras: Vec<String> },
+    Placeholder {
+        is_title: bool,
+        paras: Vec<String>,
+    },
     Loose(Vec<String>),
+    /// Date, footer or page-number frame (`presentation:class`).
+    Footer {
+        class: String,
+        paras: Vec<String>,
+    },
     Element(SlideElement),
 }
 
@@ -411,6 +438,12 @@ fn parse_odp_frame(
     }
     if has_tb {
         let (paras, align, ts) = parse_text_runs(events, ctx.styles);
+        if let Some(class @ ("date-time" | "footer" | "page-number")) = ph_class.as_deref() {
+            return Ok(Some(OdpItem::Footer {
+                class: class.to_string(),
+                paras,
+            }));
+        }
         if is_layout || rect_opt.is_none() {
             if is_layout {
                 let is_title = matches!(ph_class.as_deref(), Some("title" | "ctrTitle"));
@@ -499,6 +532,202 @@ fn parse_odp_shape(
     }))
 }
 
+/// Elements, text and slide extensions gathered from one page.
+#[derive(Default)]
+struct PageAcc {
+    title_parts: Vec<String>,
+    bullets: Vec<String>,
+    loose: Vec<String>,
+    els: Vec<SlideElement>,
+    notes: String,
+    total_el: usize,
+    total_img_b: usize,
+    x: ExtAccum,
+}
+
+/// Effects an element keeps, read from its style, transform and geometry attributes (tables and charts
+/// keep none), with the id animations point at.
+fn element_fx(
+    sub: &[XmlEvent<'_>],
+    el: &SlideElement,
+    ctx: &OdpPageCtx<'_>,
+) -> (ElementFx, Option<String>) {
+    let Some(XmlEvent::Start { attrs, .. }) = sub.first() else {
+        return (ElementFx::default(), None);
+    };
+    let odf_id = attr(attrs, "draw:id")
+        .or_else(|| attr(attrs, "xml:id"))
+        .map(|s| s.into_owned());
+    let style = attr(attrs, "draw:style-name");
+    let g = ctx.styles.x.graphic(style.as_deref());
+    let line = style
+        .as_deref()
+        .and_then(|n| ctx.styles.graphics.get(n))
+        .and_then(|s| {
+            s.stroke.clone().map(|color| SlideOutline {
+                color,
+                width_pt: s.stroke_width_pt.unwrap_or(0.75),
+            })
+        });
+    let mut fx = ElementFx {
+        rotation_deg: parse_transform(attrs).map_or(0.0, |t| t.rotation_deg),
+        dash: ctx.styles.x.dash_of(&g),
+        shadow: g.shadow.clone(),
+        ..ElementFx::default()
+    };
+    match el {
+        SlideElement::Shape { .. } => {
+            let mirrored = |key: &str| {
+                sub.iter().any(|e| matches!(e, XmlEvent::Start { name, attrs }
+                    if loc(name) == "enhanced-geometry" && attr(attrs, key).is_some_and(|v| v == "true")))
+            };
+            fx.flip_h = mirrored("draw:mirror-horizontal");
+            fx.flip_v = mirrored("draw:mirror-vertical");
+            fx.para = scan_para(sub, &ctx.styles.x);
+        }
+        SlideElement::TextBox { .. } => {
+            fx.outline = line;
+            fx.para = scan_para(sub, &ctx.styles.x);
+        }
+        SlideElement::Image { .. } => {
+            (fx.flip_h, fx.flip_v) = g.flip;
+            fx.outline = line;
+        }
+        SlideElement::Table { .. } | SlideElement::Chart { .. } => {
+            return (ElementFx::default(), odf_id)
+        }
+    }
+    (fx, odf_id)
+}
+
+fn walk_children(
+    inner: &[XmlEvent<'_>],
+    ctx: &mut OdpPageCtx<'_>,
+    acc: &mut PageAcc,
+    depth: usize,
+) -> Result<(), EasyOfficeError> {
+    let mut i = 0usize;
+    while i < inner.len() {
+        let XmlEvent::Start { name, .. } = &inner[i] else {
+            i += 1;
+            continue;
+        };
+        let (tag, start) = (loc(name), i);
+        let mut open = 1usize;
+        i += 1;
+        while i < inner.len() && open > 0 {
+            match &inner[i] {
+                XmlEvent::Start { .. } => open += 1,
+                XmlEvent::End(_) => open -= 1,
+                XmlEvent::Text(_) => {}
+            }
+            i += 1;
+        }
+        let sub = &inner[start..i];
+        match tag {
+            "notes" => {
+                let (np, _, _) = parse_text_runs(sub, ctx.styles);
+                let nt = np
+                    .into_iter()
+                    .filter(|s| !s.trim().is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if !nt.is_empty() && acc.notes.is_empty() {
+                    acc.notes = nt;
+                }
+            }
+            "par" => parse_timeline(sub, &mut acc.x.anims)?,
+            "g" => walk_group(sub, ctx, acc, depth)?,
+            _ => place_shape(tag, sub, ctx, acc)?,
+        }
+    }
+    Ok(())
+}
+
+fn place_shape(
+    tag: &str,
+    sub: &[XmlEvent<'_>],
+    ctx: &mut OdpPageCtx<'_>,
+    acc: &mut PageAcc,
+) -> Result<(), EasyOfficeError> {
+    let fid = format!("el-{}", acc.els.len() + 1);
+    let maybe = match tag {
+        "frame" => match parse_odp_frame(sub, &fid, ctx)? {
+            Some(OdpItem::Placeholder { is_title, paras }) => {
+                let ne = paras.into_iter().filter(|s| !s.is_empty());
+                if is_title {
+                    acc.title_parts.extend(ne)
+                } else {
+                    acc.bullets.extend(ne)
+                }
+                None
+            }
+            Some(OdpItem::Loose(p)) => {
+                acc.loose.extend(p.into_iter().filter(|s| !s.is_empty()));
+                None
+            }
+            Some(OdpItem::Footer { class, paras }) => {
+                apply_footer_frame(&mut acc.x, &class, &paras, sub);
+                None
+            }
+            Some(OdpItem::Element(el)) => Some(el),
+            None => None,
+        },
+        "custom-shape" | "rect" | "ellipse" => parse_odp_shape(tag, sub, &fid, ctx)?,
+        _ => None,
+    };
+    if let Some(el) = maybe {
+        let (fx, odf_id) = element_fx(sub, &el, ctx);
+        push_checked_slide_element(el, &mut acc.els, &mut acc.total_el, &mut acc.total_img_b)?;
+        let idx = acc.els.len() - 1;
+        if !fx.is_default() {
+            acc.x.fx.push((idx, fx));
+        }
+        if let Some(id) = odf_id {
+            acc.x.spids.insert(id, Member::El(idx));
+        }
+        acc.x.members.push(Member::El(idx));
+    }
+    Ok(())
+}
+
+/// A `draw:g` group: its children are read in place and the group is kept when two or more survive.
+fn walk_group(
+    sub: &[XmlEvent<'_>],
+    ctx: &mut OdpPageCtx<'_>,
+    acc: &mut PageAcc,
+    depth: usize,
+) -> Result<(), EasyOfficeError> {
+    if depth >= MAX_GROUP_DEPTH {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+            "ODP 그룹 중첩 깊이가 상한({MAX_GROUP_DEPTH})을 초과했습니다."
+        )));
+    }
+    let mark = acc.x.members.len();
+    if let Some(inner) = sub.get(1..sub.len().saturating_sub(1)) {
+        walk_children(inner, ctx, acc, depth + 1)?;
+    }
+    let members: Vec<Member> = acc.x.members.drain(mark..).collect();
+    if members.len() < 2 {
+        acc.x.members.extend(members);
+        return Ok(());
+    }
+    let Some(XmlEvent::Start { attrs, .. }) = sub.first() else {
+        return Ok(());
+    };
+    let name = attr(attrs, "draw:name").map(|s| s.into_owned());
+    let odf_id = attr(attrs, "draw:id")
+        .or_else(|| attr(attrs, "xml:id"))
+        .map(|s| s.into_owned());
+    acc.x.groups.push(PendingGroup { name, members });
+    let member = Member::Group(acc.x.groups.len() - 1);
+    if let Some(id) = odf_id {
+        acc.x.spids.insert(id, member);
+    }
+    acc.x.members.push(member);
+    Ok(())
+}
+
 /// Unpacks an ODF 1.3 Presentation (`.odp`) package into a [`RichSlideDeck`].
 pub fn unpack_odp_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> {
     let (entries, content_xml, meta_xml, styles_xml) = extract_odp_rich_parts(bytes)?;
@@ -521,8 +750,19 @@ pub fn unpack_odp_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> {
     let mut budget = DecodeBudget::new();
     budget.charge(content_xml.len(), "ODP content.xml")?;
 
-    let mut reader = XmlReader::with_budget(&content_xml, MAX_ODP_XML_EVENTS);
     let mut style_maps = OdpStyleMaps::default();
+    if let Some(styles) = styles_xml.as_deref() {
+        budget.charge(styles.len(), "ODP styles.xml")?;
+        let mut sr = XmlReader::with_budget(styles, MAX_ODP_XML_EVENTS);
+        while let Some(ev) = sr.next_event()? {
+            if matches!(&ev, XmlEvent::Start { name, .. } if matches!(loc(name), "styles" | "automatic-styles"))
+            {
+                let sub = sr.collect_subtree(ev)?;
+                style_maps.x.collect(&sub);
+            }
+        }
+    }
+    let mut reader = XmlReader::with_budget(&content_xml, MAX_ODP_XML_EVENTS);
     let (mut media_cache, mut total_el, mut total_img_b) = (HashMap::new(), 0usize, 0usize);
     let mut slides = Vec::new();
 
@@ -533,6 +773,7 @@ pub fn unpack_odp_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> {
                 "automatic-styles" => {
                     let sub = reader.collect_subtree(ev)?;
                     collect_odp_styles(&sub, &mut style_maps);
+                    style_maps.x.collect(&sub);
                 }
                 "page" => {
                     if slides.len() >= MAX_SLIDES_PER_DECK {
@@ -551,7 +792,7 @@ pub fn unpack_odp_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> {
                         .get(&page_style)
                         .copied()
                         .unwrap_or(SlideTransition::None);
-                    let mut notes = attr(&attrs_copy, "notes")
+                    let notes = attr(&attrs_copy, "notes")
                         .map(|s| XmlSanitizer::unescape(&s))
                         .unwrap_or_default();
                     let attr_name = attr(&attrs_copy, "draw:name")
@@ -566,89 +807,41 @@ pub fn unpack_odp_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> {
                         media_cache: &mut media_cache,
                         budget: &mut budget,
                     };
-                    let (mut title_parts, mut bullets, mut loose, mut els) =
-                        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-
-                    let mut i = 1usize;
-                    while i + 1 < page_events.len() {
-                        if let XmlEvent::Start { name: cn, .. } = &page_events[i] {
-                            let tag = loc(cn);
-                            let start = i;
-                            let mut depth = 1usize;
-                            i += 1;
-                            while i < page_events.len() && depth > 0 {
-                                match &page_events[i] {
-                                    XmlEvent::Start { .. } => depth += 1,
-                                    XmlEvent::End(_) => depth -= 1,
-                                    _ => {}
-                                }
-                                i += 1;
-                            }
-                            let sub = &page_events[start..i];
-                            if tag == "notes" {
-                                let (np, _, _) = parse_text_runs(sub, ctx.styles);
-                                let nt = np
-                                    .into_iter()
-                                    .filter(|s| !s.trim().is_empty())
-                                    .collect::<Vec<_>>()
-                                    .join("\n");
-                                if !nt.is_empty() && notes.is_empty() {
-                                    notes = nt;
-                                }
-                                continue;
-                            }
-                            let fid = format!("el-{}", els.len() + 1);
-                            let maybe = match tag {
-                                "frame" => match parse_odp_frame(sub, &fid, &mut ctx)? {
-                                    Some(OdpItem::Placeholder { is_title, paras }) => {
-                                        let ne = paras.into_iter().filter(|s| !s.is_empty());
-                                        if is_title {
-                                            title_parts.extend(ne)
-                                        } else {
-                                            bullets.extend(ne)
-                                        }
-                                        None
-                                    }
-                                    Some(OdpItem::Loose(p)) => {
-                                        loose.extend(p.into_iter().filter(|s| !s.is_empty()));
-                                        None
-                                    }
-                                    Some(OdpItem::Element(el)) => Some(el),
-                                    None => None,
-                                },
-                                "custom-shape" | "rect" | "ellipse" => {
-                                    parse_odp_shape(tag, sub, &fid, &mut ctx)?
-                                }
-                                _ => None,
-                            };
-                            if let Some(el) = maybe {
-                                push_checked_slide_element(
-                                    el,
-                                    &mut els,
-                                    &mut total_el,
-                                    &mut total_img_b,
-                                )?;
-                            }
-                        } else {
-                            i += 1;
-                        }
+                    let mut acc = PageAcc {
+                        notes,
+                        total_el,
+                        total_img_b,
+                        ..PageAcc::default()
+                    };
+                    if let Some(inner) = page_events.get(1..page_events.len().saturating_sub(1)) {
+                        walk_children(inner, &mut ctx, &mut acc, 0)?;
                     }
-                    ctx.budget.charge(notes.len(), "ODP 발표자 노트")?;
-                    let s_title = if !title_parts.is_empty() {
-                        title_parts.join("\n")
-                    } else if els.is_empty() {
+                    (total_el, total_img_b) = (acc.total_el, acc.total_img_b);
+                    ctx.budget.charge(acc.notes.len(), "ODP 발표자 노트")?;
+                    let page = style_maps.x.page(&page_style);
+                    let background = style_maps.x.background(&page, |href| {
+                        let path = safe_package_path(href)?;
+                        let entry = entry_map.get(path.as_str())?;
+                        RichImage::new(entry.data.clone(), "").ok()
+                    });
+                    acc.x.background = background;
+                    let s_title = if !acc.title_parts.is_empty() {
+                        acc.title_parts.join("\n")
+                    } else if acc.els.is_empty() {
                         attr_name
                     } else {
                         String::new()
                     };
-                    bullets.extend(loose);
+                    acc.bullets.extend(acc.loose);
+                    let ext = finish_ext(acc.x, &mut acc.els, page.hidden)?;
                     slides.push(RichSlide {
                         title: s_title,
-                        bullets,
-                        notes,
+                        bullets: acc.bullets,
+                        notes: acc.notes,
                         layout,
                         transition,
-                        elements: els,
+                        elements: acc.els,
+                        ext,
                     });
                 }
                 _ => {}

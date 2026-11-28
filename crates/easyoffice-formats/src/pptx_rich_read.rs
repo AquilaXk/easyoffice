@@ -8,6 +8,10 @@ use crate::ooxml_presentation::{
     extract_notes_xml_text, parse_slide_chart_xml, parse_slide_size_aspect, read_ppt_rels,
     resolve_ppt, utf8_entry, SLIDESHOW_MAIN_CT,
 };
+use crate::pptx_ext_read::{
+    apply_footer_ph, finish_ext, parse_bg, parse_timing, scan_fx, transform_group, ExtAccum,
+    Member, PendingGroup,
+};
 use crate::pptx_shape_read::{parse_cxn_sp, parse_sp, ParsedSp};
 use crate::pptx_theme_cache::PptxThemeCache;
 use crate::pptx_theme_color::{ColorSpecBuilder, PptxClrMap, PptxThemePalette};
@@ -15,6 +19,7 @@ use crate::rich_slide::{
     emu_to_pt, normalize_table_rows, push_checked_slide_element, RichSlide, RichSlideDeck,
     SlideBox, SlideElement, SlideTransition,
 };
+use crate::rich_slide_ext::ElementFx;
 use crate::rtf_xml_helpers::{extract_attr, extract_attr_from_fragment, extract_balanced_elements};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
@@ -72,6 +77,9 @@ pub(crate) struct GroupFrame {
     ch_y: f64,
     ch_w: f64,
     ch_h: f64,
+    rot_deg: f64,
+    flip_h: bool,
+    flip_v: bool,
 }
 
 impl GroupFrame {
@@ -122,9 +130,10 @@ struct SlideAccum {
     els: Vec<SlideElement>,
     total_el: usize,
     total_img_b: usize,
+    x: ExtAccum,
 }
 
-fn resolve_rel_entry<'a>(
+pub(crate) fn resolve_rel_entry<'a>(
     rid: &str,
     kind: &str,
     ctx: &SlideCtx<'a>,
@@ -183,10 +192,19 @@ pub(crate) fn parse_xfrm(
 
 fn parse_grp_frame(events: &[XmlEvent<'_>]) -> Result<GroupFrame, EasyOfficeError> {
     let (mut off, mut ext, mut ch_off, mut ch_ext, mut in_xfrm) = (None, None, None, None, false);
+    let (mut rot_deg, mut flip_h, mut flip_v) = (0.0, false, false);
     for ev in events {
         match ev {
             XmlEvent::Start { name, attrs } => match loc(name) {
-                "xfrm" => in_xfrm = true,
+                "xfrm" => {
+                    in_xfrm = true;
+                    let turn = attr(attrs, "rot").and_then(|v| v.trim().parse::<f64>().ok());
+                    rot_deg = turn
+                        .filter(|v| v.is_finite())
+                        .map_or(0.0, |v| (v / 60_000.0).rem_euclid(360.0));
+                    flip_h = attr(attrs, "flipH").is_some_and(|v| v == "1" || v == "true");
+                    flip_v = attr(attrs, "flipV").is_some_and(|v| v == "1" || v == "true");
+                }
                 "off" if in_xfrm && off.is_none() => off = parse_pt_pair(attrs, "x", "y")?,
                 "ext" if in_xfrm && ext.is_none() => ext = parse_pt_pair(attrs, "cx", "cy")?,
                 "chOff" if in_xfrm && ch_off.is_none() => ch_off = parse_pt_pair(attrs, "x", "y")?,
@@ -217,6 +235,9 @@ fn parse_grp_frame(events: &[XmlEvent<'_>]) -> Result<GroupFrame, EasyOfficeErro
         ch_y,
         ch_w,
         ch_h,
+        rot_deg,
+        flip_h,
+        flip_v,
     })
 }
 
@@ -425,6 +446,14 @@ fn dispatch_shape_subtree(
                 acc.loose.extend(p.into_iter().filter(|s| !s.is_empty()));
                 None
             }
+            ParsedSp::Footer {
+                ph_type,
+                text,
+                field,
+            } => {
+                apply_footer_ph(&mut acc.x.footer, &ph_type, &text, field.as_deref());
+                None
+            }
             ParsedSp::Element(el) => Some(el),
         },
         "cxnSp" => parse_cxn_sp(sub, &fid, ctx, groups)?,
@@ -433,9 +462,47 @@ fn dispatch_shape_subtree(
         _ => None,
     };
     if let Some(el) = maybe {
+        let kind = el_fx_kind(&el);
         push_checked_slide_element(el, &mut acc.els, &mut acc.total_el, &mut acc.total_img_b)?;
+        let idx = acc.els.len() - 1;
+        let scan = scan_fx(sub, ctx.palette, ctx.clr_map);
+        let mut fx = scan.fx;
+        match kind {
+            FxKind::None => fx = ElementFx::default(),
+            FxKind::Shape => fx.outline = None,
+            FxKind::Overlay => fx.outline = scan.line,
+            FxKind::Picture => {
+                fx.outline = scan.line;
+                fx.para = None;
+            }
+        }
+        if !fx.is_default() {
+            acc.x.fx.push((idx, fx));
+        }
+        if let Some(spid) = scan.spid {
+            acc.x.spids.insert(spid, Member::El(idx));
+        }
+        acc.x.members.push(Member::El(idx));
     }
     Ok(())
+}
+
+/// Which effects an element kind keeps: its stroke is on the element for shapes, in the overlay for text
+/// boxes and pictures; tables and charts take none.
+enum FxKind {
+    None,
+    Shape,
+    Overlay,
+    Picture,
+}
+
+fn el_fx_kind(el: &SlideElement) -> FxKind {
+    match el {
+        SlideElement::Shape { .. } => FxKind::Shape,
+        SlideElement::TextBox { .. } => FxKind::Overlay,
+        SlideElement::Image { .. } => FxKind::Picture,
+        SlideElement::Table { .. } | SlideElement::Chart { .. } => FxKind::None,
+    }
 }
 
 fn walk_grp_sp(
@@ -481,7 +548,9 @@ fn walk_grp_sp(
         }
     }
 
-    groups.push(frame.unwrap_or_default());
+    let frame = frame.unwrap_or_default();
+    let (first_el, mark) = (acc.els.len(), acc.x.members.len());
+    groups.push(frame);
     let res = (|| -> Result<(), EasyOfficeError> {
         for (kind, s, e) in children {
             let sub = &inner[s..=e];
@@ -494,7 +563,44 @@ fn walk_grp_sp(
         Ok(())
     })();
     groups.pop();
-    res
+    res?;
+    let mut bounds = SlideBox {
+        x: frame.gx,
+        y: frame.gy,
+        w: frame.gw,
+        h: frame.gh,
+    };
+    for outer in groups.iter().rev() {
+        bounds = outer.apply(bounds);
+    }
+    let bounds = bounds.scaled(ctx.sx, ctx.sy);
+    transform_group(
+        &mut acc.els,
+        &mut acc.x.fx,
+        first_el,
+        (bounds.x + bounds.w / 2.0, bounds.y + bounds.h / 2.0),
+        (frame.rot_deg, frame.flip_h, frame.flip_v),
+    );
+    let members: Vec<Member> = acc.x.members.drain(mark..).collect();
+    if members.len() < 2 {
+        acc.x.members.extend(members);
+        return Ok(());
+    }
+    let (mut name, mut spid) = (None, None);
+    if let Some(XmlEvent::Start { attrs, .. }) = events
+        .iter()
+        .find(|e| matches!(e, XmlEvent::Start { name, .. } if loc(name) == "cNvPr"))
+    {
+        name = attr(attrs, "name").map(|s| s.into_owned());
+        spid = attr(attrs, "id").map(|s| s.into_owned());
+    }
+    acc.x.groups.push(PendingGroup { name, members });
+    let member = Member::Group(acc.x.groups.len() - 1);
+    if let Some(spid) = spid {
+        acc.x.spids.insert(spid, member);
+    }
+    acc.x.members.push(member);
+    Ok(())
 }
 
 /// Unpacks a `.pptx` or `.ppsx` OOXML package into a [`RichSlideDeck`].
@@ -618,6 +724,17 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
                         sp_d = Some(d);
                         continue;
                     }
+                    if sp_d.is_none() && matches!(ln, "bg" | "timing") {
+                        let is_bg = ln == "bg";
+                        let sub = reader.collect_subtree(ev)?;
+                        d -= 1;
+                        if is_bg {
+                            acc.x.background = parse_bg(&sub, &mut ctx)?;
+                        } else {
+                            parse_timing(&sub, &mut acc.x.anims)?;
+                        }
+                        continue;
+                    }
                     if sp_d.is_none() && ln == "t" {
                         in_bare_t = true;
                         bare_t.clear();
@@ -666,6 +783,8 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
             }
         }
         acc.bullets.extend(acc.loose);
+        let hidden = matches!(extract_attr(s_xml, "<p:sld", "show"), Some("0" | "false"));
+        let ext = finish_ext(std::mem::take(&mut acc.x), &mut acc.els, hidden)?;
         slides.push(RichSlide {
             title: s_title,
             bullets: acc.bullets,
@@ -673,6 +792,7 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
             layout,
             transition,
             elements: acc.els,
+            ext,
         });
     }
     let deck = RichSlideDeck {

@@ -2,12 +2,16 @@
 
 //! Lossless ECMA-376 PresentationML (`.pptx`/`.ppsx`) writer and re-exported reader for [`RichSlideDeck`].
 
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::ooxml_presentation::{
     build_slide_chart_xml, finish_pptx_package, notes_slide_xml, rels_xml, PML_NS,
 };
 use crate::ooxml_shared_parts::PML_SP_TREE_HEADER;
+use crate::pptx_ext_write::{
+    ppr_xml, push_bg, push_effects, push_footer, push_ln, push_timing, xfrm_attrs,
+};
 use crate::pptx_master::{
     slide_placeholder_specs, slide_placeholder_visibility, two_column_placeholder_specs,
     PlaceholderSpec,
@@ -18,18 +22,20 @@ use crate::rich_slide::{
     pt_to_emu, pt_to_signed_emu, RichSlideDeck, SlideBox, SlideElement, SlideMasterLayout,
     SlideTextAlign, SlideTransition,
 };
+use crate::rich_slide_ext::{ElementFx, SlideDash, SlideExt, SlideNode, SlideParaFmt};
 use crate::{EasyOfficeError, XmlSanitizer};
 
-fn push_xfrm(out: &mut String, tag: &str, r: SlideBox) {
+fn push_xfrm(out: &mut String, tag: &str, r: SlideBox, fx: Option<&ElementFx>) {
     let (x, y, cx, cy) = (
         pt_to_signed_emu(r.x),
         pt_to_signed_emu(r.y),
         pt_to_emu(r.w),
         pt_to_emu(r.h),
     );
+    let attrs = xfrm_attrs(fx);
     let _ = write!(
         out,
-        "<{tag}><a:off x=\"{x}\" y=\"{y}\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></{tag}>"
+        "<{tag}{attrs}><a:off x=\"{x}\" y=\"{y}\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></{tag}>"
     );
 }
 
@@ -49,17 +55,19 @@ fn push_paras(
     biu: (bool, bool, bool),
     align: SlideTextAlign,
     color: Option<&str>,
+    para: Option<&SlideParaFmt>,
 ) {
     let sz = (pt * 100.0).round() as u32;
-    let (b, i, algn) = (u8::from(biu.0), u8::from(biu.1), align.ooxml_algn());
+    let (b, i) = (u8::from(biu.0), u8::from(biu.1));
     let u = if biu.2 { "sng" } else { "none" };
+    let ppr = ppr_xml(align, para);
     let clr = color
         .map(|h| format!("<a:solidFill><a:srgbClr val=\"{h}\"/></a:solidFill>"))
         .unwrap_or_default();
     for line in text.split('\n') {
         let _ = write!(
             out,
-            "<a:p><a:pPr algn=\"{algn}\"/><a:r><a:rPr lang=\"ko-KR\" sz=\"{sz}\" b=\"{b}\" i=\"{i}\" u=\"{u}\" dirty=\"0\">{clr}<a:latin typeface=\"+mn-lt\"/><a:ea typeface=\"+mn-ea\"/></a:rPr><a:t>{}</a:t></a:r></a:p>",
+            "<a:p>{ppr}<a:r><a:rPr lang=\"ko-KR\" sz=\"{sz}\" b=\"{b}\" i=\"{i}\" u=\"{u}\" dirty=\"0\">{clr}<a:latin typeface=\"+mn-lt\"/><a:ea typeface=\"+mn-ea\"/></a:rPr><a:t>{}</a:t></a:r></a:p>",
             XmlSanitizer::escape(line),
         );
     }
@@ -85,197 +93,292 @@ fn push_ph(out: &mut String, sid: usize, spec: &PlaceholderSpec, lines: &[&str])
     out.push_str("</p:txBody></p:sp>");
 }
 
-fn push_gf_head(out: &mut String, sid: usize, id: &str, rect: SlideBox, uri: &str) {
-    let _ = write!(out, "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"{sid}\" name=\"{}\"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp=\"1\"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>", XmlSanitizer::escape(id));
-    push_xfrm(out, "p:xfrm", rect);
-    let _ = write!(out, "<a:graphic><a:graphicData uri=\"{uri}\">");
-}
-
-fn push_sp_open(out: &mut String, sid: usize, id: &str, extra: &str, tx_box: &str, rect: SlideBox) {
-    let _ = write!(
-        out,
-        "<p:sp><p:nvSpPr><p:cNvPr id=\"{sid}\" name=\"{}\"{extra}/><p:cNvSpPr{tx_box}/><p:nvPr/></p:nvSpPr><p:spPr>",
-        XmlSanitizer::escape(id)
-    );
-    push_xfrm(out, "a:xfrm", rect);
-}
-
-fn push_element(
-    out: &mut String,
+/// Everything one slide's shape tree needs while it is written: the next shape id, the shape id of each
+/// element and group (animations point at them), and the parts the elements add to the package.
+struct Emit<'a> {
+    xml: String,
     sid: usize,
-    el: &SlideElement,
-    media: &mut MediaParts,
-    charts: &mut Vec<(usize, String)>,
-    rels: &mut Vec<(String, &'static str, String)>,
-    next_rel: &mut usize,
-) {
-    match el {
-        SlideElement::TextBox {
-            id,
-            rect,
-            text,
-            font_size_pt,
-            bold,
-            italic,
-            underline,
-            align,
-            color,
-            fill,
-            role,
-        } => {
-            let extra = role
-                .map(|r| format!(" descr=\"eo-role:{}\"", r.as_str()))
-                .unwrap_or_default();
-            push_sp_open(out, sid, id, &extra, " txBox=\"1\"", *rect);
-            out.push_str("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>");
-            push_fill(out, fill.as_deref());
-            out.push_str("<a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap=\"square\"/><a:lstStyle/>");
-            push_paras(
-                out,
-                text,
-                *font_size_pt,
-                (*bold, *italic, *underline),
-                *align,
-                color.as_deref(),
-            );
-            out.push_str("</p:txBody></p:sp>");
-        }
-        SlideElement::Shape {
-            id,
-            rect,
-            shape_type,
-            text,
-            fill,
-            stroke,
-            stroke_width_pt,
-            color,
-            font_size_pt,
-            bold,
-            italic,
-            underline,
-            align,
-        } => {
-            push_sp_open(out, sid, id, "", "", *rect);
-            let _ = write!(
-                out,
-                "<a:prstGeom prst=\"{}\"><a:avLst/></a:prstGeom>",
-                shape_type.ooxml_prst()
-            );
-            push_fill(out, fill.as_deref());
-            let _ = write!(out, "<a:ln w=\"{}\">", pt_to_emu(*stroke_width_pt));
-            push_fill(out, stroke.as_deref());
-            out.push_str("</a:ln></p:spPr><p:txBody><a:bodyPr anchor=\"ctr\"/><a:lstStyle/>");
-            push_paras(
-                out,
-                text,
-                *font_size_pt,
-                (*bold, *italic, *underline),
-                *align,
-                color.as_deref(),
-            );
-            out.push_str("</p:txBody></p:sp>");
-        }
-        SlideElement::Image {
-            id,
-            rect,
-            image,
-            alt,
-        } => {
-            let mref = media.add("ppt/media", image);
-            let rid = format!("rId{}", *next_rel);
-            *next_rel += 1;
-            rels.push((
-                rid.clone(),
-                "image",
-                format!(
-                    "../{}",
-                    mref.path.strip_prefix("ppt/").unwrap_or(&mref.path)
-                ),
-            ));
-            let descr = if alt.is_empty() {
-                image.alt()
-            } else {
-                alt.as_str()
-            };
-            let _ = write!(out, "<p:pic><p:nvPicPr><p:cNvPr id=\"{sid}\" name=\"{}\" descr=\"{}\"/><p:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"{rid}\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>", XmlSanitizer::escape(id), XmlSanitizer::escape(descr));
-            push_xfrm(out, "a:xfrm", *rect);
-            out.push_str("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr></p:pic>");
-        }
-        SlideElement::Table {
-            id,
-            rect,
-            rows,
-            header_row,
-            fill,
-        } => {
-            let cols = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
-            let (col_emu, row_emu) = (
-                (pt_to_emu(rect.w) / cols as u64).max(1),
-                (pt_to_emu(rect.h) / rows.len().max(1) as u64).max(1),
-            );
-            push_gf_head(
-                out,
-                sid,
+    ids: HashMap<String, usize>,
+    text_shapes: HashSet<usize>,
+    ext: &'a SlideExt,
+    media: &'a mut MediaParts,
+    charts: &'a mut Vec<(usize, String)>,
+    rels: &'a mut Vec<(String, &'static str, String)>,
+    next_rel: usize,
+}
+
+impl Emit<'_> {
+    fn take_sid(&mut self, id: &str) -> usize {
+        let sid = self.sid;
+        self.sid += 1;
+        self.ids.insert(id.to_string(), sid);
+        sid
+    }
+
+    fn gf_head(&mut self, sid: usize, id: &str, rect: SlideBox, uri: &str) {
+        let _ = write!(self.xml, "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"{sid}\" name=\"{}\"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp=\"1\"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>", XmlSanitizer::escape(id));
+        push_xfrm(&mut self.xml, "p:xfrm", rect, None);
+        let _ = write!(self.xml, "<a:graphic><a:graphicData uri=\"{uri}\">");
+    }
+
+    fn sp_open(&mut self, sid: usize, id: &str, extra: &str, tx_box: &str, rect: SlideBox) {
+        let fx = self.ext.fx_of(id);
+        let _ = write!(
+            self.xml,
+            "<p:sp><p:nvSpPr><p:cNvPr id=\"{sid}\" name=\"{}\"{extra}/><p:cNvSpPr{tx_box}/><p:nvPr/></p:nvSpPr><p:spPr>",
+            XmlSanitizer::escape(id)
+        );
+        push_xfrm(&mut self.xml, "a:xfrm", rect, fx);
+    }
+
+    fn element(&mut self, el: &SlideElement) {
+        let sid = self.take_sid(el.id());
+        let fx = self.ext.fx_of(el.id());
+        let para = fx.and_then(|f| f.para.as_ref());
+        match el {
+            SlideElement::TextBox {
                 id,
-                *rect,
-                "http://schemas.openxmlformats.org/drawingml/2006/table",
-            );
-            let _ = write!(
-                out,
-                "<a:tbl><a:tblPr firstRow=\"{}\" bandRow=\"1\"/><a:tblGrid>",
-                u8::from(*header_row)
-            );
-            for _ in 0..cols {
-                let _ = write!(out, "<a:gridCol w=\"{col_emu}\"/>");
-            }
-            out.push_str("</a:tblGrid>");
-            for (r_idx, row) in rows.iter().enumerate() {
-                let _ = write!(out, "<a:tr h=\"{row_emu}\">");
-                let cell_fill = fill.as_deref().filter(|_| !header_row || r_idx == 0);
-                for c_idx in 0..cols {
-                    let cell = row.get(c_idx).map_or("", String::as_str);
-                    out.push_str("<a:tc><a:txBody><a:bodyPr/><a:lstStyle/>");
-                    for line in cell.split('\n') {
-                        let _ = write!(out, "<a:p><a:r><a:rPr lang=\"ko-KR\" dirty=\"0\"/><a:t>{}</a:t></a:r></a:p>", XmlSanitizer::escape(line));
+                rect,
+                text,
+                font_size_pt,
+                bold,
+                italic,
+                underline,
+                align,
+                color,
+                fill,
+                role,
+            } => {
+                self.text_shapes.insert(sid);
+                let extra = role
+                    .map(|r| format!(" descr=\"eo-role:{}\"", r.as_str()))
+                    .unwrap_or_default();
+                self.sp_open(sid, id, &extra, " txBox=\"1\"", *rect);
+                self.xml
+                    .push_str("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>");
+                push_fill(&mut self.xml, fill.as_deref());
+                match fx.and_then(|f| f.outline.as_ref()) {
+                    Some(o) => {
+                        push_ln(&mut self.xml, Some(o.width_pt), Some(&o.color), dash_of(fx))
                     }
-                    match cell_fill {
-                        Some(h) => {
-                            let _ = write!(out, "</a:txBody><a:tcPr><a:solidFill><a:srgbClr val=\"{h}\"/></a:solidFill></a:tcPr></a:tc>");
-                        }
-                        None => out.push_str("</a:txBody><a:tcPr/></a:tc>"),
-                    }
+                    None => self.xml.push_str("<a:ln><a:noFill/></a:ln>"),
                 }
-                out.push_str("</a:tr>");
+                push_effects(&mut self.xml, fx);
+                self.xml
+                    .push_str("</p:spPr><p:txBody><a:bodyPr wrap=\"square\"/><a:lstStyle/>");
+                push_paras(
+                    &mut self.xml,
+                    text,
+                    *font_size_pt,
+                    (*bold, *italic, *underline),
+                    *align,
+                    color.as_deref(),
+                    para,
+                );
+                self.xml.push_str("</p:txBody></p:sp>");
             }
-            out.push_str("</a:tbl></a:graphicData></a:graphic></p:graphicFrame>");
-        }
-        SlideElement::Chart {
-            id,
-            rect,
-            chart_type,
-            title,
-            categories,
-            series,
-            legend,
-        } => {
-            let num = charts.len() + 1;
-            charts.push((
-                num,
-                build_slide_chart_xml(*chart_type, title, categories, series, *legend),
-            ));
-            let rid = format!("rId{}", *next_rel);
-            *next_rel += 1;
-            rels.push((rid.clone(), "chart", format!("../charts/chart{num}.xml")));
-            push_gf_head(
-                out,
-                sid,
+            SlideElement::Shape {
                 id,
-                *rect,
-                "http://schemas.openxmlformats.org/drawingml/2006/chart",
-            );
-            let _ = write!(out, "<c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" r:id=\"{rid}\"/></a:graphicData></a:graphic></p:graphicFrame>");
+                rect,
+                shape_type,
+                text,
+                fill,
+                stroke,
+                stroke_width_pt,
+                color,
+                font_size_pt,
+                bold,
+                italic,
+                underline,
+                align,
+            } => {
+                self.text_shapes.insert(sid);
+                self.sp_open(sid, id, "", "", *rect);
+                let _ = write!(
+                    self.xml,
+                    "<a:prstGeom prst=\"{}\"><a:avLst/></a:prstGeom>",
+                    shape_type.ooxml_prst()
+                );
+                push_fill(&mut self.xml, fill.as_deref());
+                push_ln(
+                    &mut self.xml,
+                    Some(*stroke_width_pt),
+                    stroke.as_deref(),
+                    dash_of(fx),
+                );
+                push_effects(&mut self.xml, fx);
+                self.xml
+                    .push_str("</p:spPr><p:txBody><a:bodyPr anchor=\"ctr\"/><a:lstStyle/>");
+                push_paras(
+                    &mut self.xml,
+                    text,
+                    *font_size_pt,
+                    (*bold, *italic, *underline),
+                    *align,
+                    color.as_deref(),
+                    para,
+                );
+                self.xml.push_str("</p:txBody></p:sp>");
+            }
+            SlideElement::Image {
+                id,
+                rect,
+                image,
+                alt,
+            } => {
+                let mref = self.media.add("ppt/media", image);
+                let rid = format!("rId{}", self.next_rel);
+                self.next_rel += 1;
+                self.rels.push((
+                    rid.clone(),
+                    "image",
+                    format!(
+                        "../{}",
+                        mref.path.strip_prefix("ppt/").unwrap_or(&mref.path)
+                    ),
+                ));
+                let descr = if alt.is_empty() {
+                    image.alt()
+                } else {
+                    alt.as_str()
+                };
+                let _ = write!(self.xml, "<p:pic><p:nvPicPr><p:cNvPr id=\"{sid}\" name=\"{}\" descr=\"{}\"/><p:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"{rid}\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>", XmlSanitizer::escape(id), XmlSanitizer::escape(descr));
+                push_xfrm(&mut self.xml, "a:xfrm", *rect, fx);
+                self.xml
+                    .push_str("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>");
+                if let Some(o) = fx.and_then(|f| f.outline.as_ref()) {
+                    push_ln(&mut self.xml, Some(o.width_pt), Some(&o.color), dash_of(fx));
+                }
+                push_effects(&mut self.xml, fx);
+                self.xml.push_str("</p:spPr></p:pic>");
+            }
+            SlideElement::Table {
+                id,
+                rect,
+                rows,
+                header_row,
+                fill,
+            } => self.table(sid, id, *rect, rows, *header_row, fill.as_deref()),
+            SlideElement::Chart {
+                id,
+                rect,
+                chart_type,
+                title,
+                categories,
+                series,
+                legend,
+            } => {
+                let num = self.charts.len() + 1;
+                self.charts.push((
+                    num,
+                    build_slide_chart_xml(*chart_type, title, categories, series, *legend),
+                ));
+                let rid = format!("rId{}", self.next_rel);
+                self.next_rel += 1;
+                self.rels
+                    .push((rid.clone(), "chart", format!("../charts/chart{num}.xml")));
+                self.gf_head(
+                    sid,
+                    id,
+                    *rect,
+                    "http://schemas.openxmlformats.org/drawingml/2006/chart",
+                );
+                let _ = write!(self.xml, "<c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" r:id=\"{rid}\"/></a:graphicData></a:graphic></p:graphicFrame>");
+            }
         }
     }
+
+    fn table(
+        &mut self,
+        sid: usize,
+        id: &str,
+        rect: SlideBox,
+        rows: &[Vec<String>],
+        header_row: bool,
+        fill: Option<&str>,
+    ) {
+        let cols = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
+        let (col_emu, row_emu) = (
+            (pt_to_emu(rect.w) / cols as u64).max(1),
+            (pt_to_emu(rect.h) / rows.len().max(1) as u64).max(1),
+        );
+        self.gf_head(
+            sid,
+            id,
+            rect,
+            "http://schemas.openxmlformats.org/drawingml/2006/table",
+        );
+        let out = &mut self.xml;
+        let _ = write!(
+            out,
+            "<a:tbl><a:tblPr firstRow=\"{}\" bandRow=\"1\"/><a:tblGrid>",
+            u8::from(header_row)
+        );
+        for _ in 0..cols {
+            let _ = write!(out, "<a:gridCol w=\"{col_emu}\"/>");
+        }
+        out.push_str("</a:tblGrid>");
+        for (r_idx, row) in rows.iter().enumerate() {
+            let _ = write!(out, "<a:tr h=\"{row_emu}\">");
+            let cell_fill = fill.filter(|_| !header_row || r_idx == 0);
+            for c_idx in 0..cols {
+                let cell = row.get(c_idx).map_or("", String::as_str);
+                out.push_str("<a:tc><a:txBody><a:bodyPr/><a:lstStyle/>");
+                for line in cell.split('\n') {
+                    let _ = write!(
+                        out,
+                        "<a:p><a:r><a:rPr lang=\"ko-KR\" dirty=\"0\"/><a:t>{}</a:t></a:r></a:p>",
+                        XmlSanitizer::escape(line)
+                    );
+                }
+                match cell_fill {
+                    Some(h) => {
+                        let _ = write!(out, "</a:txBody><a:tcPr><a:solidFill><a:srgbClr val=\"{h}\"/></a:solidFill></a:tcPr></a:tc>");
+                    }
+                    None => out.push_str("</a:txBody><a:tcPr/></a:tc>"),
+                }
+            }
+            out.push_str("</a:tr>");
+        }
+        out.push_str("</a:tbl></a:graphicData></a:graphic></p:graphicFrame>");
+    }
+
+    /// Writes the elements in z-order; a group is written where its first member sits.
+    fn tree(&mut self, elements: &[SlideElement]) {
+        for node in self.ext.layout(elements) {
+            self.node(&node, elements);
+        }
+    }
+
+    fn node(&mut self, node: &SlideNode<'_>, elements: &[SlideElement]) {
+        let SlideNode::Group { id, children } = node else {
+            if let SlideNode::Leaf(i) = node {
+                self.element(&elements[*i]);
+            }
+            return;
+        };
+        let sid = self.take_sid(id);
+        let b = self.ext.node_bounds(node, elements);
+        let (x, y, cx, cy) = (
+            pt_to_signed_emu(b.x),
+            pt_to_signed_emu(b.y),
+            pt_to_emu(b.w),
+            pt_to_emu(b.h),
+        );
+        let _ = write!(
+            self.xml,
+            "<p:grpSp><p:nvGrpSpPr><p:cNvPr id=\"{sid}\" name=\"{}\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x=\"{x}\" y=\"{y}\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/><a:chOff x=\"{x}\" y=\"{y}\"/><a:chExt cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm></p:grpSpPr>",
+            XmlSanitizer::escape(id)
+        );
+        for child in children {
+            self.node(child, elements);
+        }
+        self.xml.push_str("</p:grpSp>");
+    }
+}
+
+fn dash_of(fx: Option<&ElementFx>) -> SlideDash {
+    fx.map_or(SlideDash::Solid, |f| f.dash)
 }
 
 /// Packs a [`RichSlideDeck`] into a `.pptx` or `.ppsx` OOXML package.
@@ -300,8 +403,14 @@ pub fn pack_pptx_rich(
                 slide.layout.layout_index()
             ),
         )];
-        let (mut next_rel, mut sid) = (2usize, 2usize);
-        let mut s_xml = format!("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:sld {PML_NS}><p:cSld><p:spTree>{PML_SP_TREE_HEADER}");
+        let mut next_rel = 2usize;
+        let show = if slide.ext.hidden { " show=\"0\"" } else { "" };
+        let mut s_xml = format!("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:sld {PML_NS}{show}><p:cSld>");
+        if let Some(bg) = &slide.ext.background {
+            push_bg(&mut s_xml, bg, &mut media, &mut s_rels, &mut next_rel);
+        }
+        let _ = write!(s_xml, "<p:spTree>{PML_SP_TREE_HEADER}");
+        let mut sid = 2usize;
         let (t_spec, b_spec) = slide_placeholder_specs(slide.layout, emu_w, emu_h);
         let (emit_title, emit_body) = slide_placeholder_visibility(slide);
 
@@ -330,18 +439,21 @@ pub fn pack_pptx_rich(
                 sid += 1;
             }
         }
-        for el in &slide.elements {
-            push_element(
-                &mut s_xml,
-                sid,
-                el,
-                &mut media,
-                &mut charts,
-                &mut s_rels,
-                &mut next_rel,
-            );
-            sid += 1;
-        }
+        let mut em = Emit {
+            xml: s_xml,
+            sid,
+            ids: HashMap::new(),
+            text_shapes: HashSet::new(),
+            ext: &slide.ext,
+            media: &mut media,
+            charts: &mut charts,
+            rels: &mut s_rels,
+            next_rel,
+        };
+        em.tree(&slide.elements);
+        let used = push_footer(&mut em.xml, &slide.ext, em.sid, emu_w, emu_h);
+        em.sid += used;
+        let (mut s_xml, ids, text_shapes, next_rel) = (em.xml, em.ids, em.text_shapes, em.next_rel);
         s_xml.push_str("</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>");
         match slide.transition {
             SlideTransition::None => {}
@@ -353,6 +465,7 @@ pub fn pack_pptx_rich(
                 s_xml.push_str("<p:transition><p:zoom dir=\"in\"/></p:transition>")
             }
         }
+        push_timing(&mut s_xml, &slide.ext.anims, &ids, &text_shapes);
         s_xml.push_str("</p:sld>");
         slide_entries.push((format!("ppt/slides/slide{n}.xml"), s_xml.into_bytes()));
 

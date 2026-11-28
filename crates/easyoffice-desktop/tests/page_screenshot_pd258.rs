@@ -133,6 +133,7 @@ fn build_test_pptx() -> Vec<u8> {
                 notes: String::new(),
                 layout: SlideMasterLayout::TitleAndContent,
                 transition: SlideTransition::Fade,
+                ext: Default::default(),
                 elements: vec![
                     SlideElement::Shape {
                         id: "sh1".into(),
@@ -205,6 +206,7 @@ fn build_test_pptx() -> Vec<u8> {
                 notes: String::new(),
                 layout: SlideMasterLayout::TitleAndContent,
                 transition: SlideTransition::Push,
+                ext: Default::default(),
                 elements: vec![SlideElement::Shape {
                     id: "sh2".into(),
                     rect: SlideBox {
@@ -232,6 +234,7 @@ fn build_test_pptx() -> Vec<u8> {
                 notes: String::new(),
                 layout: SlideMasterLayout::TitleAndContent,
                 transition: SlideTransition::Zoom,
+                ext: Default::default(),
                 elements: Vec::new(),
             },
         ],

@@ -196,6 +196,7 @@ fn cli_inspect_reports_layout_lint_for_docx_and_pptx_and_enforces_cap() {
             notes: String::new(),
             layout: SlideMasterLayout::TitleAndContent,
             transition: SlideTransition::Fade,
+            ext: Default::default(),
             elements: vec![
                 SlideElement::Shape {
                     id: "s1".into(),

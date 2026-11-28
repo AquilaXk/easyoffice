@@ -85,6 +85,7 @@ fn slide_lint_detects_stage_text_table_and_bullet_overflows() {
             notes: String::new(),
             layout: SlideMasterLayout::TitleAndContent,
             transition: SlideTransition::Fade,
+            ext: Default::default(),
             elements: vec![
                 // Outside 960x540 stage right edge
                 rect_shape("out-right", 850.0, 20.0, 130.0, 60.0, "정상"),
@@ -157,6 +158,7 @@ fn slide_lint_detects_element_overlap_and_skips_full_background_shape() {
             notes: String::new(),
             layout: SlideMasterLayout::TitleAndContent,
             transition: SlideTransition::Fade,
+            ext: Default::default(),
             elements: vec![
                 // Covers 100% of stage area -> background shape excluded from overlap
                 rect_shape("bg-full", 0.0, 0.0, 720.0, 540.0, ""),
@@ -195,6 +197,7 @@ fn slide_lint_detects_empty_placeholders_by_layout_and_textbox_content() {
                 notes: String::new(),
                 layout: SlideMasterLayout::TitleSlide,
                 transition: SlideTransition::Fade,
+                ext: Default::default(),
                 elements: vec![
                     textbox("tb-empty", 40.0, 80.0, 300.0, 40.0, "   ", 18.0),
                     textbox(
@@ -233,6 +236,7 @@ fn slide_lint_detects_empty_placeholders_by_layout_and_textbox_content() {
                 notes: String::new(),
                 layout: SlideMasterLayout::TitleAndContent,
                 transition: SlideTransition::Fade,
+                ext: Default::default(),
                 elements: Vec::new(),
             },
             // Slide 3: Blank layout with nothing -> 0 issues
@@ -242,6 +246,7 @@ fn slide_lint_detects_empty_placeholders_by_layout_and_textbox_content() {
                 notes: String::new(),
                 layout: SlideMasterLayout::Blank,
                 transition: SlideTransition::None,
+                ext: Default::default(),
                 elements: Vec::new(),
             },
             // Slide 4: Clean slide with Role::Title textbox supplying title -> 0 issues
@@ -251,6 +256,7 @@ fn slide_lint_detects_empty_placeholders_by_layout_and_textbox_content() {
                 notes: String::new(),
                 layout: SlideMasterLayout::SectionHeader,
                 transition: SlideTransition::Fade,
+                ext: Default::default(),
                 elements: vec![SlideElement::TextBox {
                     id: "role-title".to_string(),
                     rect: SlideBox {
@@ -456,6 +462,7 @@ fn lint_caps_hostile_report_at_max_lint_issues_and_marks_truncated() {
             notes: String::new(),
             layout: SlideMasterLayout::TitleAndContent,
             transition: SlideTransition::Fade,
+            ext: Default::default(),
             elements,
         }],
         elements_rejected: 0,
@@ -493,6 +500,7 @@ fn benchmark_layout_lint_release() {
             notes: String::new(),
             layout: SlideMasterLayout::TitleAndContent,
             transition: SlideTransition::Fade,
+            ext: Default::default(),
             elements,
         });
     }

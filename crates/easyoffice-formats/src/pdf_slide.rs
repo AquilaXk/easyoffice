@@ -1,5 +1,7 @@
 //! Multi-page pure vector PDF exporter for [`RichSlideDeck`].
 
+mod ext;
+
 use std::f64::consts::FRAC_PI_2;
 use std::fmt::Write;
 
@@ -906,23 +908,27 @@ pub fn encode_slide_pdf(deck: &RichSlideDeck, title: &str) -> Result<Vec<u8>, Ea
     } else {
         title
     };
-    let slides_ref: Vec<RichSlide> = if deck.slides.is_empty() {
-        vec![RichSlide {
-            title: effective_title.to_string(),
-            ..RichSlide::default()
-        }]
+    let blank = [RichSlide {
+        title: effective_title.to_string(),
+        ..RichSlide::default()
+    }];
+    let slides_ref = ext::visible_slides(if deck.slides.is_empty() {
+        &blank
     } else {
-        deck.slides.clone()
-    };
+        &deck.slides
+    });
+    let emu = deck.stage_dimensions_emu();
     let mut pages = Vec::with_capacity(slides_ref.len());
-    for (idx, slide) in slides_ref.iter().enumerate() {
+    for (page_idx, &(slide_idx, slide)) in slides_ref.iter().enumerate() {
         let mut cv = PdfCanvas::new(pw, ph);
+        ext::draw_background(&mut cv, slide);
         draw_placeholders(&mut cv, slide);
         for el in &slide.elements {
-            render_element(&mut cv, el);
+            ext::draw_element(&mut cv, slide, el);
         }
+        ext::draw_footer(&mut cv, slide, slide_idx + 1, emu);
         pages.push(PdfPageEntry::Laid(PdfLaidPage {
-            page_number: idx + 1,
+            page_number: page_idx + 1,
             rotation_degrees: 0,
             width_pt: pw,
             height_pt: ph,

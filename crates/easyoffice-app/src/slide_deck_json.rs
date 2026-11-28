@@ -4,14 +4,15 @@ use std::fmt::Write;
 
 use easyoffice_formats::{
     base64_codec, normalize_hex_color, normalize_table_rows, ChartKind, ChartLegendPos,
-    EasyOfficeError, RichImage, RichSlide, RichSlideDeck, SlideAspect, SlideBox, SlideChartSeries,
-    SlideElement, SlideMasterLayout, SlideOrientation, SlidePlaceholderRole, SlideShapeType,
-    SlideTextAlign, SlideTransition, StrictJsonValue, DEFAULT_SLIDE_FONT_PT,
+    EasyOfficeError, ElementFx, RichImage, RichSlide, RichSlideDeck, SlideAspect, SlideBox,
+    SlideChartSeries, SlideElement, SlideMasterLayout, SlideOrientation, SlidePlaceholderRole,
+    SlideShapeType, SlideTextAlign, SlideTransition, StrictJsonValue, DEFAULT_SLIDE_FONT_PT,
     DEFAULT_SLIDE_STROKE_PT, MAX_ELEMENTS_PER_DECK, MAX_ELEMENTS_PER_SLIDE, MAX_SLIDES_PER_DECK,
     MAX_SLIDE_CHART_POINTS, MAX_SLIDE_CHART_SERIES, MAX_SLIDE_TOTAL_IMAGE_BYTES,
 };
 
 use crate::convert_structured::{as_array, as_object, field, invalid, opt_str, Budget, JsonObject};
+use crate::slide_ext_json::{parse_element_fx, parse_slide_ext, write_element_fx, write_slide_ext};
 
 fn push_f64(out: &mut String, v: f64) {
     if v.is_finite() {
@@ -323,6 +324,7 @@ pub(crate) fn parse_slide_deck(
                 .ok_or_else(|| invalid(format!("지원하지 않는 슬라이드 전환 효과: {s}")))?,
         };
         let mut elements = Vec::new();
+        let mut fxs = Vec::new();
         if let Some(ev) = field(obj, "elements") {
             let arr = as_array(ev, "elements")?;
             if arr.len() > MAX_ELEMENTS_PER_SLIDE {
@@ -337,9 +339,14 @@ pub(crate) fn parse_slide_deck(
                         "덱 전체 개체 수가 상한({MAX_ELEMENTS_PER_DECK})을 초과했습니다."
                     )));
                 }
-                elements.push(parse_element(e_item, ei, budget, &mut total_img_bytes)?);
+                let el = parse_element(e_item, ei, budget, &mut total_img_bytes)?;
+                if !matches!(el, SlideElement::Table { .. } | SlideElement::Chart { .. }) {
+                    fxs.extend(parse_element_fx(as_object(e_item, "elements")?, el.id())?);
+                }
+                elements.push(el);
             }
         }
+        let ext = parse_slide_ext(obj, fxs, budget, &mut total_img_bytes)?;
         slides.push(RichSlide {
             title: opt_str(obj, "title")?.unwrap_or("").to_string(),
             bullets,
@@ -347,6 +354,7 @@ pub(crate) fn parse_slide_deck(
             layout,
             transition,
             elements,
+            ext,
         });
     }
 
@@ -374,7 +382,12 @@ fn push_opt_hex(
     }
 }
 
-fn write_element_json(out: &mut String, el: &SlideElement, push_str: fn(&mut String, &str)) {
+fn write_element_json(
+    out: &mut String,
+    el: &SlideElement,
+    fx: Option<&ElementFx>,
+    push_str: fn(&mut String, &str),
+) {
     let r = el.rect();
     out.push('{');
     match el {
@@ -443,7 +456,14 @@ fn write_element_json(out: &mut String, el: &SlideElement, push_str: fn(&mut Str
             push_f64(out, r.h);
             let _ = write!(out, ",\"shapeType\":\"{}\",\"text\":", shape_type.as_str());
             push_str(out, text);
+            // A shape with no fill reads back as an empty color, not as the editor's default blue.
+            if fill.is_none() {
+                out.push_str(",\"fill\":\"\"");
+            }
             push_opt_hex(out, "fill", fill, push_str);
+            if stroke.is_none() {
+                out.push_str(",\"stroke\":\"\"");
+            }
             push_opt_hex(out, "stroke", stroke, push_str);
             out.push_str(",\"strokeWidthPt\":");
             push_f64(out, *stroke_width_pt);
@@ -558,6 +578,7 @@ fn write_element_json(out: &mut String, el: &SlideElement, push_str: fn(&mut Str
             let _ = write!(out, "],\"legend\":\"{}\"", legend.as_str());
         }
     }
+    write_element_fx(out, fx, push_str);
     out.push('}');
 }
 
@@ -599,10 +620,11 @@ pub(crate) fn write_slide_deck_decode_fields(
                 if ei > 0 {
                     out.push(',');
                 }
-                write_element_json(out, el, push_str);
+                write_element_json(out, el, s.ext.fx_of(el.id()), push_str);
             }
             out.push(']');
         }
+        write_slide_ext(out, &s.ext, push_str);
         out.push('}');
     }
 }

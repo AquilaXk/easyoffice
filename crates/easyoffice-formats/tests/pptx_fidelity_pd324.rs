@@ -543,6 +543,7 @@ fn excludes_non_body_placeholders_roundtrips_two_column_and_ignores_end_para_rpr
                 notes: String::new(),
                 layout: SlideMasterLayout::TwoColumn,
                 transition: SlideTransition::None,
+                ext: Default::default(),
                 elements: vec![],
             },
             RichSlide {
@@ -551,6 +552,7 @@ fn excludes_non_body_placeholders_roundtrips_two_column_and_ignores_end_para_rpr
                 notes: String::new(),
                 layout: SlideMasterLayout::TwoColumn,
                 transition: SlideTransition::None,
+                ext: Default::default(),
                 elements: vec![],
             },
         ],

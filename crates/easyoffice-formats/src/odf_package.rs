@@ -277,6 +277,7 @@ pub(crate) fn finish_odp_package(
     content_xml: String,
     media: MediaParts,
     charts: Vec<(usize, String)>,
+    extra_styles: &str,
 ) -> Result<Vec<u8>, EasyOfficeError> {
     let (w_cm, h_cm) = deck.stage_dimensions_cm();
     let mut styles = concat!(
@@ -288,6 +289,7 @@ pub(crate) fn finish_odp_package(
         "xmlns:presentation=\"urn:oasis:names:tc:opendocument:xmlns:presentation:1.0\" ",
         "xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" ",
         "xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\" ",
+        "xmlns:xlink=\"http://www.w3.org/1999/xlink\" ",
         "office:version=\"1.2\">",
         "<office:font-face-decls>",
         "<style:font-face style:name=\"맑은 고딕\" svg:font-family=\"&apos;맑은 고딕&apos;\" style:font-family-generic=\"swiss\"/>",
@@ -337,6 +339,7 @@ pub(crate) fn finish_odp_package(
         }
         styles.push_str("</style:presentation-page-layout>");
     }
+    styles.push_str(extra_styles);
     let _ = write!(
         styles,
         "</office:styles><office:automatic-styles><style:page-layout style:name=\"PM1\"><style:page-layout-properties fo:margin-top=\"0cm\" fo:margin-bottom=\"0cm\" fo:margin-left=\"0cm\" fo:margin-right=\"0cm\" fo:page-width=\"{w_cm:.3}cm\" fo:page-height=\"{h_cm:.3}cm\" style:print-orientation=\"{}\"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name=\"Standard\" style:page-layout-name=\"PM1\"/></office:master-styles></office:document-styles>",

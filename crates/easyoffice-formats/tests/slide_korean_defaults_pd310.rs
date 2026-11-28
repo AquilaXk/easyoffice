@@ -129,6 +129,7 @@ fn pptx_legacy_and_rich_emit_16_9_malgun_gothic_theme_master_and_layouts() {
                 notes: String::new(),
                 layout: SlideMasterLayout::TitleSlide,
                 transition: SlideTransition::None,
+                ext: Default::default(),
                 elements: vec![],
             },
             RichSlide {
@@ -137,6 +138,7 @@ fn pptx_legacy_and_rich_emit_16_9_malgun_gothic_theme_master_and_layouts() {
                 notes: String::new(),
                 layout: SlideMasterLayout::SectionHeader,
                 transition: SlideTransition::None,
+                ext: Default::default(),
                 elements: vec![],
             },
             RichSlide {
@@ -145,6 +147,7 @@ fn pptx_legacy_and_rich_emit_16_9_malgun_gothic_theme_master_and_layouts() {
                 notes: String::new(),
                 layout: SlideMasterLayout::Blank,
                 transition: SlideTransition::None,
+                ext: Default::default(),
                 elements: vec![SlideElement::TextBox {
                     id: "free-1".into(),
                     rect: SlideBox {
@@ -214,6 +217,7 @@ fn odp_writes_malgun_gothic_default_styles_standard_xlink_and_layout_frames() {
                 notes: String::new(),
                 layout: SlideMasterLayout::TitleSlide,
                 transition: SlideTransition::None,
+                ext: Default::default(),
                 elements: vec![],
             },
             RichSlide {
@@ -222,6 +226,7 @@ fn odp_writes_malgun_gothic_default_styles_standard_xlink_and_layout_frames() {
                 notes: String::new(),
                 layout: SlideMasterLayout::Blank,
                 transition: SlideTransition::None,
+                ext: Default::default(),
                 elements: vec![SlideElement::TextBox {
                     id: "tb".into(),
                     rect: SlideBox {

@@ -79,6 +79,7 @@ fn full_test_deck(aspect: SlideAspect) -> RichSlideDeck {
                 notes: "핵심 수치부터 간단히 설명".into(),
                 layout: SlideMasterLayout::TitleSlide,
                 transition: SlideTransition::Fade,
+                ext: Default::default(),
                 elements: vec![
                     SlideElement::TextBox {
                         id: "tb-sub".into(),
@@ -148,6 +149,7 @@ fn full_test_deck(aspect: SlideAspect) -> RichSlideDeck {
                 notes: "표와 막대 차트를 함께 제시".into(),
                 layout: SlideMasterLayout::TwoColumn,
                 transition: SlideTransition::Push,
+                ext: Default::default(),
                 elements: vec![
                     SlideElement::Table {
                         id: "tbl-kpi".into(),
@@ -224,6 +226,7 @@ fn full_test_deck(aspect: SlideAspect) -> RichSlideDeck {
                 notes: "전환 없음, 빈 레이아웃 테스트".into(),
                 layout: SlideMasterLayout::Blank,
                 transition: SlideTransition::None,
+                ext: Default::default(),
                 elements: vec![
                     SlideElement::Shape {
                         id: "sh-arrow".into(),
@@ -592,6 +595,7 @@ fn cross_format_pptx_to_odp_to_pptx_preserves_canvas_and_transition_presets() {
         notes: "줌 전환 확인".into(),
         layout: SlideMasterLayout::SectionHeader,
         transition: SlideTransition::Zoom,
+        ext: Default::default(),
         elements: vec![],
     });
     let pptx1 = OoxmlCodec::pack_pptx_rich(&deck, false).unwrap();
@@ -752,6 +756,7 @@ fn bench_pd257_slide_deck_roundtrip() {
             notes: "발표 노트".into(),
             layout: SlideMasterLayout::ALL[i % SlideMasterLayout::ALL.len()],
             transition: SlideTransition::Fade,
+            ext: Default::default(),
             elements: vec![
                 SlideElement::TextBox {
                     id: format!("t-{i}"),

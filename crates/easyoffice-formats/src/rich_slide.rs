@@ -1,7 +1,10 @@
 //! Coordinate-based slide deck model (`PD-257`) with fail-closed resource budgets,
 //! aspect-ratio normalization, master layouts, transitions, and 5 element kinds.
 
+use std::collections::HashSet;
+
 use crate::rich_document::normalize_hex_color;
+use crate::rich_slide_ext::SlideExt;
 use crate::sheet_chart::{ChartKind, ChartLegendPos};
 use crate::{DecodedSlide, EasyOfficeError, RichImage};
 
@@ -686,6 +689,7 @@ pub struct RichSlide {
     pub layout: SlideMasterLayout,
     pub transition: SlideTransition,
     pub elements: Vec<SlideElement>,
+    pub ext: SlideExt,
 }
 
 impl Default for RichSlide {
@@ -697,6 +701,7 @@ impl Default for RichSlide {
             layout: SlideMasterLayout::TitleAndContent,
             transition: SlideTransition::None,
             elements: Vec::new(),
+            ext: SlideExt::default(),
         }
     }
 }
@@ -770,6 +775,7 @@ impl RichSlideDeck {
                     layout: SlideMasterLayout::TitleAndContent,
                     transition: SlideTransition::None,
                     elements: Vec::new(),
+                    ext: SlideExt::default(),
                 })
                 .collect(),
             elements_rejected: 0,
@@ -851,12 +857,16 @@ impl RichSlideDeck {
                 el.validate()?;
                 if let SlideElement::Image { image, .. } = el {
                     total_image_bytes = total_image_bytes.saturating_add(image.bytes().len());
-                    if total_image_bytes > MAX_SLIDE_TOTAL_IMAGE_BYTES {
-                        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                            "슬라이드 전체 이미지 크기({total_image_bytes}B)가 상한({MAX_SLIDE_TOTAL_IMAGE_BYTES}B)을 초과했습니다."
-                        )));
-                    }
                 }
+            }
+            let ids: HashSet<&str> = slide.elements.iter().map(SlideElement::id).collect();
+            slide.ext.validate(&ids)?;
+            total_image_bytes =
+                total_image_bytes.saturating_add(slide.ext.background_image_bytes());
+            if total_image_bytes > MAX_SLIDE_TOTAL_IMAGE_BYTES {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                    "슬라이드 전체 이미지 크기({total_image_bytes}B)가 상한({MAX_SLIDE_TOTAL_IMAGE_BYTES}B)을 초과했습니다."
+                )));
             }
         }
         Ok(())
