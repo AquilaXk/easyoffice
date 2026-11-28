@@ -754,7 +754,8 @@
       cycleDeckAspect,
       toggleDeckOrientation,
       appendLink,
-      appendNote,      isShowing: () => showing,
+      appendNote,
+      runAct: (act) => host.__EASYOFFICE_SLIDE_RUN_ACT__?.(act) ?? false,      isShowing: () => showing,
     };
   }
 

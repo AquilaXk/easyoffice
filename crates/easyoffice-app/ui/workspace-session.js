@@ -867,12 +867,16 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       return Boolean(el.closest?.('[contenteditable="true"]'));
     }
 
-    const bindingByKeys = new Map((shortcutBindings || []).map((b) => [b.keys, b]));
+    // A combination may be bound once per module (Ctrl+G: the spreadsheet's 이동 and the slide's group).
+    const bindingsByKeys = new Map();
+    for (const b of shortcutBindings || []) bindingsByKeys.set(b.keys, [...(bindingsByKeys.get(b.keys) || []), b]);
 
     // Browser-reserved combos (new/close window) are only bound inside the desktop shell; `macOnly`
-    // combos only on macOS (the other systems keep the key for the editor).
+    // combos only on macOS (the other systems keep the key for the editor). Of a combo's bindings the
+    // one for the window's module wins, then one for every module.
     function bindingFor(combo) {
-      const binding = bindingByKeys.get(combo);
+      const module = getActiveModule(), list = bindingsByKeys.get(combo) || [];
+      const binding = list.find((b) => b.module === module || b.modules?.includes(module)) || list.find((b) => !b.module && !b.modules) || list[0];
       if (!binding || binding.native || binding.external) return null;
       if (binding.macOnly && !isMacClient()) return null;
       return binding.desktopOnly && !isDesktopShell() ? null : binding;

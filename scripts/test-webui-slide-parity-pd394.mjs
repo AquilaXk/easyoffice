@@ -162,6 +162,20 @@ test("the editor groups, turns and flips the selection and keeps it through the 
   assert.equal(canvas.currentSlide().groups.length, 0);
 });
 
+test("Ctrl+G groups the selected objects and Ctrl+Shift+G ungroups them, in the slide window only", async () => {
+  const { host, sandbox } = await openSlide();
+  const canvas = host.__EASYOFFICE_SLIDE_CANVAS__;
+  canvas.addElement({ kind: "textbox", x: 100, y: 100, w: 200, h: 80, text: "하나" });
+  canvas.addElement({ kind: "textbox", x: 400, y: 100, w: 200, h: 80, text: "둘" });
+  canvas.setSelectedIds(canvas.getElements().map((e) => e.id));
+  assert.equal(sandbox.dispatchWindowKeydown({ key: "g", ctrlKey: true }).defaultPrevented, true);
+  assert.equal(canvas.currentSlide().groups.length, 1);
+  assert.equal(sandbox.dispatchWindowKeydown({ key: "G", ctrlKey: true, shiftKey: true }).defaultPrevented, true);
+  assert.equal(canvas.currentSlide().groups.length, 0);
+  const table = host.__EASYOFFICE_RIBBON_CATALOG__.WORKSPACE_SHORTCUT_BINDINGS;
+  assert.deepEqual(table.filter((b) => b.keys === "Ctrl+G").map((b) => [b.module, b.action]), [["SHEET", "sheet-goto"], ["SLIDE", "slide-group"]]);
+});
+
 test("hiding a slide dims its thumbnail and the show skips it", async () => {
   const { document, sandbox, userClick } = await openSlide();
   const add = document.getElementById("btn-add-slide");

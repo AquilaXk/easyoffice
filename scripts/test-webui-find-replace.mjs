@@ -58,11 +58,14 @@ test("Ctrl+F opens the find dialog (not the palette), Ctrl+H adds the replace ro
   assert.equal($(h.document, "btn-find-replace-all").textContent, "모두 대치");
 });
 
-test("the shortcut table has no repeated combination and keeps print, find and replace to one action each", async () => {
+test("the shortcut table has no repeated combination within a module and keeps print, find and replace to one action each", async () => {
   const h = await createWorkspaceHarness();
   const { WORKSPACE_SHORTCUT_BINDINGS: table } = h.host.__EASYOFFICE_RIBBON_CATALOG__;
-  const keys = table.map((b) => b.keys);
-  assert.equal(new Set(keys).size, keys.length);
+  // A combination may be bound once per module (Ctrl+G: the spreadsheet's 이동 and the slide's group); a binding without a module counts for all of them.
+  const scopes = table.map((b) => `${b.keys}|${b.module || (b.modules || []).join(",")}`);
+  assert.equal(new Set(scopes).size, scopes.length);
+  const unscoped = new Set(table.filter((b) => !b.module && !b.modules).map((b) => b.keys));
+  for (const b of table) assert.ok(!(b.module && unscoped.has(b.keys)), `${b.keys} is bound for every module and for ${b.module}`);
   const action = (k) => table.find((b) => b.keys === k)?.action;
   assert.deepEqual([action("Ctrl+F"), action("Ctrl+H"), action("Ctrl+/"), action("Ctrl+P")], ["find", "replace", "palette", "print"]);
   assert.deepEqual(table.filter((b) => b.action === "replace").map((b) => [b.keys, b.module || ""]), [["Ctrl+H", ""], ["Ctrl+F2", "HWP"]], "Ctrl+F2 stays with the Hangul window only");
