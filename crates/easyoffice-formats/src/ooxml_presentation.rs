@@ -532,9 +532,7 @@ pub(crate) type DecodedSlideChart = (
 );
 
 pub(crate) fn parse_slide_chart_xml(xml: &str) -> Result<DecodedSlideChart, EasyOfficeError> {
-    fn loc(n: &str) -> &str {
-        n.rsplit(':').next().unwrap_or(n)
-    }
+    use crate::xml_stream::local_name as loc;
     fn over() -> EasyOfficeError {
         EasyOfficeError::ResourceBudgetExceeded(format!(
             "슬라이드 차트 포인트 수({MAX_SLIDE_CHART_POINTS}) 초과"

@@ -696,3 +696,30 @@ fn a_less_than_sign_inside_a_quoted_value_is_read_as_text() {
     };
     assert_eq!(attrs.get("v").unwrap(), "x<y");
 }
+
+/// `local_name` replaced `name.rsplit(':').next()` in the slide readers; it answers the same for every name,
+/// also the ones no namespace-aware XML has (two colons, an empty part).
+#[test]
+fn local_name_is_what_follows_the_last_colon() {
+    for name in [
+        "a:off",
+        "off",
+        "",
+        ":",
+        "a:",
+        ":a",
+        "a:b:c",
+        "x::y",
+        "p:nvSpPr",
+        "draw:frame",
+        "한:글",
+        "글:",
+        "::",
+    ] {
+        assert_eq!(
+            local_name(name),
+            name.rsplit(':').next().unwrap_or(name),
+            "{name:?}"
+        );
+    }
+}

@@ -30,10 +30,7 @@ use crate::{
 const MAX_SLIDE_XML_EVENTS: usize = 512_000;
 const MAX_GROUP_DEPTH: usize = 16;
 
-#[inline]
-pub(crate) fn loc(name: &str) -> &str {
-    name.rsplit(':').next().unwrap_or(name)
-}
+pub(crate) use crate::xml_stream::local_name as loc;
 
 fn parse_pt_pair(
     attrs: &Attrs<'_>,

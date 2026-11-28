@@ -27,10 +27,7 @@ use crate::{EasyOfficeError, RichImage, XmlSanitizer, ZipArchiveEntry};
 const MAX_ODP_XML_EVENTS: usize = 512_000;
 const MAX_GROUP_DEPTH: usize = 16;
 
-#[inline]
-fn loc(name: &str) -> &str {
-    name.rsplit(':').next().unwrap_or(name)
-}
+use crate::xml_stream::local_name as loc;
 
 #[derive(Clone, Default)]
 struct OdfGraphicStyle {

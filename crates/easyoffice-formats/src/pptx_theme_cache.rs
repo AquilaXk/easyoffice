@@ -13,10 +13,7 @@ use crate::{EasyOfficeError, ZipArchiveEntry};
 
 const MAX_MASTER_LAYOUT_XML_EVENTS: usize = 131_072;
 
-#[inline]
-fn loc(name: &str) -> &str {
-    name.rsplit(':').next().unwrap_or(name)
-}
+use crate::xml_stream::local_name as loc;
 
 struct CachedLayout {
     layout_type: SlideMasterLayout,

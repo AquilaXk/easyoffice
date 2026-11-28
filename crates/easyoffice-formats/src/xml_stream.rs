@@ -169,6 +169,17 @@ pub(crate) fn attr<'a>(attrs: &Attrs<'a>, name: &str) -> Option<Cow<'a, str>> {
     attrs.get(name)
 }
 
+/// The name without its namespace prefix: what follows the last `:` (`a:off` is `off`). The prefix is a few
+/// bytes, and `str::rsplit` set up a word-at-a-time reverse search for them on every start tag of a slide
+/// file (about a tenth of reading a 500 slide deck, PD-397), so the short name is scanned byte by byte.
+#[inline]
+pub(crate) fn local_name(name: &str) -> &str {
+    match name.as_bytes().iter().rposition(|&byte| byte == b':') {
+        Some(at) => &name[at + 1..],
+        None => name,
+    }
+}
+
 /// Resolves the predefined and numeric entities of `text`; borrowed when it has no `&`.
 pub(crate) fn unescape_cow(text: &str) -> Cow<'_, str> {
     if XmlSanitizer::find_byte_swar(text.as_bytes(), 0, b'&').is_none() {

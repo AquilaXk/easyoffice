@@ -11,10 +11,7 @@ const MAX_THEME_XML_EVENTS: usize = 65_536;
 const MAX_FMT_STYLE_ENTRIES: usize = 16;
 const MAX_COLOR_TRANSFORMS: usize = 16;
 
-#[inline]
-fn loc(name: &str) -> &str {
-    name.rsplit(':').next().unwrap_or(name)
-}
+use crate::xml_stream::local_name as loc;
 
 #[inline]
 pub(crate) fn rgb_to_hex(rgb: u32) -> String {

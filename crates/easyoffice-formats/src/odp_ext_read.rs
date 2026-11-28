@@ -17,9 +17,7 @@ use crate::rich_slide_ext::{
 use crate::xml_stream::{attr, Attrs, XmlEvent};
 use crate::EasyOfficeError;
 
-fn loc(name: &str) -> &str {
-    name.rsplit(':').next().unwrap_or(name)
-}
+use crate::xml_stream::local_name as loc;
 
 fn attr_of(attrs: &Attrs<'_>, qualified: &str) -> Option<String> {
     attr(attrs, qualified)
