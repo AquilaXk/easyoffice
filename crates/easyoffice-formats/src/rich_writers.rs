@@ -30,8 +30,8 @@ use crate::rich_list_writers::{
 pub(crate) use crate::rich_markdown_writer::render_markdown_rich;
 use crate::rich_notes::{collect_note_ordinals, is_deleted_run, RichNoteKind};
 use crate::rich_page_frame::{
-    docx_cols_xml, docx_frame_parts_and_refs, docx_page_margins, docx_paper, docx_settings,
-    page_text_width_twips, DOCX_SETTINGS_PART,
+    docx_cols_xml, docx_frame_parts_and_refs, docx_line_numbers_xml, docx_page_margins, docx_paper,
+    docx_settings, page_text_width_twips, DOCX_SETTINGS_PART,
 };
 use crate::rich_rtf_writer::line_spacing_240ths;
 use crate::rich_run_writers::OdtTextKey;
@@ -40,6 +40,7 @@ use crate::rich_toc_writers::{
     docx_field_edges_cached, docx_toc_page, docx_toc_style_id, docx_toc_styles_xml, docx_toc_tabs,
     is_toc_block, odt_toc_page, odt_toc_paragraph_style, TocScope,
 };
+use crate::rich_word_features::RichSectionBreak;
 use crate::{
     EasyOfficeError, PdfDocumentModel, PdfPageModel, PdfSerializer, XmlSanitizer, ZipArchiveCodec,
 };
@@ -87,6 +88,9 @@ fn docx_default_paragraph(defaults: &RichDefaults) -> String {
     )
 }
 
+/// The built-in caption style the captions of pictures, tables and figures use (9 pt italic, as the Word program's).
+const DOCX_CAPTION_STYLE_XML: &str = "<w:style w:type=\"paragraph\" w:styleId=\"Caption\"><w:name w:val=\"caption\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:qFormat/><w:pPr><w:spacing w:after=\"200\" w:line=\"240\" w:lineRule=\"auto\"/></w:pPr><w:rPr><w:i/><w:iCs/><w:sz w:val=\"18\"/><w:szCs w:val=\"18\"/></w:rPr></w:style>";
+
 fn docx_styles_xml(has_toc: bool, defaults: &RichDefaults) -> String {
     let mut xml = format!(
         concat!(
@@ -120,6 +124,7 @@ fn docx_styles_xml(has_toc: bool, defaults: &RichDefaults) -> String {
             "<w:style w:type=\"paragraph\" w:styleId=\"{id}\"><w:name w:val=\"{name}\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:contextualSpacing/></w:pPr></w:style>"
         ));
     }
+    xml.push_str(DOCX_CAPTION_STYLE_XML);
     xml.push_str(DOCX_LINK_STYLE_XML);
     if has_toc {
         xml.push_str(&docx_toc_styles_xml());
@@ -206,6 +211,8 @@ fn push_docx_paragraph(
         Some(docx_toc_style_id(role))
     } else if (1..=6).contains(&p.heading_level) {
         Some(format!("Heading{}", p.heading_level))
+    } else if p.caption {
+        Some("Caption".to_string())
     } else {
         list_kind.and_then(|kind| match kind {
             RichListKind::Bullet => Some("ListBullet".to_string()),
@@ -307,7 +314,7 @@ pub(crate) fn docx_rich_entries(
         "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/>",
         "</Relationships>"
     );
-    let core_xml = crate::ooxml_shared_parts::core_properties_xml(&doc.display_title());
+    let core_xml = crate::ooxml_shared_parts::document_properties_xml(doc);
     let defaults = RichDefaults::of(doc);
     let styles = docx_styles_xml(doc.blocks.iter().any(is_toc_block), &defaults);
     let lists = plan_lists(&doc.blocks);
@@ -339,6 +346,17 @@ pub(crate) fn docx_rich_entries(
             seen_later_para = Some(p.columns);
         }
     }
+    // A section break ends a section at its paragraph, as a change of columns does.
+    for (idx, block) in doc.blocks.iter().enumerate() {
+        if let RichBlock::Paragraph(p) = block {
+            if p.section_break.is_some() && section_end_cols[idx].is_none() {
+                section_end_cols[idx] = Some(p.columns);
+            }
+        }
+    }
+    let line_numbers_xml = docx_line_numbers_xml(doc.page_frame.line_numbers);
+    // How the section that the next `w:sectPr` closes began (the break before it); the first one starts the document.
+    let mut section_start: Option<RichSectionBreak> = None;
     let text_width_twips = page_text_width_twips(&doc.page_frame);
     let (frame_entries, mut frame) = docx_frame_parts_and_refs(&doc.page_frame);
     // The frame belongs to the first section: its references and `titlePg` go on the `sectPr` that ends it, the later sections
@@ -360,7 +378,14 @@ pub(crate) fn docx_rich_entries(
                     } else {
                         ("", "")
                     };
-                    format!("<w:sectPr>{refs}<w:type w:val=\"continuous\"/>{pg_sz}{pg_mar}{cols_xml}{title_pg}</w:sectPr>")
+                    // A section break names how the section after it begins, which the `w:type` of that section's own
+                    // `w:sectPr` says: this one carries the type of the break before. A change of columns alone is continuous.
+                    let kind = match p.section_break {
+                        Some(next) => section_start.replace(next).map(RichSectionBreak::wire_name),
+                        None => Some("continuous"),
+                    };
+                    let type_xml = kind.map_or(String::new(), |k| format!("<w:type w:val=\"{k}\"/>"));
+                    format!("<w:sectPr>{refs}{type_xml}{pg_sz}{pg_mar}{line_numbers_xml}{cols_xml}{title_pg}</w:sectPr>")
                 });
                 push_docx_paragraph(
                     &mut body,
@@ -417,8 +442,11 @@ pub(crate) fn docx_rich_entries(
     } else {
         ("", "")
     };
+    let last_type = section_start.map_or(String::new(), |k| {
+        format!("<w:type w:val=\"{}\"/>", k.wire_name())
+    });
     body.push_str(&format!(
-        "<w:sectPr>{refs}{pg_sz}{pg_mar}{last_cols_xml}{title_pg}</w:sectPr>"
+        "<w:sectPr>{refs}{last_type}{pg_sz}{pg_mar}{line_numbers_xml}{last_cols_xml}{title_pg}</w:sectPr>"
     ));
     body.push_str("</w:body></w:document>");
 

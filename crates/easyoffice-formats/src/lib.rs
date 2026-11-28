@@ -102,6 +102,7 @@ mod rich_table_cells;
 mod rich_table_style;
 mod rich_table_writers;
 mod rich_toc_writers;
+pub mod rich_word_features;
 mod rich_writers;
 mod rich_xml;
 mod rtf_escape;
@@ -161,12 +162,14 @@ pub use rich_char_open_type::{OpenType, MAX_PACKED_OPEN_TYPE};
 pub use rich_char_spacing::{letter_spacing, MAX_LETTER_SPACING_TWIPS};
 pub use rich_defaults::RichDefaults;
 pub use rich_document::{
-    evaluate_table_formulas, frame_paragraph, normalize_hex_color, safe_link_target, RichAlignment,
-    RichBinding, RichBindingKind, RichBlock, RichColumns, RichDocument, RichField, RichLineSpacing,
+    evaluate_table_formulas, frame_paragraph, normalize_hex_color, safe_bookmark_name,
+    safe_field_code, safe_link_target, RichAlignment, RichBinding, RichBindingKind, RichBlock,
+    RichColumns, RichDocument, RichField, RichLineNumberRestart, RichLineNumbers, RichLineSpacing,
     RichListKind, RichListNumber, RichNumberEnclosure, RichNumberFormat, RichPageFrame,
-    RichPageMargins, RichPaper, RichParagraph, RichRun, RichScript, RichToc, MAX_LINE_PERCENT,
-    MAX_LINE_SPACING_TWIPS, MAX_PAGE_FRAME_PARAGRAPHS, MAX_PAGE_MARGIN_TWIPS,
-    MAX_PARA_SPACING_TWIPS, MAX_TOC_LEVEL, MAX_TOC_PAGE, TOC_BOOKMARK_PREFIX,
+    RichPageMargins, RichPaper, RichParagraph, RichProperties, RichRun, RichScript,
+    RichSectionBreak, RichToc, MAX_LINE_PERCENT, MAX_LINE_SPACING_TWIPS, MAX_PAGE_FRAME_PARAGRAPHS,
+    MAX_PAGE_MARGIN_TWIPS, MAX_PARA_SPACING_TWIPS, MAX_TOC_LEVEL, MAX_TOC_PAGE,
+    TOC_BOOKMARK_PREFIX,
 };
 pub use rich_font_face::{font_face, MAX_FONT_FACE_BYTES};
 pub use rich_image::{

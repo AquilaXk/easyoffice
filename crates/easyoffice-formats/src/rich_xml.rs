@@ -171,6 +171,35 @@ pub(crate) fn push_annotated_run(
     comment_id: Option<u32>,
     revision: Option<&RichRevision>,
 ) {
+    push_marked_run(
+        runs,
+        text,
+        fmt,
+        link,
+        comment_id,
+        revision,
+        RunMarks::default(),
+    );
+}
+
+/// What a run carries beyond its format: the field it is the result of and the bookmark that starts before it.
+#[derive(Default)]
+pub(crate) struct RunMarks<'a> {
+    pub(crate) field_code: Option<&'a str>,
+    pub(crate) bookmark_start: Option<String>,
+}
+
+/// [`push_annotated_run`] with the field and bookmark marks (PD-395): runs do not merge across a field boundary, into a run
+/// that a bookmark ends at, or into a run a bookmark starts at.
+pub(crate) fn push_marked_run(
+    runs: &mut Vec<RichRun>,
+    text: &str,
+    fmt: &CharFmt,
+    link: Option<&str>,
+    comment_id: Option<u32>,
+    revision: Option<&RichRevision>,
+    marks: RunMarks<'_>,
+) {
     if text.is_empty() {
         return;
     }
@@ -181,12 +210,18 @@ pub(crate) fn push_annotated_run(
             && last.revision.as_ref() == revision
             && fmt.matches_run(last)
             && last.link.as_deref() == link
+            && last.field_code.as_deref() == marks.field_code
+            && last.bookmark_end.is_none()
+            && marks.bookmark_start.is_none()
         {
             last.text.push_str(text);
             return;
         }
     }
     runs.push(RichRun {
+        field_code: marks.field_code.map(str::to_string),
+        bookmark_start: marks.bookmark_start,
+        bookmark_end: None,
         field: None,
         link: link.map(str::to_string),
         text: text.to_string(),

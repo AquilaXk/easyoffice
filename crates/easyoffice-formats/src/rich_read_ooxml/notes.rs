@@ -8,7 +8,7 @@ use crate::rich_notes::{
     MAX_AUTHOR_BYTES, MAX_COMMENTS_PER_DOCUMENT, MAX_DATE_BYTES, MAX_NOTES_PER_DOCUMENT,
     MAX_NOTE_TEXT_BYTES, MAX_REVISIONS_PER_DOCUMENT,
 };
-use crate::rich_xml::push_annotated_run;
+use crate::rich_xml::{push_marked_run, RunMarks};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{EasyOfficeError, RichRun, RichScript};
 
@@ -300,14 +300,19 @@ impl DocxWalker {
         }
         let link_len = self.link.as_deref().map_or(0, str::len);
         self.text_budget.charge_run(link_len, "DOCX 런")?;
+        let marks = RunMarks {
+            field_code: self.field_code.as_deref(),
+            bookmark_start: self.pending_bookmark_start.take(),
+        };
         if let Some(top) = self.paras.last_mut() {
-            push_annotated_run(
+            push_marked_run(
                 &mut top.runs,
                 &self.cur_text,
                 &self.fmt,
                 self.link.as_deref(),
                 comment_id,
                 self.revision_stack.last(),
+                marks,
             );
         }
         self.cur_text.clear();

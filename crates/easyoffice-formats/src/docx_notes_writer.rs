@@ -218,6 +218,29 @@ fn close_revision(out: &mut String, open_rev: &mut Option<&RichRevision>) {
     }
 }
 
+/// The start of a complex field: `begin`, the instruction and `separate`; the runs that follow are its result.
+fn push_field_begin(out: &mut String, code: &str) {
+    let _ = write!(
+        out,
+        "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> {} </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>",
+        XmlSanitizer::escape(code)
+    );
+}
+
+fn close_field(out: &mut String, open_field: &mut Option<&str>) {
+    if open_field.take().is_some() {
+        out.push_str("<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>");
+    }
+}
+
+fn push_bookmark_start(out: &mut String, id: usize, name: &str) {
+    let _ = write!(
+        out,
+        "<w:bookmarkStart w:id=\"{id}\" w:name=\"{}\"/>",
+        XmlSanitizer::escape(name)
+    );
+}
+
 fn close_comment(out: &mut String, open_comment: &mut Option<u32>) {
     if let Some(cid) = open_comment.take() {
         let _ = write!(
@@ -233,9 +256,15 @@ pub(crate) fn push_docx_paragraph_runs(out: &mut String, p: &RichParagraph, link
     let mut cur_comment: Option<u32> = None;
     let mut cur_rev: Option<&RichRevision> = None;
     let mut cur_link: Option<&str> = None;
+    let mut cur_field: Option<&str> = None;
 
     for run in p.runs.iter().filter(|r| {
-        !r.text.is_empty() || r.field.is_some() || r.note_ref.is_some() || r.comment_id.is_some()
+        !r.text.is_empty()
+            || r.field.is_some()
+            || r.note_ref.is_some()
+            || r.comment_id.is_some()
+            || r.bookmark_start.is_some()
+            || r.bookmark_end.is_some()
     }) {
         let want_comment = run.comment_id;
         let want_rev = run.revision.as_ref();
@@ -292,6 +321,27 @@ pub(crate) fn push_docx_paragraph_runs(out: &mut String, p: &RichParagraph, link
             }
         }
 
+        // A field (`DATE`, `TIME`, `REF`, `SEQ`) spans the runs that share its instruction.
+        let want_field = run.field_code.as_deref();
+        if cur_field != want_field {
+            close_field(out, &mut cur_field);
+            if let Some(code) = want_field {
+                push_field_begin(out, code);
+                cur_field = Some(code);
+            }
+        }
+        if let Some(id) = run
+            .bookmark_start
+            .as_deref()
+            .and_then(|name| links.start_bookmark(name).map(|id| (id, name)))
+        {
+            push_bookmark_start(out, id.0, id.1);
+        }
+        let bookmark_end = run
+            .bookmark_end
+            .as_deref()
+            .and_then(|name| links.bookmark_id(name));
+
         if let Some((kind, id)) = run.note_ref {
             let tag = match kind {
                 RichNoteKind::Footnote => "w:footnoteReference",
@@ -301,31 +351,30 @@ pub(crate) fn push_docx_paragraph_runs(out: &mut String, p: &RichParagraph, link
                 out,
                 "<w:r><w:rPr><w:vertAlign w:val=\"superscript\"/></w:rPr><{tag} w:id=\"{id}\"/></w:r>"
             );
-            continue;
+        } else if let Some(field) = run.field {
+            out.push_str(&docx_field_run(field, &docx_run_properties(run)));
+        } else if !run.text.is_empty() {
+            let properties = docx_run_properties(run);
+            out.push_str("<w:r>");
+            out.push_str(&if cur_link.is_some() {
+                docx_linked_run_properties(&properties)
+            } else {
+                properties
+            });
+            let text_tag = if is_deleted_run(run) {
+                "w:delText"
+            } else {
+                "w:t"
+            };
+            push_docx_text_tagged(out, &run.text, text_tag);
+            out.push_str("</w:r>");
         }
-        let properties = docx_run_properties(run);
-        if let Some(field) = run.field {
-            out.push_str(&docx_field_run(field, &properties));
-            continue;
+        if let Some(id) = bookmark_end {
+            let _ = write!(out, "<w:bookmarkEnd w:id=\"{id}\"/>");
         }
-        if run.text.is_empty() {
-            continue;
-        }
-        out.push_str("<w:r>");
-        out.push_str(&if cur_link.is_some() {
-            docx_linked_run_properties(&properties)
-        } else {
-            properties
-        });
-        let text_tag = if is_deleted_run(run) {
-            "w:delText"
-        } else {
-            "w:t"
-        };
-        push_docx_text_tagged(out, &run.text, text_tag);
-        out.push_str("</w:r>");
     }
 
+    close_field(out, &mut cur_field);
     if cur_link.is_some() {
         out.push_str("</w:hyperlink>");
     }

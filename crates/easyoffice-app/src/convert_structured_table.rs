@@ -36,6 +36,9 @@ pub(crate) fn write_image_fields(out: &mut String, img: &RichImage) {
 /// Appends optional `colWidthsTwips`, `cellStyles`, and `cellImages` JSON properties to an open
 /// table object in `decode` responses.
 pub(crate) fn write_table_extras(out: &mut String, table: &RichTable) {
+    if table.header_rows > 0 {
+        let _ = write!(out, ",\"headerRows\":{}", table.header_rows);
+    }
     if let Some(widths) = table.validated_col_widths() {
         out.push_str(",\"colWidthsTwips\":[");
         for (idx, w) in widths.iter().enumerate() {
@@ -465,6 +468,9 @@ pub(super) fn parse_table(
         ));
     }
     let max_cols = table.column_count();
+    // The header rows that repeat on every page: from the top, at most the rows the table has.
+    table.header_rows = opt_bounded(obj, "headerRows", 0, 1_000_000)?
+        .map_or(0, |n| (n as usize).min(table.rows.len()) as u32);
     table.col_widths_twips = parse_col_widths(obj, max_cols, warnings)?;
     table.cell_styles = parse_cell_styles(obj, &table.rows, budget, warnings)?;
     table.cell_images = parse_cell_images(obj, &table.rows, budget, img_budget, warnings)?;

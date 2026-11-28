@@ -36,9 +36,11 @@ pub(crate) fn write_run_annotations(out: &mut String, r: &RichRun) {
         push_json_str(out, &rev.date);
         out.push('}');
     }
+    super::convert_structured_word::write_run_word(out, r);
 }
 
 pub(crate) fn write_doc_root_notes(out: &mut String, doc: &RichDocument) {
+    super::convert_structured_word::write_doc_word(out, doc);
     if doc.track_changes {
         out.push_str(",\"trackChanges\":true");
     }

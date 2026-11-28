@@ -27,6 +27,44 @@ pub(crate) fn core_properties_xml(title: &str) -> String {
     )
 }
 
+/// `docProps/core.xml` of a document: the title (the property the user wrote, else the document's), the author (a file with
+/// none gets the placeholder creator, which the reader takes for no author), the subject, the keywords and the comments.
+pub(crate) fn document_properties_xml(doc: &crate::RichDocument) -> String {
+    let properties = doc.properties.bounded();
+    let title = if properties.title.is_empty() {
+        doc.display_title()
+    } else {
+        properties.title.clone()
+    };
+    let author = if properties.author.is_empty() {
+        crate::rich_word_features::PLACEHOLDER_CREATOR.to_string()
+    } else {
+        properties.author.clone()
+    };
+    let optional = |tag: &str, value: &str| {
+        if value.is_empty() {
+            String::new()
+        } else {
+            format!("<{tag}>{}</{tag}>", XmlSanitizer::escape(value))
+        }
+    };
+    format!(
+        concat!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
+            "<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" ",
+            "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\" ",
+            "xmlns:dcmitype=\"http://purl.org/dc/dcmitype/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "<dc:title>{}</dc:title>{}<dc:creator>{}</dc:creator>{}{}",
+            "</cp:coreProperties>"
+        ),
+        XmlSanitizer::escape(&title),
+        optional("dc:subject", &properties.subject),
+        XmlSanitizer::escape(&author),
+        optional("cp:keywords", &properties.keywords),
+        optional("dc:description", &properties.comments),
+    )
+}
+
 /// Writes `w:tblPr` and `w:tblGrid`, which must precede the first `w:tr` (ECMA-376 §17.4.38).
 pub(crate) fn push_docx_table_properties(out: &mut String, rows: &[Vec<String>]) {
     push_docx_table_properties_with_widths_for_page(out, rows, None, DOCX_TEXT_WIDTH_TWIPS);

@@ -453,6 +453,7 @@ pub(super) fn finalize_odt_document(
             comments: odt_notes.comments,
             track_changes: odt_notes.track_changes,
             defaults: Some(super::defaults::read_odt_defaults(styles_xml)?),
+            properties: Default::default(),
         },
         warnings,
     ))

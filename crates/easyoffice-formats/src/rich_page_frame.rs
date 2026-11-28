@@ -58,6 +58,25 @@ pub(crate) fn docx_field_run(field: RichField, run_properties: &str) -> String {
     )
 }
 
+/// `w:lnNumType` of the section properties (ECMA-376 17.6.8): `w:start` counts from 0, so the first number shown is
+/// `start + 1`; a distance of 0 is left to the program.
+pub(crate) fn docx_line_numbers_xml(numbers: Option<crate::RichLineNumbers>) -> String {
+    let Some(n) = numbers else {
+        return String::new();
+    };
+    let distance = if n.distance_twips > 0 {
+        format!(" w:distance=\"{}\"", n.distance_twips)
+    } else {
+        String::new()
+    };
+    format!(
+        "<w:lnNumType w:countBy=\"{}\" w:start=\"{}\"{distance} w:restart=\"{}\"/>",
+        n.count_by,
+        n.start.saturating_sub(1),
+        n.restart.wire_name()
+    )
+}
+
 /// `w:pgSz` for the section properties: A4 when the document has no paper of its own, `w:orient` when the page
 /// is wider than high.
 pub(crate) fn docx_paper(paper: Option<&RichPaper>) -> String {

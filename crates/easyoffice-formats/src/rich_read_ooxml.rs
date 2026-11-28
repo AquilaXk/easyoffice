@@ -22,6 +22,10 @@ use crate::rich_table::{
     estimate_cell_paragraphs_bytes, join_rich_cell_paragraphs, run_extra_metadata_bytes,
     TableAssembler, MAX_CELL_PARAGRAPH_ENTRIES,
 };
+use crate::rich_word_features::{
+    safe_bookmark_name, safe_field_code, RichLineNumberRestart, RichLineNumbers, RichProperties,
+    RichSectionBreak, MAX_BOOKMARKS, PLACEHOLDER_CREATOR,
+};
 use crate::rich_xml::{check_paragraph_depth, push_linked_run, toggle_on, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
@@ -40,6 +44,8 @@ mod notes;
 mod styles;
 #[path = "rich_read_ooxml/table.rs"]
 mod table;
+#[path = "rich_read_ooxml/word.rs"]
+mod word;
 use frame::*;
 use notes::{read_docx_comments, read_docx_notes};
 use styles::*;
@@ -170,6 +176,18 @@ pub(super) struct DocxWalker {
     simple_field: Option<(RichField, bool)>,
     /// The field of a complex field whose result is open.
     result_field: Option<RichField>,
+    /// The instruction of the body field whose result is open (`DATE`, `TIME`, `REF`, `SEQ`; PD-395).
+    field_code: Option<String>,
+    /// Bookmark ids to names, the bookmark that started and has no run yet, and how many were read.
+    bookmark_names: HashMap<String, String>,
+    pending_bookmark_start: Option<String>,
+    bookmark_total: usize,
+    /// Inside a `w:sectPr`, its `w:type`, the `w:type` of every section read, and the paragraphs that closed one.
+    in_sect_pr: bool,
+    section_type: Option<RichSectionBreak>,
+    section_types: Vec<Option<RichSectionBreak>>,
+    section_marks: Vec<(usize, usize)>,
+    line_numbers: Option<RichLineNumbers>,
     /// `w:pgMar` and `w:pgSz` of the open section, and the page setup of the first section that gives margins.
     section_margins: Option<RichPageMargins>,
     section_paper: Option<RichPaper>,
@@ -192,7 +210,7 @@ const MAX_SDT_DEPTH: usize = 16;
 impl DocxWalker {
     /// Handles an element start; returns true when the whole subtree must be skipped.
     fn on_start(&mut self, name: &str, attrs: &Attrs<'_>) -> Result<bool, EasyOfficeError> {
-        if self.frame_mode && name == "w:instrText" {
+        if name == "w:instrText" {
             self.in_instruction = true;
             return Ok(false);
         }
@@ -286,7 +304,9 @@ impl DocxWalker {
                 if let Some(top) = self.paras.last_mut() {
                     top.bookmark = top.bookmark.or(number);
                 }
+                self.start_bookmark(attrs);
             }
+            "w:bookmarkEnd" => self.end_bookmark(attrs),
             "w:pPr" => self.in_ppr = true,
             "w:tab" if self.in_ppr => {
                 if let Some(top) = self.paras.last_mut() {
@@ -315,7 +335,15 @@ impl DocxWalker {
                 self.section_paper = None;
                 self.section_cols = None;
                 self.section_title_pg = false;
+                self.section_type = None;
+                self.in_sect_pr = true;
             }
+            "w:type" if self.in_sect_pr => {
+                self.section_type = attr(attrs, "w:val")
+                    .as_deref()
+                    .and_then(RichSectionBreak::from_wire_name);
+            }
+            "w:lnNumType" if self.in_sect_pr => self.read_line_numbers(attrs),
             "w:pgMar" => {
                 self.section_margins = page_margins(attrs);
                 self.section_gutter = page_gutter(attrs);
@@ -339,9 +367,12 @@ impl DocxWalker {
                     .and_then(|i| field_of_instruction(&i))
                     .map(|field| (field, false));
             }
-            "w:fldChar" if self.frame_mode => match attr(attrs, "w:fldCharType").as_deref() {
+            "w:fldSimple" => {
+                self.field_code = attr(attrs, "w:instr").and_then(|i| safe_field_code(&i));
+            }
+            "w:fldChar" => match attr(attrs, "w:fldCharType").as_deref() {
                 Some("begin") => self.field_instruction = Some(String::new()),
-                Some("separate") => {
+                Some("separate") if self.frame_mode => {
                     let field = self
                         .field_instruction
                         .take()
@@ -351,9 +382,16 @@ impl DocxWalker {
                         self.push_field_run(field)?;
                     }
                 }
+                Some("separate") => {
+                    self.field_code = self
+                        .field_instruction
+                        .take()
+                        .and_then(|i| safe_field_code(&i));
+                }
                 Some("end") => {
                     self.field_instruction = None;
                     self.result_field = None;
+                    self.field_code = None;
                 }
                 _ => {}
             },
@@ -497,8 +535,14 @@ impl DocxWalker {
                 self.revision_stack.pop();
             }
             "w:instrText" => self.in_instruction = false,
-            "w:fldSimple" => self.simple_field = None,
+            "w:fldSimple" => {
+                self.simple_field = None;
+                self.field_code = None;
+            }
             "w:sectPr" => {
+                self.in_sect_pr = false;
+                let ordinal = self.section_types.len();
+                self.section_types.push(self.section_type.take());
                 if self.first_margins.is_none() && self.section_margins.is_some() {
                     self.first_gutter = self.section_gutter;
                 }
@@ -519,6 +563,7 @@ impl DocxWalker {
                 let cols = self.section_cols.take();
                 if let Some(top) = self.paras.last_mut() {
                     top.sect_end = Some(cols);
+                    top.section_ordinal = Some(ordinal);
                 } else {
                     self.apply_section_cols(cols);
                 }
@@ -599,6 +644,7 @@ impl DocxWalker {
                     {
                         table.col_widths_twips = widths;
                     }
+                    table.header_rows = self.table_state.header_rows.min(table.rows.len() as u32);
                     self.dropped_merges += dropped;
                     self.blocks.push(RichBlock::Table(table));
                 }
@@ -677,6 +723,7 @@ impl DocxWalker {
             return Ok(());
         };
         let sect_end = p.sect_end.take();
+        let section_ordinal = p.section_ordinal.take();
         let images = std::mem::take(&mut p.images);
         if self.tbl_depth > 0 {
             let para = resolver.finish(p);
@@ -729,6 +776,9 @@ impl DocxWalker {
             }
             self.pending_page_break |= (carried && !kept) || after;
             self.blocks.extend(images.into_iter().map(RichBlock::Image));
+            if let Some(ordinal) = section_ordinal {
+                self.section_marks.push((self.blocks.len(), ordinal));
+            }
             if let Some(cols) = sect_end {
                 self.apply_section_cols(cols);
             }
@@ -847,6 +897,9 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
     if page_frame.margins.is_some() {
         page_frame.binding = binding;
     }
+    page_frame.line_numbers = walker.line_numbers;
+    walker.apply_section_breaks();
+    let properties = word::read_properties(checked_part(&parts, "docProps/core.xml"));
     let mut warnings = walker.warnings;
     for note in frame_warnings {
         if !warnings.contains(&note) {
@@ -869,6 +922,7 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
             comments,
             track_changes: settings.track_revisions,
             defaults: Some(defaults),
+            properties,
         },
         warnings,
     ))

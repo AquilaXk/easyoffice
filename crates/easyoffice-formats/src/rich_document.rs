@@ -182,6 +182,13 @@ pub struct RichRun {
     pub comment_id: Option<u32>,
     /// Tracked-change revision metadata (`Insert` or `Delete`) when tracked.
     pub revision: Option<RichRevision>,
+    /// The instruction of the field whose result is `text` (`DATE`, `TIME`, `REF`, `SEQ`; [`safe_field_code`]). Runs that
+    /// follow one another with the same instruction are one field; the writers that have no counterpart write the text.
+    pub field_code: Option<String>,
+    /// A bookmark ([`safe_bookmark_name`]) starts before this run's text.
+    pub bookmark_start: Option<String>,
+    /// The bookmark of that name ends after this run's text.
+    pub bookmark_end: Option<String>,
 }
 
 /// A value the page fills in at each page it is drawn on.
@@ -199,6 +206,10 @@ pub enum RichField {
 pub use crate::rich_page_setup::{
     RichBinding, RichBindingKind, RichPageMargins, RichPaper, MAX_PAGE_MARGIN_TWIPS,
     MIN_PAGE_BODY_TWIPS,
+};
+pub use crate::rich_word_features::{
+    safe_bookmark_name, safe_field_code, RichLineNumberRestart, RichLineNumbers, RichProperties,
+    RichSectionBreak,
 };
 
 /// Most paragraphs of one header or footer; a file with more keeps the first ones.
@@ -225,6 +236,10 @@ pub struct RichPageFrame {
     pub paper: Option<RichPaper>,
     /// The binding of the first section (one-sided with no gutter when the file gives none).
     pub binding: RichBinding,
+    /// Line numbers in the margin of every section (DOCX `w:lnNumType`).
+    pub line_numbers: Option<RichLineNumbers>,
+    /// The text watermark behind the text of every page (DOCX: a shape in the header, ODT: none).
+    pub watermark: Option<String>,
 }
 
 impl RichPageFrame {
@@ -430,6 +445,10 @@ pub struct RichParagraph {
     /// The paragraph shows, after the body, text that the document also holds elsewhere (the header and footer of a Pages file).
     /// `Some("")` matches `page_frame`/appendix headings (legacy boolean flag), while non-empty `Some(orig)` matches the exact copy text read by the reader.
     pub frame_copy: Option<String>,
+    /// The paragraph is a caption (DOCX style `Caption`) of a picture, table or figure.
+    pub caption: bool,
+    /// A section break follows this paragraph and the next section begins as [`RichSectionBreak`] says.
+    pub section_break: Option<RichSectionBreak>,
 }
 
 impl RichParagraph {
@@ -470,6 +489,8 @@ pub struct RichDocument {
     /// Document-wide defaults of an opened file (PD-363); `None` for a new document, which gets the
     /// Korean defaults of PD-307 when it is written.
     pub defaults: Option<crate::RichDefaults>,
+    /// Author, subject, keywords and comments of the document (the title is `title`).
+    pub properties: RichProperties,
 }
 
 /// The headings of the header and footer appendix, and the prefixes it puts before first-page and even-page text.

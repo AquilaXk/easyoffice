@@ -43,6 +43,9 @@ pub(super) struct DocxTableState {
     pub(super) cell_borders: TableCellBorders,
     pub(super) cell_tc_w: Option<u32>,
     pub(super) cell_images: Vec<RichImage>,
+    /// `w:tblHeader` of the open row, and how many rows from the top are header rows (a header row after a body row is not one).
+    row_is_header: bool,
+    pub(super) header_rows: u32,
 }
 
 impl DocxTableState {
@@ -84,11 +87,18 @@ impl DocxTableState {
     }
 
     pub(super) fn finish_row(&mut self) {
+        if self.row_is_header && self.header_rows as usize == self.row_idx {
+            self.header_rows += 1;
+        }
+        self.row_is_header = false;
         self.row_idx = self.row_idx.saturating_add(1);
     }
 
     pub(super) fn on_start(&mut self, name: &str, attrs: &Attrs<'_>) {
         match name {
+            "w:tblHeader" if !self.in_cell => {
+                self.row_is_header = crate::rich_xml::toggle_on(attr(attrs, "w:val").as_deref());
+            }
             "w:tblPr" if !self.in_cell => self.in_tbl_pr = true,
             "w:tblGrid" if !self.in_cell => self.in_tbl_grid = true,
             "w:tblW" if self.in_tbl_pr => {

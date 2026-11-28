@@ -343,7 +343,12 @@ pub(crate) fn push_docx_table(out: &mut String, table: &RichTable, ctx: &mut Doc
         ctx.text_width_twips,
     );
     for (r, row) in table.rows.iter().enumerate() {
-        out.push_str("<w:tr>");
+        // The header rows repeat at the top of every page the table runs onto.
+        out.push_str(if (r as u32) < table.header_rows {
+            "<w:tr><w:trPr><w:tblHeader/></w:trPr>"
+        } else {
+            "<w:tr>"
+        });
         let mut c = 0;
         while c < row.len() {
             let state = spans.as_ref().map_or(CellSpan::Plain, |m| m.at(r, c));

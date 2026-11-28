@@ -35,6 +35,8 @@ pub(super) struct ParaState {
     pub(super) page_break_before: bool,
     pub(super) page_break_after: bool,
     pub(super) sect_end: Option<Option<RichColumns>>,
+    /// The ordinal of the section a `w:sectPr` in this paragraph closed (the section break after it, PD-395).
+    pub(super) section_ordinal: Option<usize>,
     pub(super) zones: Vec<(String, Vec<RichRun>)>,
     pub(super) task_checkbox: Option<bool>,
     pub(super) strip_task_space: bool,
@@ -202,8 +204,23 @@ impl Resolver<'_> {
             toc_page,
             toc_dots: toc_page.is_some() && p.tab_leader.as_deref().is_none_or(|l| l == "dot"),
             page_break_before: p.page_break_before,
+            caption: heading == 0
+                && toc.is_none()
+                && p.style_id
+                    .as_deref()
+                    .is_some_and(|id| self.is_caption_style(id)),
             ..RichParagraph::default()
         }
+    }
+
+    /// Whether a style is the built-in caption style (`Caption`, or a style named `caption`).
+    fn is_caption_style(&self, style_id: &str) -> bool {
+        style_id.eq_ignore_ascii_case("caption")
+            || self
+                .styles
+                .get(style_id)
+                .and_then(|st| st.name.as_deref())
+                .is_some_and(|name| name.eq_ignore_ascii_case("caption"))
     }
 }
 

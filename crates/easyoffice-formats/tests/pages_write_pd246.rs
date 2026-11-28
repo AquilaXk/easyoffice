@@ -442,6 +442,7 @@ fn page_setup_duplex_margins_and_section_headers_footers_roundtrip_and_keep_inva
             alignment: Some(RichAlignment::Left),
             ..para(vec![run("짝수 바닥글")])
         }],
+        ..RichPageFrame::default()
     };
     assert_eq!(pages_write_loss(&source), PagesWriteLoss::default());
 

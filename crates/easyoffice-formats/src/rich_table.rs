@@ -61,6 +61,8 @@ pub struct RichTable {
     pub cell_styles: Vec<TableCellStyleEntry>,
     pub cell_images: Vec<TableCellImage>,
     pub cell_paragraphs: Vec<TableCellParagraphs>,
+    /// The rows from the top that repeat at the top of every page the table runs onto (DOCX `w:tblHeader`).
+    pub header_rows: u32,
 }
 
 impl From<Vec<Vec<String>>> for RichTable {
@@ -79,6 +81,7 @@ impl RichTable {
             cell_styles: Vec::new(),
             cell_images: Vec::new(),
             cell_paragraphs: Vec::new(),
+            header_rows: 0,
         }
     }
 
@@ -95,6 +98,7 @@ impl RichTable {
                 cell_styles: Vec::new(),
                 cell_images: Vec::new(),
                 cell_paragraphs: Vec::new(),
+                header_rows: 0,
             },
             dropped,
         )
@@ -118,6 +122,7 @@ impl RichTable {
                 cell_styles: Vec::new(),
                 cell_images: Vec::new(),
                 cell_paragraphs: Vec::new(),
+                header_rows: 0,
             },
             dropped_merges,
             dropped_links,

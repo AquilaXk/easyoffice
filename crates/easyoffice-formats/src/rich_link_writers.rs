@@ -43,9 +43,32 @@ const DOCX_HYPERLINK_REL_TYPE: &str =
 pub(crate) struct DocxLinks {
     urls: Vec<String>,
     index: HashMap<String, usize>,
+    /// The ids of the bookmarks that started, by name (`w:bookmarkStart` and `w:bookmarkEnd` pair by id).
+    bookmarks: HashMap<String, usize>,
 }
 
+/// Bookmark ids start here, above the ids of the table-of-contents bookmarks (their heading numbers).
+const DOCX_BOOKMARK_ID_BASE: usize = 100_000;
+
 impl DocxLinks {
+    /// The id of a bookmark that starts here: `None` for a name that already started (Word needs unique names) and
+    /// past [`crate::rich_word_features::MAX_BOOKMARKS`].
+    pub(crate) fn start_bookmark(&mut self, name: &str) -> Option<usize> {
+        if self.bookmarks.contains_key(name)
+            || self.bookmarks.len() >= crate::rich_word_features::MAX_BOOKMARKS
+        {
+            return None;
+        }
+        let id = DOCX_BOOKMARK_ID_BASE + self.bookmarks.len();
+        self.bookmarks.insert(name.to_string(), id);
+        Some(id)
+    }
+
+    /// The id of the bookmark an end closes, when it started.
+    pub(crate) fn bookmark_id(&self, name: &str) -> Option<usize> {
+        self.bookmarks.get(name).copied()
+    }
+
     pub(crate) fn rel_id(&mut self, url: &str) -> String {
         let idx = if let Some(&at) = self.index.get(url) {
             at

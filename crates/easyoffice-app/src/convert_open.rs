@@ -25,7 +25,8 @@ use crate::convert_hwp::ShellWriters;
 use crate::convert_password::{accepts_loss, password_lost, REFUSED_PASSWORD_LOSS};
 use crate::convert_structured::convert_structured_table::{write_image_fields, write_table_extras};
 use crate::convert_structured::{
-    convert_structured_defaults, convert_structured_notes, encode_source_target, StructuredContent,
+    convert_structured_defaults, convert_structured_notes, convert_structured_word,
+    encode_source_target, StructuredContent,
 };
 use crate::convert_structured_doc::parse_pdf_options;
 use crate::line_spacing_json::write_line_spacing_json;
@@ -134,9 +135,7 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
     if let Some(number) = p.bookmark {
         let _ = write!(out, ",\"bookmark\":{number}");
     }
-    if p.page_break_before {
-        out.push_str(",\"pageBreakBefore\":true");
-    }
+    convert_structured_word::write_paragraph_word(out, p);
     if let Some(copy) = &p.frame_copy {
         if copy.is_empty() {
             out.push_str(",\"frameCopy\":true");

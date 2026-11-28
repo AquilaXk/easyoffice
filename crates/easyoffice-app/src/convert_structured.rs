@@ -35,6 +35,8 @@ pub(crate) mod convert_structured_defaults;
 pub(crate) mod convert_structured_notes;
 #[path = "convert_structured_table.rs"]
 pub(crate) mod convert_structured_table;
+#[path = "convert_structured_word.rs"]
+pub(crate) mod convert_structured_word;
 
 use crate::convert_structured_doc::parse_pdf_options;
 use crate::line_spacing_json::parse_line_spacing;
@@ -230,8 +232,14 @@ pub(crate) fn parse_structured_content(
         let notes = convert_structured_notes::parse_doc_notes(entries, &mut budget)?;
         let comments = convert_structured_notes::parse_doc_comments(entries, &mut budget)?;
         let track_changes = opt_bool(entries, "trackChanges")?;
+        let (properties, line_numbers, watermark) =
+            convert_structured_word::parse_document_word(entries)?;
+        let mut page_frame = parse_page_frame(entries, &mut budget)?;
+        page_frame.line_numbers = line_numbers;
+        page_frame.watermark = watermark;
         let doc = RichDocument {
-            page_frame: parse_page_frame(entries, &mut budget)?,
+            page_frame,
+            properties,
             title: String::new(),
             blocks,
             official_agency: None,
@@ -344,6 +352,8 @@ fn parse_page_frame(
         margins,
         paper,
         binding,
+        line_numbers: None,
+        watermark: None,
     })
 }
 
@@ -373,7 +383,11 @@ pub(crate) fn parse_runs(
                 .ok_or_else(|| invalid("구조화 저장: run 'text'는 문자열이어야 합니다."))?;
             let (note_ref, comment_id, revision) =
                 convert_structured_notes::parse_run_annotations(run, budget)?;
+            let word = convert_structured_word::parse_run_word(run)?;
             runs.push(RichRun {
+                field_code: word.field_code,
+                bookmark_start: word.bookmark_start,
+                bookmark_end: word.bookmark_end,
                 field: opt_run_field(run)?,
                 link: opt_link(run)?,
                 text: text.to_string(),
@@ -490,6 +504,7 @@ fn parse_paragraph(
         None => None,
         Some(v) => parse_doc_columns(v)?,
     };
+    let (caption, section_break) = convert_structured_word::parse_paragraph_word(obj)?;
     Ok(RichParagraph {
         list_level,
         list_number,
@@ -531,6 +546,8 @@ fn parse_paragraph(
         page_break_before: opt_bool(obj, "pageBreakBefore")?,
         columns,
         frame_copy: opt_frame_copy(obj)?,
+        caption,
+        section_break,
     })
 }
 
