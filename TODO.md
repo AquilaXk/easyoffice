@@ -3,7 +3,6 @@
 ## 지금
 - [ ] 설치본 실기기 점검(아래; 현재 공개판은 `v0.2.3`)
 - [ ] `docs/office-parity.md`의 없음·일부 항목을 중요도 순으로 구현(상세는 표, PD-393)
-- [ ] 코파일럿 시트 `sheet.structure` 내부 경로(`executeSheetStructure`)가 이동한 마지막 줄을 한 번 더 복사한다(데이터가 있는 시트에 `insert_rows at 2`, A5·B5 중복). 실제 조작 경로의 결과가 맞다(PD-392)
 - [ ] 코파일럿 포인터의 실제 조작을 내장 한글 편집기와 시트 서식·차트·정렬로 넓힘(PD-392 Revisit)
 
 ## v0.2.3 실기기 점검 (macOS·Windows)

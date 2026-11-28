@@ -278,11 +278,16 @@ export const copilotRealSheetSteps = [
     assert.ok(log.some((e) => e.type === "click" && e.act === "row-insert-above"), "the menu item's handler ran");
     assert.equal(await page.$eval('#pane-sheet td[data-cell="A3"]', (el) => el.textContent), "가", "the row moved down");
     const state = await stable(page, sheetState);
-    // (4) The rows from the second one moved down by one. The internal path of the structure change (`executeSheetStructure`) copies the last moved
-    // row once more below itself (`A5`, `B5`), so its result is not the one to compare with: the rows the two paths agree on are compared.
+    // (4) The rows from the second one moved down by one, all rows compared with the internal path's.
     const internal = await internalResult(page, { seed: async () => {}, prompt: ["표를 채워 주세요", "둘째 줄 앞에 줄을 넣어 주세요"], answers: [[PLAIN], [insert]], read: sheetState, settle: sheetSettled(["A3"]) });
-    assert.equal(JSON.stringify(state), JSON.stringify(internal.slice(0, state.length)));
-    assert.deepEqual(state.map((s) => s.slice(0, 3).join("=")), ["A1=항목=", "B1=값=", "A3=가=", "B3=10=", "A4=나=", "B4=20="]);
+    assert.equal(JSON.stringify(state), JSON.stringify(internal));
+    // Regression: the internal path alone moves every row once (no last row copied below itself: `A5`, `B5`), with its formula following.
+    const expected = ["A1=항목=", "B1=값=", "A3=가=", "B3=10=", "A4=나=", "B4=20="];
+    assert.deepEqual(state.map((s) => s.slice(0, 3).join("=")), expected);
+    assert.deepEqual(internal.map((s) => s.slice(0, 3).join("=")), expected);
+    const withFormula = { op: "sheet.write", cells: [{ coord: "A1", raw: "1" }, { coord: "A2", raw: "2" }, { coord: "A3", raw: "=SUM(A1:A2)" }] };
+    const shifted = await internalResult(page, { seed: async () => {}, prompt: ["합계를 넣어 주세요", "둘째 줄 앞에 줄을 넣어 주세요"], answers: [[withFormula], [insert]], read: sheetState, settle: sheetSettled(["A3"]) });
+    assert.deepEqual(shifted.map((s) => s.slice(0, 3).join("=")), ["A1=1=", "A3=2=", "A4=3==SUM(A1:A3)"]);
     // (5) one undo takes the row back (the data stays)
     await undoLast(page);
     await page.waitForFunction(() => document.querySelector('#pane-sheet td[data-cell="A2"]')?.textContent === "가", undefined, TICK);
