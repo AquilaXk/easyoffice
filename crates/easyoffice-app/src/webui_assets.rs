@@ -247,6 +247,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "sheet-text-columns.js",
     "sheet-utils.js",
     "sheet-view-live.js",
+    "sheet-view-options.js",
     "sheet-view-state.js",
     "sheet-view-ui.js",
     "shell-chrome.js",

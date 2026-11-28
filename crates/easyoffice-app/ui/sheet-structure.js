@@ -99,6 +99,7 @@
     const tabMenu = host.__EASYOFFICE_CREATE_SHEET_TAB_MENU__({ document, getTabs: () => tabs, ui: tabUi });
     const mediaUi = host.__EASYOFFICE_CREATE_SHEET_MEDIA_UI__?.(deps) ?? null;
     const noteUi = host.__EASYOFFICE_CREATE_SHEET_NOTE_UI__?.(deps) ?? null;
+    const viewOptions = host.__EASYOFFICE_CREATE_SHEET_VIEW_OPTIONS__?.(deps) ?? null;
     const kit = host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document);
 
     function say(text) {
@@ -563,6 +564,7 @@
       ...tableUi.actions,
       ...(mediaUi?.actions || {}),
       ...(noteUi?.actions || {}),
+      ...(viewOptions?.actions || {}),
       "tab-add": () => tabs.insert(null),
       "tab-color": () => Promise.resolve(tabMenu.openColor(getActiveSheetName())),
       ...tabs.actions,
@@ -811,6 +813,7 @@
       host.__EASYOFFICE_SHEET_CALC_OPTIONS__?.syncMenu(document);
       outlineUi.render();
       tableUi.sync();
+      viewOptions?.refresh();
       syncLayers();
     }
 

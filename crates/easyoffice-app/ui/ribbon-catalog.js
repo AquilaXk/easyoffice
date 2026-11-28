@@ -354,7 +354,7 @@
     { keys: "Ctrl+T", action: "insert-table", ribbon: true, module: "SHEET", desktopOnly: true, notInField: true },
     // Find and replace as in the spreadsheet and word processor programs: Ctrl+F finds and Ctrl+H replaces. On macOS the
     // replace key is the Control key itself (`macControl`): ⌘H is the system's "hide" key and never reaches the page. The
-    // Hangul editor keeps its own Ctrl+F2, so that window answers it too (PD-390).
+    // Hangul editor keeps its own Ctrl+F2, so that window answers it too (PD-391).
     { keys: "Ctrl+F", action: "find" },
     { keys: "Ctrl+H", action: "replace", macControl: true },
     { keys: "Ctrl+F2", action: "replace", module: "HWP" },

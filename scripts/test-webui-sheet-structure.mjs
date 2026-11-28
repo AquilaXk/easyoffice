@@ -241,6 +241,31 @@ test("the 서식 menu's 행 and 열 submenus hide and unhide the axis they name,
   assert.equal((only().hiddenRows || []).length, 0);
 });
 
+test("보기 > 수식 입력줄 and 머리글 hide the bar and the column letters, and the choice of the headings is kept per sheet", async () => {
+  const { document, userClick } = await openWithEngine();
+  const act = async (name) => {
+    userClick(document.querySelector(`.md-item[data-sheet-act="${name}"]`));
+    await flushAsyncTurns(20);
+  };
+  const checked = (name) => document.querySelector(`.md-item[data-sheet-act="${name}"]`).getAttribute("aria-checked");
+  const bar = document.getElementById("sheet-formula-bar");
+  const table = document.getElementById("sheet-grid");
+  assert.equal(bar.hidden, false);
+  assert.equal(checked("view-formula-bar"), "true");
+  await act("view-formula-bar");
+  assert.equal(bar.hidden, true, "the name box and formula field go together");
+  assert.equal(checked("view-formula-bar"), "false");
+  await act("view-formula-bar");
+  assert.equal(bar.hidden, false);
+  assert.notEqual(table.dataset.headings, "off");
+  await act("view-headings");
+  assert.equal(table.dataset.headings, "off");
+  assert.equal(checked("view-headings"), "false");
+  await act("view-headings");
+  assert.equal(table.dataset.headings, "on");
+  assert.equal(checked("view-headings"), "true");
+});
+
 test("a row edit sends the tables of the sheet, takes the engine's moved ones, and undo gives the old ones back (PD-224)", async () => {
   const calls = [];
   const table = (range) => ({ name: "T", range, header: true, totals: false, columns: ["a", "b"], rowStripes: true, columnStripes: false, firstColumn: false, lastColumn: false });

@@ -826,6 +826,8 @@ pub const ITEMS: &[MenuItemSpec] = &[
         "메모 표시/숨기기",
         "note-toggle-all"
     ),
+    sa!("sheet:view-formula-bar", "수식 입력줄", "view-formula-bar"),
+    sa!("sheet:view-headings", "머리글", "view-headings"),
     sa!("sheet:freeze-first-row", "첫 행 고정", "freeze-first-row"),
     sa!("sheet:freeze-first-col", "첫 열 고정", "freeze-first-col"),
     sa!("sheet:freeze-clear", "틀 고정 취소", "freeze-clear"),

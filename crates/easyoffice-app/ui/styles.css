@@ -515,6 +515,7 @@ select:focus-visible,
 .sheet-grid thead th { position: sticky; top: 0; z-index: 3; height: 26px; line-height: 25px; user-select: none; }
 .sheet-grid tbody th { position: sticky; left: 0; z-index: 2; width: 56px; user-select: none; }
 .sheet-grid thead th.sheet-corner { left: 0; z-index: 5; width: 56px; }
+.sheet-grid[data-headings="off"] thead, .sheet-grid[data-headings="off"] tbody th { display: none; }
 .sheet-grid td { line-height: max(21px, calc(1.275em - 1px)); caret-color: transparent; cursor: cell; user-select: none; }
 .sheet-grid td:focus { outline: none; }
 .sheet-grid td.num { text-align: right; font-variant-numeric: tabular-nums; }

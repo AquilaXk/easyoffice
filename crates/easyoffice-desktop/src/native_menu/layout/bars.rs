@@ -324,6 +324,8 @@ const VIEW_SHEET: MenuSpec = menu(
         "view:zoom-fit-page",
         "view:zoom-fit-width",
         S,
+        "sheet:view-formula-bar",
+        "sheet:view-headings",
         SHEET_FREEZE,
         S,
         "view:split",

@@ -35,7 +35,7 @@
 
     function paintRow(tr, r, fr, fc, edge) {
       const rowFrozen = r >= 1 && r <= fr;
-      const top = rowFrozen ? headH + rowTop(r) + "px" : "";
+      const top = rowFrozen ? headH() + rowTop(r) + "px" : "";
       for (const el of tr.children) {
         const rowHead = el.tagName === "TH";
         const c = rowHead ? 0 : el._col || -1;
@@ -43,7 +43,7 @@
         if (!rowFrozen && !colFrozen && !el._pinned) continue;
         el._pinned = rowFrozen || colFrozen;
         setStyle(el, "top", top);
-        if (!rowHead) setStyle(el, "left", colFrozen ? rowHeadW + colLeft(c) + "px" : "");
+        if (!rowHead) setStyle(el, "left", colFrozen ? rowHeadW() + colLeft(c) + "px" : "");
         el.classList.toggle("frozen-row", rowFrozen);
         el.classList.toggle("frozen-col", colFrozen);
         el.classList.toggle("frozen-edge-row", rowFrozen && r === edge.row);
@@ -67,7 +67,7 @@
         const colFrozen = c >= 1 && c <= fc;
         th.classList.toggle("frozen-col", colFrozen);
         th.classList.toggle("frozen-edge-col", colFrozen && c === edge.col);
-        if (c > 0) setStyle(th, "left", colFrozen ? rowHeadW + colLeft(c) + "px" : "");
+        if (c > 0) setStyle(th, "left", colFrozen ? rowHeadW() + colLeft(c) + "px" : "");
       }
       for (const [r, tr] of rows) paintRow(tr, r, fr, fc, edge);
     }

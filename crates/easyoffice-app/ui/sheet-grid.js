@@ -61,14 +61,18 @@
     function rowHeightsOf() {
       return layoutApi?.rowHeightsOf(getSheetName()) || null;
     }
+    // The column letters and row numbers can be hidden (보기 > 머리글, PD-391): the header band and gutter then measure 0.
+    let headersShown = true;
+    const headH = () => (headersShown ? HEAD_H : 0);
+    const rowHeadW = () => (headersShown ? ROW_HEAD_W : 0);
     // Frozen rows and columns stay in the window whatever the scroll (PD-208).
     const freeze = host.__EASYOFFICE_CREATE_SHEET_FREEZE__?.({
       layoutApi,
       getSheetName,
       rowTop: (r) => rowTop(r),
       colLeft: (c) => colLeft(c),
-      headH: HEAD_H,
-      rowHeadW: ROW_HEAD_W,
+      headH,
+      rowHeadW,
       maxRows: MAX_ROWS,
       maxCols: MAX_COLS,
     });
@@ -269,7 +273,7 @@
         const first = rowAtY(vp.scrollTop + frozenHeight(fr));
         const top = visibleIndexOf(first);
         // Rows under the grid's height put more of them in the viewport: the last one is found by its position.
-        const visible = rowFit?.any() ? visibleIndexOf(rowAtY(vp.scrollTop + vp.clientHeight)) - top + 1 : Math.ceil((vp.clientHeight - HEAD_H) / rowBase()) + 1;
+        const visible = rowFit?.any() ? visibleIndexOf(rowAtY(vp.scrollTop + vp.clientHeight)) - top + 1 : Math.ceil((vp.clientHeight - headH()) / rowBase()) + 1;
         return {
           layout: true,
           fr,
@@ -393,7 +397,7 @@
       const right = colLeft(MAX_COLS + 1) - colLeft(v.c1 + 1);
       if (v.layout && right > 0) list.push(spacerHead(right));
       headRow.replaceChildren(...list);
-      if (corner) corner.style.width = ROW_HEAD_W + "px";
+      if (corner) corner.style.width = rowHeadW() + "px";
     }
 
     function buildCells(tr, r, v) {
@@ -486,7 +490,7 @@
 
     function syncTableWidth(table, v) {
       const inner = v.layout ? colLeft(MAX_COLS + 1) : colLeft(v.c1 + 1);
-      table.style.width = ROW_HEAD_W + inner + "px";
+      table.style.width = rowHeadW() + inner + "px";
     }
 
     // A hidden row has no `tr`: an auto filter can hide nearly every row, so a window of visible rows spans thousands.
@@ -592,6 +596,15 @@
       layoutApi, layoutOf, getSheetName, tdByPacked, colHeadByCol, rowHeadByRow, seedDomMaps, colLeft, rowTop,
     });
 
+    // Shows or hides the column letters and row numbers and redraws with the geometry that follows.
+    function setHeadersShown(shown) {
+      if (headersShown === shown) return;
+      headersShown = shown;
+      const table = document.getElementById("sheet-grid");
+      if (table) table.dataset.headings = shown ? "on" : "off";
+      layoutChanged();
+    }
+
     // The layout changed (hide, unhide, merge, edit): redraw with the new row and column geometry.
     function layoutChanged() {
       widthCacheSheet = null;
@@ -695,13 +708,13 @@
       if (hasLayout(vp)) {
         // A frozen row or column is always in view; the others scroll clear of the frozen ones.
         const { rows: fr, cols: fc } = frozenCounts();
-        const viewH = vp.clientHeight - HEAD_H;
+        const viewH = vp.clientHeight - headH();
         const top = rowTop(row);
         const bottom = top + (rowFit ? rowFit.heightOf(row) : rowBase());
         if (row > fr && top < vp.scrollTop + frozenHeight(fr)) vp.scrollTop = top - frozenHeight(fr);
         else if (row > fr && bottom > vp.scrollTop + viewH) vp.scrollTop = bottom - viewH;
         const left = colLeft(col);
-        const viewW = vp.clientWidth - ROW_HEAD_W;
+        const viewW = vp.clientWidth - rowHeadW();
         if (col > fc && left < vp.scrollLeft + frozenWidth(fc)) vp.scrollLeft = left - frozenWidth(fc);
         else if (col > fc && left + colWidth(col) > vp.scrollLeft + viewW) vp.scrollLeft = left + colWidth(col) - viewW;
       }
@@ -731,7 +744,7 @@
 
     function visibleRowSpan() {
       const vp = viewportEl();
-      if (hasLayout(vp)) return Math.max(1, Math.floor((vp.clientHeight - HEAD_H) / rowBase()) - 1);
+      if (hasLayout(vp)) return Math.max(1, Math.floor((vp.clientHeight - headH()) / rowBase()) - 1);
       return 20;
     }
 
@@ -806,7 +819,7 @@
     }
 
     return {
-      MAX_ROWS, MAX_COLS, get ROW_H() { return rowBase(); }, ROW_HEAD_W, HEAD_H, rowTop, rowAtY, anchorAt, contentRectOf, get DEFAULT_COL_W() { return defaultColW(); },
+      MAX_ROWS, MAX_COLS, get ROW_H() { return rowBase(); }, get ROW_HEAD_W() { return rowHeadW(); }, get HEAD_H() { return headH(); }, setHeadersShown, headersAreShown: () => headersShown, rowTop, rowAtY, anchorAt, contentRectOf, get DEFAULT_COL_W() { return defaultColW(); },
       colName, colIndex, packCoord, packRef, parseRef, refOf, colWidth, colLeft, colAtX,
       applyColWidth, applyColWidths, layoutChanged, rowAtVisible, MIN_COL_W, MAX_COL_W, rowHeight: (r) => rowFit?.heightOf(r) ?? rowBase(), rowFitOverBudget: () => Boolean(rowFit?.overBudget()),
       measureText: (font, family, text) => measureLine(sampleTd(), font, family, text),

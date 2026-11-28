@@ -278,6 +278,8 @@
     "sheet:col-unhide": "sheet-act:col-unhide",
     "sheet:merge": "sheet-act:merge",
     "sheet:unmerge": "sheet-act:unmerge",
+    "sheet:view-formula-bar": "sheet-act:view-formula-bar",
+    "sheet:view-headings": "sheet-act:view-headings",
     "sheet:freeze-first-row": "sheet-act:freeze-first-row",
     "sheet:freeze-first-col": "sheet-act:freeze-first-col",
     "sheet:freeze-clear": "sheet-act:freeze-clear",
