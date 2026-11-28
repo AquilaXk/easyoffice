@@ -1,4 +1,5 @@
 import { analyzeDialog, measureDialog } from "./dialog-layout.mjs";
+import { paste } from "./support.mjs";
 import { KNOWN_DIALOG_VIOLATIONS } from "./dialog-known.mjs";
 
 // The dialog layout steps of the WebKit suite (docs/design-system.md, "대화상자 부품 키트"): each step opens one dialog (or one
@@ -67,6 +68,26 @@ async function selectDocText(page) {
 }
 
 const FONT_DIALOG = click('[data-studio-menu-cmd="font-dialog"]');
+const DOC_MENU = (cmd) => click(`[data-studio-menu-cmd="${cmd}"]`);
+
+/** A two-by-two table with the caret in its first cell, so the table dialogs have a table to act on. */
+async function pasteTable(page) {
+  await page.click("#doc-editor p");
+  await page.keyboard.type("앞");
+  await paste(page, { "text/html": "<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>", "text/plain": "a\tb\nc\td" });
+  await page.waitForSelector("#doc-editor table td");
+  await page.click("#doc-editor table tr:first-child td:first-child");
+}
+
+/** A 1x1 image in the document, opened for its size through a double click. */
+async function pasteImage(page) {
+  await page.click("#doc-editor p");
+  await page.keyboard.type("앞");
+  const gif1x1 = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+  await paste(page, { "text/html": `<p><img src="data:image/gif;base64,${gif1x1}"></p>`, "text/plain": "" });
+  await page.waitForSelector("#doc-editor img.doc-inline-image");
+  await page.evaluate(() => document.querySelector("#doc-editor img.doc-inline-image").dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+}
 
 const DOC_DIALOGS = [
   ["글꼴 글꼴 탭", "doc-font-dialog", [selectDocText, FONT_DIALOG]],
@@ -80,6 +101,11 @@ const DOC_DIALOGS = [
   ["편지 병합", "doc-mailmerge-dialog", [click('[data-studio-menu-cmd="doc-mod-mailmerge"]')]],
   ["메모", "doc-comment-dialog", [click('[data-studio-menu-cmd="review-comment"]')]],
   ["차트", "doc-chart-dialog", [click('[data-studio-menu-cmd="insert-chart"]')]],
+  ["하이퍼링크", "doc-link-dialog", [selectDocText, DOC_MENU("insert-link")]],
+  ["표 속성", "doc-table-props-dialog", [pasteTable, DOC_MENU("table-cell-props")]],
+  ["셀 테두리", "doc-cell-border-dialog", [pasteTable, DOC_MENU("table-border-bg")]],
+  ["셀 배경", "doc-cell-border-dialog", [pasteTable, DOC_MENU("table-border-bg"), click('[data-doc-cb-tab="bg"]')]],
+  ["그림 크기", "doc-image-size-dialog", [pasteImage]],
 ];
 
 /** Violations the step may still have (`KNOWN_DIALOG_VIOLATIONS`), minus what the browser's fonts decide: a clipped box is listed but its absence is not an error. */
