@@ -24,7 +24,7 @@ use crate::rich_table::{
 };
 use crate::rich_word_features::{
     safe_bookmark_name, safe_field_code, RichLineNumberRestart, RichLineNumbers, RichProperties,
-    RichSectionBreak, MAX_BOOKMARKS, PLACEHOLDER_CREATOR,
+    RichSectionBreak, MAX_BOOKMARKS, MAX_LINE_NUMBER_VALUE, MAX_SECTION_BREAKS,
 };
 use crate::rich_xml::{check_paragraph_depth, push_linked_run, toggle_on, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
@@ -598,7 +598,11 @@ impl DocxWalker {
                 self.in_del_text = false;
             }
             "w:hyperlink" => self.link = None,
-            "w:p" => self.finish_paragraph(resolver)?,
+            "w:p" => {
+                self.finish_paragraph(resolver)?;
+                // A kept field (date, time, reference, number) lives in one paragraph: one that never ends closes here.
+                self.field_code = None;
+            }
             "w:tblPr" | "w:tblGrid" | "w:tcBorders" | "w:tcPr"
                 if self.tbl_depth == 1 && !self.in_ppr && !self.in_rpr =>
             {
@@ -738,13 +742,7 @@ impl DocxWalker {
             let last_runs = std::mem::take(&mut p.runs);
             zones.push((last_jc, last_runs));
             for (jc, runs) in zones {
-                if runs.iter().any(|r| {
-                    r.field.is_some()
-                        || r.note_ref.is_some()
-                        || r.comment_id.is_some()
-                        || r.revision.is_some()
-                        || !r.text.trim().is_empty()
-                }) {
+                if runs.iter().any(run_keeps_paragraph) {
                     self.text_budget.charge_block(0, "DOCX 문단")?;
                     let zone_state = ParaState {
                         runs,
@@ -761,13 +759,7 @@ impl DocxWalker {
             let carried = p.page_break_before;
             let after = p.page_break_after;
             let mut kept = false;
-            if p.runs.iter().any(|r| {
-                r.field.is_some()
-                    || r.note_ref.is_some()
-                    || r.comment_id.is_some()
-                    || r.revision.is_some()
-                    || !r.text.trim().is_empty()
-            }) {
+            if p.runs.iter().any(run_keeps_paragraph) {
                 self.text_budget.charge_block(0, "DOCX 문단")?;
                 let mut paragraph = resolver.finish(p);
                 paragraph.page_break_before |= std::mem::take(&mut self.pending_page_break);
@@ -776,7 +768,9 @@ impl DocxWalker {
             }
             self.pending_page_break |= (carried && !kept) || after;
             self.blocks.extend(images.into_iter().map(RichBlock::Image));
-            if let Some(ordinal) = section_ordinal {
+            if let Some(ordinal) =
+                section_ordinal.filter(|_| self.section_marks.len() < MAX_SECTION_BREAKS)
+            {
                 self.section_marks.push((self.blocks.len(), ordinal));
             }
             if let Some(cols) = sect_end {
@@ -785,6 +779,18 @@ impl DocxWalker {
         }
         Ok(())
     }
+}
+
+/// Whether a run is a reason to keep its paragraph: text, a field, a note reference, a comment, a revision, or one end of a
+/// bookmark (a paragraph dropped with the end of a bookmark would leave the start without its end).
+fn run_keeps_paragraph(r: &RichRun) -> bool {
+    r.field.is_some()
+        || r.note_ref.is_some()
+        || r.comment_id.is_some()
+        || r.revision.is_some()
+        || r.bookmark_start.is_some()
+        || r.bookmark_end.is_some()
+        || !r.text.trim().is_empty()
 }
 
 /// Runs the events of one WordprocessingML part (the body or a header/footer) through `walker`.

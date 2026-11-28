@@ -262,6 +262,70 @@ fn hostile_bookmark_names_and_counts_are_dropped_or_capped() {
     );
 }
 
+fn bookmark_marks(doc: &RichDocument) -> (Vec<String>, Vec<String>) {
+    let runs = doc.blocks.iter().flat_map(|b| match b {
+        RichBlock::Paragraph(p) => p.runs.clone(),
+        _ => Vec::new(),
+    });
+    let (mut starts, mut ends) = (Vec::new(), Vec::new());
+    for r in runs {
+        starts.extend(r.bookmark_start);
+        ends.extend(r.bookmark_end);
+    }
+    starts.sort();
+    ends.sort();
+    (starts, ends)
+}
+
+const W_NS: &str = "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"";
+
+#[test]
+fn the_bookmark_names_of_the_engine_and_of_the_page_are_the_same_set() {
+    use easyoffice_formats::rich_word_features::safe_bookmark_name;
+    // The page (`doc-word-model.js`) tests the same list with its own pattern.
+    for name in ["책\u{345}", "Ⅳ장", "_표1", &"가".repeat(40)] {
+        assert!(safe_bookmark_name(name).is_some(), "{name}");
+    }
+    for name in ["1장", &"가".repeat(41), "_Toc1", "_GoBack", "a b", ""] {
+        assert!(safe_bookmark_name(name).is_none(), "{name}");
+    }
+}
+
+#[test]
+fn two_bookmarks_that_start_at_the_same_place_both_survive() {
+    let xml = format!(
+        "<w:document {W_NS}><w:body><w:p>\
+        <w:bookmarkStart w:id=\"1\" w:name=\"_Ref1\"/><w:bookmarkStart w:id=\"2\" w:name=\"내책갈피\"/>\
+        <w:r><w:t>글</w:t></w:r><w:bookmarkEnd w:id=\"2\"/><w:bookmarkEnd w:id=\"1\"/></w:p></w:body></w:document>"
+    );
+    let back = decode(&docx_with_body(&xml), "same.docx");
+    let names = vec!["_Ref1".to_string(), "내책갈피".to_string()];
+    let mut sorted = names.clone();
+    sorted.sort();
+    assert_eq!(bookmark_marks(&back), (sorted.clone(), sorted.clone()));
+    // and the file written from it has both pairs
+    let again = round_trip(&back, DocumentFormat::Docx, "again.docx");
+    assert_eq!(bookmark_marks(&again), (sorted.clone(), sorted));
+}
+
+#[test]
+fn a_bookmark_that_ends_in_an_otherwise_empty_paragraph_keeps_its_end() {
+    let xml = format!(
+        "<w:document {W_NS}><w:body>\
+        <w:p><w:bookmarkStart w:id=\"1\" w:name=\"가나\"/><w:r><w:t>글</w:t></w:r></w:p>\
+        <w:p><w:bookmarkEnd w:id=\"1\"/></w:p><w:p><w:r><w:t>끝</w:t></w:r></w:p></w:body></w:document>"
+    );
+    let back = decode(&docx_with_body(&xml), "empty.docx");
+    let (starts, ends) = bookmark_marks(&back);
+    assert_eq!((starts.len(), ends.len()), (1, 1), "{back:?}");
+    let written = part(&encode(&back, DocumentFormat::Docx), "word/document.xml");
+    assert_eq!(
+        written.matches("<w:bookmarkStart").count(),
+        written.matches("<w:bookmarkEnd").count()
+    );
+    assert_eq!(written.matches("<w:bookmarkEnd").count(), 1, "{written}");
+}
+
 // ---- captions
 
 #[test]
@@ -342,6 +406,86 @@ fn a_section_break_after_a_table_is_an_empty_paragraph_with_the_break() {
     assert_eq!(brk.section_break, Some(RichSectionBreak::NextPage));
     assert!(brk.runs.is_empty());
     assert_eq!(runs_of(&back, 2)[0].text, "다음 구역");
+}
+
+#[test]
+fn a_field_without_an_end_closes_at_the_end_of_its_paragraph() {
+    let xml = format!(
+        "<w:document {W_NS}><w:body>\
+        <w:p><w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText> DATE </w:instrText></w:r>\
+        <w:r><w:fldChar w:fldCharType=\"separate\"/></w:r><w:r><w:t>2026</w:t></w:r></w:p>\
+        <w:p><w:r><w:t>다음 문단</w:t></w:r></w:p></w:body></w:document>"
+    );
+    let back = decode(&docx_with_body(&xml), "open.docx");
+    assert_eq!(runs_of(&back, 0)[0].field_code.as_deref(), Some("DATE"));
+    assert_eq!(runs_of(&back, 1)[0].field_code, None, "{back:?}");
+}
+
+#[test]
+fn the_old_properties_of_a_section_change_are_not_a_section() {
+    let xml = format!(
+        "<w:document {W_NS}><w:body>\
+        <w:p><w:pPr><w:sectPr><w:type w:val=\"continuous\"/>\
+        <w:sectPrChange w:id=\"1\"><w:sectPr><w:type w:val=\"evenPage\"/><w:lnNumType w:countBy=\"3\"/></w:sectPr></w:sectPrChange>\
+        </w:sectPr></w:pPr><w:r><w:t>A</w:t></w:r></w:p>\
+        <w:p><w:r><w:t>B</w:t></w:r></w:p>\
+        <w:sectPr><w:type w:val=\"oddPage\"/></w:sectPr></w:body></w:document>"
+    );
+    let back = decode(&docx_with_body(&xml), "change.docx");
+    let kinds: Vec<_> = back
+        .blocks
+        .iter()
+        .map(|b| match b {
+            RichBlock::Paragraph(p) => (p.plain_text(), p.section_break),
+            _ => panic!("paragraph"),
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            ("A".to_string(), Some(RichSectionBreak::OddPage)),
+            ("B".to_string(), None)
+        ]
+    );
+    assert!(back.page_frame.line_numbers.is_none());
+}
+
+#[test]
+fn a_line_number_start_at_the_largest_value_is_kept() {
+    for (start, shown) in [("31680", 31_680), ("31679", 31_680), ("0", 1)] {
+        let xml = format!(
+            "<w:document {W_NS}><w:body><w:p><w:r><w:t>A</w:t></w:r></w:p>\
+            <w:sectPr><w:lnNumType w:start=\"{start}\" w:countBy=\"2\"/></w:sectPr></w:body></w:document>"
+        );
+        let back = decode(&docx_with_body(&xml), "ln.docx");
+        let numbers = back.page_frame.line_numbers.expect("line numbers");
+        assert_eq!((numbers.start, numbers.count_by), (shown, 2), "{start}");
+    }
+}
+
+#[test]
+fn a_file_with_tens_of_thousands_of_sections_is_read_in_linear_time_and_keeps_a_bounded_number() {
+    let unit = "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>표</w:t></w:r></w:p></w:tc></w:tr></w:tbl>\
+        <w:p><w:pPr><w:sectPr><w:type w:val=\"continuous\"/></w:sectPr></w:pPr></w:p>";
+    let xml = format!(
+        "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>{}</w:body></w:document>",
+        unit.repeat(80_000)
+    );
+    let bytes = docx_with_body(&xml);
+    let started = std::time::Instant::now();
+    let back = decode(&bytes, "many.docx");
+    let took = started.elapsed();
+    let breaks = back
+        .blocks
+        .iter()
+        .filter(|b| matches!(b, RichBlock::Paragraph(p) if p.section_break.is_some()))
+        .count();
+    assert_eq!(
+        breaks,
+        easyoffice_formats::rich_word_features::MAX_SECTION_BREAKS
+    );
+    // The quadratic version took 20 s for this file; the debug build needs well under the bound.
+    assert!(took.as_secs_f64() < 5.0, "{took:?}");
 }
 
 // ---- line numbers
@@ -687,11 +831,18 @@ fn the_document_properties_round_trip_through_core_properties() {
 }
 
 #[test]
-fn a_document_without_an_author_reads_back_without_one() {
+fn a_document_without_an_author_has_no_creator_and_an_author_is_never_blanked() {
     let doc = doc_of(vec![paragraph("본문")]);
     let bytes = encode(&doc, DocumentFormat::Docx);
-    assert!(part(&bytes, "docProps/core.xml").contains("<dc:creator>EasyOffice</dc:creator>"));
+    assert!(!part(&bytes, "docProps/core.xml").contains("dc:creator"));
     assert!(decode(&bytes, "p.docx").properties.is_empty());
+    let mut named = doc_of(vec![paragraph("본문")]);
+    named.properties.author = "EasyOffice".to_string();
+    let back = round_trip(&named, DocumentFormat::Docx, "n.docx");
+    assert_eq!(
+        back.properties.author, "EasyOffice",
+        "an author is the author"
+    );
 }
 
 #[test]

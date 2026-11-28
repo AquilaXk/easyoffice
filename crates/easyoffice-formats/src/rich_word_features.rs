@@ -10,12 +10,12 @@ pub const MAX_FIELD_CODE_BYTES: usize = 256;
 pub const MAX_BOOKMARK_CHARS: usize = 40;
 /// Most bookmarks a document keeps.
 pub const MAX_BOOKMARKS: usize = 1000;
+/// Most section breaks a document keeps (a section of a file past this reads as part of the one before it).
+pub const MAX_SECTION_BREAKS: usize = 1000;
 /// Longest watermark text, in characters.
 pub const MAX_WATERMARK_CHARS: usize = 64;
 /// Longest value of a document property, in bytes.
 pub const MAX_PROPERTY_BYTES: usize = 1024;
-/// The creator the writers put in a file that has no author of its own; read back, it is no author.
-pub const PLACEHOLDER_CREATOR: &str = "EasyOffice";
 /// Largest `w:lnNumType` number (start, step or distance from the text, in twips).
 pub const MAX_LINE_NUMBER_VALUE: u32 = 31_680;
 

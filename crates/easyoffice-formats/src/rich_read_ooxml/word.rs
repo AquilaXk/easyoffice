@@ -14,14 +14,9 @@ pub(super) fn read_properties(core: Option<&str>) -> RichProperties {
             .map(XmlSanitizer::unescape)
             .unwrap_or_default()
     };
-    let author = first("dc:creator");
     RichProperties {
         title: String::new(),
-        author: if author == PLACEHOLDER_CREATOR {
-            String::new()
-        } else {
-            author
-        },
+        author: first("dc:creator"),
         subject: first("dc:subject"),
         keywords: first("cp:keywords"),
         comments: first("dc:description"),
@@ -34,29 +29,57 @@ pub(super) fn read_properties(core: Option<&str>) -> RichProperties {
 /// as an unsupported object. Anything else in the part stays as it was.
 pub(super) fn split_watermark(xml: &str) -> (Option<String>, Cow<'_, str>) {
     const MARK: &str = "PowerPlusWaterMarkObject";
-    const PICT_END: &str = "</w:pict>";
-    let Some(at) = xml.find(MARK) else {
+    // Only a part that names the shape needs a read; the shape itself is found by its element and attributes below, so the
+    // name in a text run or in another attribute is not taken for it.
+    if !xml.contains(MARK) {
         return (None, Cow::Borrowed(xml));
-    };
-    let (Some(pict), Some(end)) = (xml[..at].rfind("<w:pict"), xml[at..].find(PICT_END)) else {
-        return (None, Cow::Borrowed(xml));
-    };
-    let pict_end = at + end + PICT_END.len();
-    let text = xml[at..pict_end].find(" string=\"").and_then(|i| {
-        let from = at + i + " string=\"".len();
-        xml[from..].find('"').map(|len| &xml[from..from + len])
-    });
-    let text = text
-        .map(XmlSanitizer::unescape)
-        .and_then(|t| crate::rich_word_features::safe_watermark_text(&t));
-    let para_start = xml[..pict].rfind("<w:p>").max(xml[..pict].rfind("<w:p "));
-    let para_end = xml[pict_end..]
-        .find("</w:p>")
-        .map(|i| pict_end + i + "</w:p>".len());
-    match (para_start, para_end) {
-        (Some(s), Some(e)) => (text, Cow::Owned(format!("{}{}", &xml[..s], &xml[e..]))),
-        _ => (text, Cow::Borrowed(xml)),
     }
+    // Where a name that the reader gave us (a slice of `xml`) starts in `xml`.
+    let offset = |part: &str| (part.as_ptr() as usize).wrapping_sub(xml.as_ptr() as usize);
+    let mut reader = XmlReader::new(xml);
+    // The outermost open paragraph (its depth and where its tag starts) and what was found in it.
+    let (mut depth, mut para_start) = (0usize, 0usize);
+    let (mut found, mut text) = (false, None);
+    while let Ok(Some(event)) = reader.next_event() {
+        match event {
+            XmlEvent::Start { name, .. } if name == "w:p" => {
+                if depth == 0 {
+                    para_start = offset(name).saturating_sub(1);
+                }
+                depth += 1;
+            }
+            XmlEvent::Start {
+                name: "v:shape",
+                attrs,
+            } if !found => {
+                found = depth > 0 && attr(&attrs, "id").is_some_and(|id| id.starts_with(MARK));
+            }
+            XmlEvent::Start {
+                name: "v:textpath",
+                attrs,
+            } if found && text.is_none() => {
+                text = attr(&attrs, "string")
+                    .and_then(|t| crate::rich_word_features::safe_watermark_text(&t));
+            }
+            XmlEvent::End(name) if name == "w:p" => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 && found {
+                    // The paragraph ends at the `>` after the name of its end tag.
+                    let name_end = offset(name).saturating_add(name.len());
+                    let end = xml
+                        .get(name_end..)
+                        .and_then(|rest| rest.find('>'))
+                        .map(|i| name_end + i + 1);
+                    return match (xml.get(..para_start), end.and_then(|e| xml.get(e..))) {
+                        (Some(head), Some(tail)) => (text, Cow::Owned([head, tail].concat())),
+                        _ => (text, Cow::Borrowed(xml)),
+                    };
+                }
+            }
+            _ => {}
+        }
+    }
+    (None, Cow::Borrowed(xml))
 }
 
 impl DocxWalker {
@@ -74,7 +97,15 @@ impl DocxWalker {
         }
         self.bookmark_total += 1;
         self.bookmark_names.insert(id.into_owned(), name.clone());
-        self.pending_bookmark_start = Some(name);
+        // A second bookmark that starts before any text: the first one gets an empty run of its own so that neither is lost.
+        if let Some(earlier) = self.pending_bookmark_start.replace(name) {
+            if let Some(top) = self.paras.last_mut() {
+                top.runs.push(RichRun {
+                    bookmark_start: Some(earlier),
+                    ..RichRun::default()
+                });
+            }
+        }
     }
 
     /// `w:bookmarkEnd`: the bookmark ends after the last run read. A range with no text in it (the start is still waiting for
@@ -112,7 +143,9 @@ impl DocxWalker {
                 .unwrap_or(default)
         };
         self.line_numbers = RichLineNumbers {
-            start: number("w:start", 0).saturating_add(1),
+            start: number("w:start", 0)
+                .saturating_add(1)
+                .min(MAX_LINE_NUMBER_VALUE),
             count_by: number("w:countBy", 1),
             distance_twips: number("w:distance", 0),
             restart: attr(attrs, "w:restart")
@@ -126,27 +159,100 @@ impl DocxWalker {
     /// Puts the section breaks on the paragraphs that end a section: the break after a section starts the next section the way
     /// that section's `w:type` says (no type is a new page). A section that ended with something that is not a paragraph gets an
     /// empty paragraph for it.
+    ///
+    /// One pass builds the new block list (the marks are in the order of their block positions), so a file with many sections
+    /// costs time in proportion to its size.
     pub(super) fn apply_section_breaks(&mut self) {
         let marks = std::mem::take(&mut self.section_marks);
-        for (len, ordinal) in marks.into_iter().rev() {
-            let kind = self
-                .section_types
-                .get(ordinal + 1)
-                .copied()
-                .flatten()
-                .unwrap_or(RichSectionBreak::NextPage);
-            match len.checked_sub(1).and_then(|i| self.blocks.get_mut(i)) {
-                Some(RichBlock::Paragraph(p)) if p.section_break.is_none() => {
-                    p.section_break = Some(kind);
-                }
-                _ => self.blocks.insert(
-                    len.min(self.blocks.len()),
-                    RichBlock::Paragraph(RichParagraph {
-                        section_break: Some(kind),
-                        ..RichParagraph::default()
-                    }),
-                ),
-            }
+        if marks.is_empty() {
+            return;
         }
+        let blocks = std::mem::take(&mut self.blocks);
+        let count = blocks.len();
+        let types = &self.section_types;
+        let mut marks = marks
+            .into_iter()
+            .map(|(len, ordinal)| {
+                let kind = types
+                    .get(ordinal + 1)
+                    .copied()
+                    .flatten()
+                    .unwrap_or(RichSectionBreak::NextPage);
+                (len.min(count), kind)
+            })
+            .peekable();
+        let mut out = Vec::with_capacity(count + marks.len());
+        let mut blocks = blocks.into_iter();
+        for position in 0..=count {
+            if position > 0 {
+                out.extend(blocks.next());
+            }
+            let mut group = Vec::new();
+            while let Some((_, kind)) = marks.next_if(|(len, _)| *len == position) {
+                group.push(kind);
+            }
+            // The last break of the group goes on the paragraph before it when that paragraph has none; the others and the
+            // breaks after something that is not a paragraph get an empty paragraph each.
+            if let Some(RichBlock::Paragraph(p)) = out.last_mut().filter(|_| position > 0) {
+                if p.section_break.is_none() {
+                    p.section_break = group.pop();
+                }
+            }
+            out.extend(group.into_iter().map(|kind| {
+                RichBlock::Paragraph(RichParagraph {
+                    section_break: Some(kind),
+                    ..RichParagraph::default()
+                })
+            }));
+        }
+        self.blocks = out;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_watermark;
+
+    const SHAPE: &str = "<w:p><w:r><w:pict><v:shape id=\"PowerPlusWaterMarkObject1\"><v:textpath string=\"초안 &amp; 검토\"/></v:shape></w:pict></w:r></w:p>";
+
+    #[test]
+    fn the_shape_is_found_by_its_element_and_its_paragraph_is_cut_out() {
+        let xml = format!("<w:hdr><w:p><w:r><w:t>머리글</w:t></w:r></w:p>{SHAPE}<w:p><w:r><w:t>끝</w:t></w:r></w:p></w:hdr>");
+        let (text, rest) = split_watermark(&xml);
+        assert_eq!(text.as_deref(), Some("초안 & 검토"));
+        assert_eq!(
+            rest,
+            "<w:hdr><w:p><w:r><w:t>머리글</w:t></w:r></w:p><w:p><w:r><w:t>끝</w:t></w:r></w:p></w:hdr>"
+        );
+    }
+
+    #[test]
+    fn the_name_in_text_or_in_another_element_is_not_a_watermark() {
+        for xml in [
+            "<w:hdr><w:p><w:r><w:t>PowerPlusWaterMarkObject</w:t></w:r></w:p></w:hdr>",
+            "<w:hdr><w:p><w:r><w:pict><v:shape id=\"other\" alt=\"PowerPlusWaterMarkObject\"><v:textpath string=\"x\"/></v:shape></w:pict></w:r></w:p></w:hdr>",
+            "<w:hdr><w:p w:rsidR=\"PowerPlusWaterMarkObject\"><w:r><w:t>본문</w:t></w:r></w:p></w:hdr>",
+        ] {
+            let (text, rest) = split_watermark(xml);
+            assert_eq!(text, None, "{xml}");
+            assert_eq!(rest, xml);
+        }
+    }
+
+    #[test]
+    fn a_paragraph_with_attributes_and_a_hostile_text_are_handled() {
+        let xml = format!(
+            "<w:hdr>{}</w:hdr>",
+            SHAPE
+                .replace("<w:p>", "<w:p w:rsidR=\"00A1\">")
+                .replace("초안 &amp; 검토", &"가".repeat(500))
+        );
+        let (text, rest) = split_watermark(&xml);
+        assert_eq!(
+            text.map(|t| t.chars().count()),
+            Some(crate::rich_word_features::MAX_WATERMARK_CHARS),
+            "a watermark text past its bound is cut"
+        );
+        assert_eq!(rest, "<w:hdr></w:hdr>");
     }
 }
