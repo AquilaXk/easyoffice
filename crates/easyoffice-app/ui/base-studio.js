@@ -516,14 +516,14 @@
       const buildGroupRow = (group) => {
         const gr = el("tr", "base-group-row"), gtd = el("td", "base-group-cell");
         gr.dataset.groupKey = group.key; gtd.colSpan = query.fields.length + 1;
-        const arrow = group.collapsed ? "▸ " : "▾ ";
-        const toggle = setAttr(mkBtn("base-group-toggle", `${arrow}${group.label} (${group.count}건)`, () => setViewSetting((t) => {
+        const arrow = setAttr(el("span", "base-group-arrow"), "aria-hidden", "true"); host.__EASYOFFICE_ICONS__?.setIcon?.(doc, arrow, group.collapsed ? "chevron-right" : "chevron-down");
+        const toggle = setAttr(mkBtn("base-group-toggle", "", () => setViewSetting((t) => {
           const set = new Set(t.collapsedGroups || []);
           if (set.has(group.key)) set.delete(group.key); else set.add(group.key);
           t.collapsedGroups = Array.from(set);
           gridSize?.invalidateTable(t.id, gridWidths);
         }), "", `그룹 접기/펼치기: ${group.label}`), "aria-expanded", group.collapsed ? "false" : "true");
-        gtd.appendChild(toggle); gr.appendChild(gtd);
+        gtd.appendChild(appendAll(toggle, arrow, el("span", "base-group-label", `${group.label} (${group.count}건)`))); gr.appendChild(gtd);
         return gr;
       };
       const buildDataRow = (rowData, rowNum, q = query) => {

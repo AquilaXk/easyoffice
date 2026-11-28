@@ -724,7 +724,7 @@
 .print-preview-title { font-size: var(--font-size-base); font-weight: 700; color: var(--color-primary-dark); margin-right: 4px; white-space: nowrap; }
 .print-preview-group, .print-preview-actions { display: inline-flex; align-items: center; gap: 2px; }
 .print-preview-actions { margin-left: auto; }
-.print-preview-btn { min-width: var(--control-height-sm); height: var(--control-height-sm); padding: 0 var(--control-padding-x); font-size: var(--control-font-size); white-space: nowrap; }
+.print-preview-btn { display: inline-flex; align-items: center; justify-content: center; min-width: var(--control-height-sm); height: var(--control-height-sm); padding: 0 var(--control-padding-x); font-size: var(--control-font-size); white-space: nowrap; }
 .print-preview-btn[aria-pressed="true"] { background: var(--ui-selected); border-color: var(--accent-primary); color: var(--color-primary-dark); font-weight: 600; }
 :root[data-theme-effective="dark"] .print-preview-btn[aria-pressed="true"] { color: var(--ui-text); }
 .print-preview-status { min-width: 44px; padding: 0 4px; text-align: center; font-size: var(--font-size-sm); color: var(--ui-text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }

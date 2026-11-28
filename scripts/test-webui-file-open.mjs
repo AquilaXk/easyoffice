@@ -150,7 +150,7 @@ test("opening a DOCX-style model loads formatted blocks into the DOC module and 
   assert.equal(editor.querySelector("ul li").textContent, "항목");
   assert.equal(editor.querySelector("h2"), null, "previous default content is replaced");
   assert.equal(tabTitle(document, "DOC"), "보고서.docx");
-  assert.match(feedback(document), /^열기 완료: 보고서\.docx \(DOCX → 문서 모듈/);
+  assert.match(feedback(document), /^열기 완료: 보고서\.docx \(DOCX, 문서 모듈/);
   assert.match(feedback(document), /그림은 가져오지 않았습니다/);
 
   const decode = JSON.parse(calls.find((c) => c.command === "convert_document_format").payload);

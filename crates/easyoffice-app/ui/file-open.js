@@ -756,7 +756,7 @@
     function describe(res, name) {
       const label = MODULE_LABELS[res.module] || res.module;
       const notes = Array.isArray(res.warnings) && res.warnings.length > 0 ? " · 참고: " + res.warnings.join(" ") : "";
-      return "열기 완료: " + name + " (" + String(res.format).toUpperCase() + " → " + label + " 모듈 · " + res.itemCount +
+      return "열기 완료: " + name + " (" + String(res.format).toUpperCase() + ", " + label + " 모듈 · " + res.itemCount +
         (ITEM_UNIT_BY_KIND.get(res.kind) ?? DEFAULT_ITEM_UNIT) + ")" + notes;
     }
 

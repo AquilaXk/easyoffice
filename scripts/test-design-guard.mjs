@@ -22,7 +22,7 @@ const DESIGN_SYSTEM = readText(fileURLToPath(new URL("../docs/design-system.md",
 const TOKENS = ui("tokens.css");
 
 const SIZE_VIOLATION_COUNTS = {};
-const GLYPH_ARROW_COUNT = 8;
+const GLYPH_ARROW_COUNT = 1;
 const WIDGET_CLASS_COUNT = 24;
 
 const sameList = (actual, known, what) => {

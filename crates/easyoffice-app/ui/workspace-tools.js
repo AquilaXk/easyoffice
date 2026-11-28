@@ -585,7 +585,7 @@
               s.suiteId +
               " " +
               s.baselineP50Us +
-              "µs→" +
+              "µs, 최적화 " +
               s.optimizedP50Us +
               "µs (" +
               s.speedupFactor +

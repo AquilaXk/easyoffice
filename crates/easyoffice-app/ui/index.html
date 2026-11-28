@@ -1380,7 +1380,7 @@
                   <option value="txt">TXT (.txt)</option>
                   <option value="pages">Pages (.pages, 실험적)</option>
                 </select>
-                <span>→</span>
+                <span data-icon="arrow-right" aria-hidden="true"></span>
                 <label for="conv-dst-fmt" class="sb-size-unit">대상</label>
                 <select id="conv-dst-fmt" class="sb-combo conv-fmt-select" aria-label="대상 포맷">
                   <option value="hwpx" selected>HWPX</option>
@@ -1427,9 +1427,9 @@
               <button id="btn-pp-fit-page" type="button" class="dialog-btn print-preview-btn">쪽 맞춤</button>
             </div>
             <div class="print-preview-group" role="group" aria-label="쪽 이동">
-              <button id="btn-pp-prev" type="button" class="dialog-btn print-preview-btn" aria-label="이전 쪽" title="이전 쪽">‹</button>
+              <button id="btn-pp-prev" type="button" class="dialog-btn print-preview-btn" aria-label="이전 쪽" title="이전 쪽" data-icon="chevron-left"></button>
               <span id="pp-page-status" class="print-preview-status" aria-live="polite">1 / 1 쪽</span>
-              <button id="btn-pp-next" type="button" class="dialog-btn print-preview-btn" aria-label="다음 쪽" title="다음 쪽">›</button>
+              <button id="btn-pp-next" type="button" class="dialog-btn print-preview-btn" aria-label="다음 쪽" title="다음 쪽" data-icon="chevron-right"></button>
             </div>
             <div class="print-preview-actions">
               <button id="btn-pp-print" type="button" class="dialog-btn dialog-btn-primary print-preview-btn">인쇄</button>

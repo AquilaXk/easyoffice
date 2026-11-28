@@ -11,11 +11,7 @@ export const KNOWN_SCRIPT_SIZE_VIOLATIONS = {};
 
 /** Arrows drawn from text glyphs (not the `▾` of the standard), as `file -> glyph -> count`. Each is an icon of ui/icons.js or a plain word in waiting. */
 export const KNOWN_GLYPH_ARROWS = {
-  "base-studio.js": { "▸": 1, "▾": 1 },
   "copilot-ext-ops.js": { "→": 1 },
-  "file-open.js": { "→": 1 },
-  "index.html": { "→": 1, "‹": 1, "›": 1 },
-  "workspace-tools.js": { "→": 1 },
 };
 
 /** Control-like classes inside dialogs that predate the kit list (docs/design-system.md). A new one belongs in the kit list, with a PD, or is a kit class. */
