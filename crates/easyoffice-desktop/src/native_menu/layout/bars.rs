@@ -750,7 +750,6 @@ const TOOL_SHEET: MenuSpec = menu(
         S,
         "tool:review-track",
         "tool:review-comment",
-        "tool:review-stats",
         S,
         "sheet:protect",
         "sheet:protect-workbook",

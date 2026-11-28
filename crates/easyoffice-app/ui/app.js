@@ -281,7 +281,7 @@
   const EXCLUDED_PALETTE_SUFFIX = {
     DOC: new Set(["data-validation"]),
     HWP: new Set(["layout-orientation", "layout-margins", "data-validation"]),
-    SHEET: new Set(["layout-paper", "layout-orientation", "layout-columns", "layout-margins", "mod-chart"]),
+    SHEET: new Set(["layout-paper", "layout-orientation", "layout-columns", "layout-margins", "mod-chart", "review-stats"]),
     SLIDE: new Set(["layout-columns", "layout-margins", "data-autosum", "data-fn-browser", "data-sort", "data-validation", "review-track"]),
     PDF: new Set(["home-bold", "home-italic", "home-underline", "home-style", "insert-table", "insert-chart", "insert-shape", "insert-link", "layout-paper", "layout-orientation", "layout-columns", "layout-margins", "data-autosum", "data-fn-browser", "data-sort", "data-validation", "review-track"]),
   };

@@ -69,7 +69,7 @@ const PALETTE_ONLY = {
     "data-autosum", "data-fn-browser", "data-sort", "data-validation",
     "review-track", "review-comment", "review-stats", "view-split",
   ],
-  SHEET: ["layout-paper", "layout-orientation", "layout-columns", "layout-margins", "mod-chart"],
+  SHEET: ["layout-paper", "layout-orientation", "layout-columns", "layout-margins", "review-stats", "mod-chart"],
   SLIDE: ["layout-columns", "layout-margins", "data-autosum", "data-fn-browser", "data-sort", "data-validation", "review-track"],
   PDF: [
     "home-bold", "home-italic", "home-underline", "home-style",

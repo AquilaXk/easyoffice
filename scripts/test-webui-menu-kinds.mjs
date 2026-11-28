@@ -98,6 +98,19 @@ test("the spreadsheet puts sorting, validation, pivot and conditional formats in
   assert.deepEqual(commandsOf(document, "삽입").slice(-2), ["data-fn-browser", "data-autosum"]);
 });
 
+test("the spreadsheet toolbar and 도구 menu leave out the word processor's marks, justify and word count", async () => {
+  const sheet = await open("SHEET");
+  await flushAsyncTurns(10);
+  const doc = await open("DOC");
+  await flushAsyncTurns(10);
+  for (const selector of ["#btn-toggle-ctrl-marks", "#btn-toggle-para-marks", '#icon-toolbar [data-studio-cmd="para-shape"]']) {
+    assert.equal(shown(sheet.document.querySelector(selector)), false, `${selector} is hidden in the spreadsheet`);
+    assert.equal(shown(doc.document.querySelector(selector)), true, `${selector} stays in the document`);
+  }
+  assert.equal(shownCommands(sheet.document).has("review-stats"), false);
+  assert.equal(shownCommands(doc.document).has("review-stats"), true);
+});
+
 test("the presentation has 슬라이드 and 슬라이드 쇼 menus and the PDF has 주석 and 쪽", async () => {
   const slide = await open("SLIDE");
   await flushAsyncTurns(10);
