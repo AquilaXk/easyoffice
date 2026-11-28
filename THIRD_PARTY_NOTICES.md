@@ -10987,6 +10987,38 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### docx-preview paragraph, tab stop, drop cap and equation rules (Apache-2.0)
+
+Source: https://github.com/VolodymyrBaydalka/docxjs (`src/document-parser.ts` `parseFrame`, `parseBorderProperties`, `mmlTagMap`, `parseMathElement`; `src/html-renderer.ts` `renderMmlRadical`, `renderMmlDelimiter`, `renderMmlNary`, `renderMmlPreSubSuper`, `renderMmlGroupChar`, `renderMmlBar`, `renderMllList`, the section `columns` style; `src/javascript.ts` `updateTabStop`; commit 28682e309a2b0e2a0162f72523ee42015cd2d1ee, Apache License 2.0, Copyright (c) 2016-2023 Volodymyr Baydalka; the project has no NOTICE file at that commit, the full license text is reproduced in the generated section above). `crates/easyoffice-app/ui/doc-word-math.js` ports the OMML to MathML element map (five places drawn wrongly by the original are corrected and listed in its header), `crates/easyoffice-app/ui/doc-word-tabs.js` ports the tab stop width rule (sorted stops, default stops past the last one, the first stop right of the tab, right, center and decimal stops measured by the text up to the next tab), `crates/easyoffice-app/ui/doc-drop-cap.js` and `doc-para-border.js` follow `parseFrame` (a drop cap paragraph floats left) and `parseBorderProperties` (the `w:pBdr` sides become CSS borders), and `crates/easyoffice-app/ui/doc-word-columns.js` uses the section's `column-count`, `column-gap` and `column-rule`. `crates/easyoffice-formats/src/rich_read_ooxml/word_blocks.rs` reads the same elements into the document model.
+
+### docx (MIT)
+
+Source: https://github.com/dolanmiu/docx (`src/file/paragraph/formatting/tab-stop.ts`, `border.ts`, `src/file/textbox/textbox.ts`, `src/file/textbox/shape/shape.ts`, `src/file/styles/style/paragraph-style.ts`; commit d15c565e371a2f4cad5ba45df6bbf71ee0b95a11, Copyright (c) 2016 Dolan). `crates/easyoffice-formats/src/rich_word_blocks.rs` writes tab stops (`w:tabs`), paragraph borders (`w:pBdr`), text boxes (`w:pict` with `v:shape` of the text box type and `v:textbox`) and the styles of the user (`w:style` with `w:customStyle`, based on the normal style) in the element order and shape this library writes. No code is copied; the library has its own object model.
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2016 Dolan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### DUrayev/SpreadsheetLLM-compression (MIT)
 
 Source: https://github.com/DUrayev/SpreadsheetLLM-compression. Adapted for high-density spreadsheet context serialization (sheet metadata anchors, dense TSV grid vs sparse formatting, and column-wise `{r}` isomorphic row formula grouping) in `crates/easyoffice-app/src/copilot/compact.rs`.

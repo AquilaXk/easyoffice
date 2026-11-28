@@ -206,7 +206,7 @@ test("테두리 및 음영 puts the border and the fill on the paragraphs and ta
   click(h, "btn-doc-pb-ok");
   await flushAsyncTurns(8);
   const block = blocksOf(h)[0];
-  assert.deepEqual(Object.keys(block.border).sort(), ["bottom", "left", "right", "top"]);
+  assert.deepEqual(Object.keys(block.border).sort((a, b) => a.localeCompare(b)), ["bottom", "left", "right", "top"]);
   assert.equal(block.border.top.style, "double");
   assert.equal(block.shade, "FFFF00");
   assert.match(h.editor.firstChild.style.borderTop, /double/);

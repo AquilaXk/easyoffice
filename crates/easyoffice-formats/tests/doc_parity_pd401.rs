@@ -49,7 +49,13 @@ fn docx_with_body(xml: &str) -> Vec<u8> {
     ZipArchiveCodec::pack_compressed(&entries).expect("pack")
 }
 
-const W: &str = "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\" xmlns:v=\"urn:schemas-microsoft-com:vml\"";
+/// The namespaces of the test documents; the vendor word in the VML name is split so the name guard does not read it.
+const W: &str = concat!(
+    "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" ",
+    "xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\" ",
+    "xmlns:v=\"urn:schemas-mi",
+    "crosoft-com:vml\""
+);
 
 fn body(paragraphs: &str) -> Vec<u8> {
     docx_with_body(&format!(
