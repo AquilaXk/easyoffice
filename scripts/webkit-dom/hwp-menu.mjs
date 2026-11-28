@@ -78,6 +78,10 @@ export const hwpMenuSteps = [
     assert.equal(result.withoutPassword, "refused", "without the password the same bytes cannot be read");
     assert.equal(result.sameAsPlain, false);
     assert.equal(result.leaked, false, "the password appears nowhere in what the shell can read");
+    // The password belongs to this document: a new one does not carry it.
+    await editorCall(page, "createBlankDocument", { skipUnsavedGuard: true });
+    assert.deepEqual(await editorCall(page, "getSaveProtection", {}), { passwordProtected: false, passwordSet: false });
+    await assert.rejects(editorCall(page, "exportHwpProtected", {}), /암호가 설정되어 있지 않습니다/);
   }],
 
   ["the editor hides its own menu row when the shell says the native menu bar is drawn (nativeMenu=1) and keeps the toolbar", async (page) => {

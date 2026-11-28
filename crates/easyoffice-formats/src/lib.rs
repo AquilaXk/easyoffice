@@ -143,8 +143,8 @@ pub use csv_markdown_codecs::*;
 pub use deflate::*;
 pub use doc_save_loss::{doc_save_loss, DocSaveLoss};
 pub use embedded_thumbnail::{
-    check_thumbnail_png, embed_thumbnail, read_thumbnail, supports_thumbnail,
-    MAX_EMBED_DOCUMENT_BYTES, MAX_THUMBNAIL_PNG_BYTES, MAX_THUMBNAIL_SIDE_PX,
+    check_thumbnail_png, embed_thumbnail, is_password_protected, read_thumbnail,
+    supports_thumbnail, MAX_EMBED_DOCUMENT_BYTES, MAX_THUMBNAIL_PNG_BYTES, MAX_THUMBNAIL_SIDE_PX,
 };
 pub use hwp_eqedit::*;
 pub use layout_lint::{

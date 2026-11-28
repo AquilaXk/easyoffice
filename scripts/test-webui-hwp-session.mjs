@@ -620,6 +620,20 @@ test("password set in the editor: save writes the editor's protected bytes, chec
   for (const call of ctx.fake.calls) assert.ok(!/password/i.test(JSON.stringify(call.params ?? {})), "no call carries a password");
 });
 
+test("password set in the editor: no first page is asked for or handed over (a picture would leak the page or break the package), for HWP and HWPX", async () => {
+  for (const format of ["hwp", "hwpx"]) {
+    const { deliver, deliveries } = recordingDeliverWithOptions();
+    const ctx = load({ deliver, host: { capabilities: [...PASSWORD_CAPABILITIES, "print-pages-v1"] } });
+    ctx.fake.state.handlers.getSaveProtection = async () => ({ passwordProtected: false, passwordSet: true });
+    ctx.fake.state.handlers.getPrintPages = async () => ({ pageCount: 3, pages: [{ svg: PAGE_SVG, widthMm: 210, heightMm: 297 }] });
+    const res = await ctx.session.save({ deliver, baseName: "보고서", format });
+    assert.equal(res.ok, true, format);
+    assert.equal(methodsOf(ctx).includes("getPrintPages"), false, `${format}: the page is not even requested`);
+    assert.equal(deliveries.length, 1);
+    assert.equal(deliveries[0].options, undefined, `${format}: no thumbnailSvg reaches the shell`);
+  }
+});
+
 test("password set in the editor: HWPX uses the protected HWPX export, and an in-place save is allowed even for a document opened with a password", async () => {
   const inPlace = recordingDeliver();
   const ctx = loadWithPasswordSet({ deliver: inPlace.deliver, opened: true });
@@ -638,6 +652,28 @@ test("password set in the editor: a failing protected check refuses the file and
   assert.equal(res.ok, false);
   assert.match(res.message, /저장 전 검증에 실패했습니다/);
   assert.equal(deliveries.length, 0);
+});
+
+test("password set in the editor: the plain autosave copy goes at once, and an autosave that was already running does not store one", async () => {
+  const ctx = loadWithPasswordSet();
+  ctx.env.indexedDB.stores.records.set("tab-A", { tabId: "tab-A", bytes: new Uint8Array([1]) });
+  ctx.fake.emit({ reason: "password_set" });
+  await delay(5);
+  assert.equal(ctx.env.indexedDB.stores.records.size, 0, "removed without waiting for the next edit");
+  assert.match(feedbackOf(ctx), /암호 문서는 자동 저장하지 않습니다/);
+  assert.equal(methodsOf(ctx).some((m) => m === "exportHwp" || m === "exportHwpx"), false);
+  // An autosave that began before the password was set: its export is slow, the password arrives, nothing is stored.
+  const racing = load();
+  let release;
+  racing.fake.state.handlers.exportBytes = () => new Promise((resolve) => { release = () => resolve(new Uint8Array([0xd0, 0xcf, 1, 2])); });
+  racing.fake.emit({ reason: "dirty_changed", dirty: true });
+  racing.fake.emit({ reason: "edited" });
+  await delay(60);
+  assert.equal(typeof release, "function", "the autosave export is waiting");
+  racing.fake.emit({ reason: "password_set" });
+  release();
+  await delay(60);
+  assert.equal(racing.env.indexedDB.stores.records.size, 0, "the plain copy was not stored");
 });
 
 test("password set in the editor: autosave keeps no plain copy, and an editor that sets a password without the capability fails the save closed", async () => {

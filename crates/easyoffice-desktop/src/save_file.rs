@@ -259,6 +259,9 @@ impl SaveRequest {
     /// document stays exactly as it was and the reason goes to the log. `font_dirs` are the folders
     /// of the shared font database, which is built inside the guarded step.
     pub fn with_thumbnail(self, svg: &str, font_dirs: &[PathBuf]) -> Self {
+        if self.is_password_protected() {
+            return self;
+        }
         self.with_thumbnail_using(|extension, bytes| {
             let fonts = crate::pdf_export::shared_font_db(font_dirs);
             crate::save_thumbnail::with_first_page(extension, bytes, svg, &fonts)
@@ -271,13 +274,23 @@ impl SaveRequest {
     pub fn with_drawn_thumbnail(self, font_dirs: &[PathBuf]) -> Self {
         let supported = easyoffice_formats::DocumentFormat::from_extension(&self.extension)
             .is_some_and(easyoffice_formats::supports_thumbnail);
-        if !supported || crate::save_thumbnail::has_non_placeholder_thumbnail(&self.bytes) {
+        if !supported
+            || self.is_password_protected()
+            || crate::save_thumbnail::has_non_placeholder_thumbnail(&self.bytes)
+        {
             return self;
         }
         self.with_thumbnail_using(|extension, bytes| {
             let fonts = crate::pdf_export::shared_font_db(font_dirs);
             crate::save_thumbnail::with_drawn_first_page(extension, bytes, &fonts)
         })
+    }
+
+    /// A password-protected Hangul file (PD-396) keeps its bytes as they are: a preview picture would be plain
+    /// text next to the encrypted content (HWP) or break the package's recorded sizes (HWPX).
+    fn is_password_protected(&self) -> bool {
+        easyoffice_formats::DocumentFormat::from_extension(&self.extension)
+            .is_some_and(|format| easyoffice_formats::is_password_protected(format, &self.bytes))
     }
 
     /// [`Self::with_thumbnail`] with the step that makes the new bytes given by the caller (a test

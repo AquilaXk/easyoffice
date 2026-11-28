@@ -30,6 +30,13 @@ pub const MAX_EMBED_DOCUMENT_BYTES: usize = 64 * 1_048_576;
 
 const HWP_PREVIEW_STREAM: &str = "PrvImage";
 const HWPX_PREVIEW_ENTRY: &str = "Preview/PrvImage.png";
+const HWP_FILE_HEADER_STREAM: &str = "FileHeader";
+/// Byte offset of the property flags in the 256-byte `FileHeader` (after the 32-byte signature and the version).
+const HWP_PROPERTIES_AT: usize = 36;
+/// Property bits: encrypted (0x02), DRM (0x10) and public-key encrypted (0x100).
+const HWP_PROTECTED_FLAGS: u32 = 0x02 | 0x10 | 0x100;
+const HWPX_MANIFEST: &str = "META-INF/manifest.xml";
+const HWPX_ENCRYPTION_MARK: &str = "encryption-data";
 const OOXML_THUMBNAIL_ENTRY: &str = "docProps/thumbnail.png";
 const OOXML_CONTENT_TYPES: &str = "[Content_Types].xml";
 const OOXML_ROOT_RELS: &str = "_rels/.rels";
@@ -153,11 +160,65 @@ fn upsert<T>(items: &mut Vec<T>, name: &str, item: T, name_of: impl Fn(&T) -> &s
     }
 }
 
+/// Whether `document` is a password-protected Hangul container (PD-396): an HWP 5.0 container whose
+/// `FileHeader` says encrypted, DRM or public-key encrypted, or an HWPX package whose manifest holds
+/// `encryption-data`. Such a file is never given a preview picture: the picture is plain text for
+/// anyone (an HWP `PrvImage` stream sits outside the encrypted streams), and rewriting an HWPX
+/// package packs its entries again, which no longer matches the sizes and digests the manifest
+/// records, so the file would not open after the save. Other formats, and bytes that cannot be read
+/// as a container, are not password-protected here (the embedding itself refuses unreadable ones).
+pub fn is_password_protected(format: DocumentFormat, document: &[u8]) -> bool {
+    match format {
+        DocumentFormat::Hwp | DocumentFormat::Hwt => hwp_is_protected(document),
+        DocumentFormat::Hwpx | DocumentFormat::Hwtx => hwpx_is_protected(document),
+        _ => false,
+    }
+}
+
+fn hwp_is_protected(document: &[u8]) -> bool {
+    let Ok(streams) = Ole2ContainerCodec::unpack(document) else {
+        return false;
+    };
+    streams
+        .iter()
+        .any(|stream| stream.name == HWP_FILE_HEADER_STREAM && header_is_protected(&stream.data))
+}
+
+fn hwpx_is_protected(document: &[u8]) -> bool {
+    let Ok(entries) = ZipArchiveCodec::unpack(document, &hangul_zip_policy()) else {
+        return false;
+    };
+    entries
+        .iter()
+        .any(|entry| entry.path == HWPX_MANIFEST && manifest_is_encrypted(&entry.data))
+}
+
+fn header_is_protected(file_header: &[u8]) -> bool {
+    file_header
+        .get(HWP_PROPERTIES_AT..HWP_PROPERTIES_AT + 4)
+        .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+        .is_some_and(|bytes| u32::from_le_bytes(bytes) & HWP_PROTECTED_FLAGS != 0)
+}
+
+fn manifest_is_encrypted(manifest: &[u8]) -> bool {
+    String::from_utf8_lossy(manifest).contains(HWPX_ENCRYPTION_MARK)
+}
+
+fn protected_error() -> EasyOfficeError {
+    invalid("암호 문서에는 미리보기 그림을 넣지 않습니다.")
+}
+
 fn embed_hwp(document: &[u8], png: &[u8]) -> Result<Vec<u8>, EasyOfficeError> {
     let mut streams: Vec<(String, Vec<u8>)> = Ole2ContainerCodec::unpack(document)?
         .into_iter()
         .map(|stream| (stream.name, stream.data))
         .collect();
+    if streams
+        .iter()
+        .any(|(name, data)| name == HWP_FILE_HEADER_STREAM && header_is_protected(data))
+    {
+        return Err(protected_error());
+    }
     upsert(
         &mut streams,
         HWP_PREVIEW_STREAM,
@@ -187,6 +248,13 @@ fn embed_zip(
         .into_iter()
         .map(|entry| (entry.path, entry.data))
         .collect();
+    if matches!(format, DocumentFormat::Hwpx | DocumentFormat::Hwtx)
+        && entries
+            .iter()
+            .any(|(path, data)| path == HWPX_MANIFEST && manifest_is_encrypted(data))
+    {
+        return Err(protected_error());
+    }
     embed_thumbnail_entries(format, &mut entries, png)?;
     ZipArchiveCodec::pack_compressed(&entries)
 }

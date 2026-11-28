@@ -285,9 +285,8 @@ registry.registerAll(insertCommands);
 registry.registerAll(tableCommands);
 registry.register(cellSelectionEnterCommand);
 // 보안 ▸ 문서 암호 설정: the password stays in this closure; a replaced document drops it (PD-396).
-const savePassword = createSavePassword(showHwpSavePasswordDialog);
+const savePassword = createSavePassword(showHwpSavePasswordDialog, () => eventBus.emit('document-password-set'));
 registry.register(savePassword.command);
-eventBus.on('document-swapped', () => savePassword.clear());
 registry.registerAll(pageCommands);
 registry.registerAll(toolCommands);
 // 공식 메뉴의 키: 문자표 Ctrl+F10, 줄/칸 추가하기 Alt+Insert(줄/칸 지우기는 Alt+Delete), chord 표기는 Ctrl+K,H 꼴.
@@ -696,6 +695,8 @@ installEmbedRuntime({
       eventBus.on('document-dirty-changed', (change) => {
         listener({ schemaVersion: 1, reason: 'dirty_changed', dirty: (change as { dirty?: boolean })?.dirty === true });
       }),
+      // 보안 ▸ 문서 암호 설정: the host drops its plain autosave copy at once (only the fact, never the password).
+      eventBus.on('document-password-set', () => listener({ schemaVersion: 1, reason: 'password_set' })),
       eventBus.on('document-mutated', () => listener({ schemaVersion: 1, reason: 'edited' })),
       eventBus.on('document-changed', () => listener({ schemaVersion: 1, reason: 'edited' })),
     ];
@@ -722,7 +723,7 @@ installEmbedRuntime({
     // was opened with a password would be saved without it. Only this flag crosses the port.
     async getSaveProtection() {
       await initPromise;
-      return { passwordProtected: wasm.requiresPasswordForSave, passwordSet: savePassword.isSet() };
+      return { passwordProtected: wasm.requiresPasswordForSave, passwordSet: savePassword.isSet(wasm) };
     },
     // EasyOffice extension (save-password-v1): bytes written with the password set by 문서 암호 설정, and the check
     // that reads them back with it. The password itself never crosses the port.
@@ -736,7 +737,12 @@ installEmbedRuntime({
     },
     async verifyProtectedBytes(data) {
       await initPromise;
-      return savePassword.verifyBytes(data, (bytes, password) => HwpDocument.openWithPassword(bytes, password));
+      return savePassword.verifyBytes(
+        wasm,
+        data,
+        (bytes, password) => HwpDocument.openWithPassword(bytes, password),
+        (bytes) => new HwpDocument(bytes),
+      );
     },
     async clearSaveProtection() {
       await initPromise;
@@ -887,7 +893,6 @@ installEmbedRuntime({
         throw new Error('문서 열기가 취소되었습니다.');
       }
       await createNewDocument();
-      savePassword.clear();
       return { pageCount: wasm.pageCount };
     },
     // EasyOffice extension (verify-bytes-v1): parse exported bytes in a throw-away document so the

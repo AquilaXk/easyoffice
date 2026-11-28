@@ -516,3 +516,106 @@ fn generic_fallback_draws_ink_even_when_bundled_noto_is_absent() {
         "generic serif/sans-serif must still resolve when Noto Sans KR is absent"
     );
 }
+
+// ---- password documents (PD-396) -------------------------------------------------------------
+// A document the editor wrote with a password gets no preview picture: an HWP `PrvImage` would be the
+// first page in plain text next to the encrypted content, and rewriting an HWPX package packs its
+// entries again, which no longer matches what the manifest records, so the file would not open.
+
+const PASSWORD: &[u8] = b"12345";
+const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+
+/// A blank document written by the Hangul core itself (the editor's own export path), with a password.
+fn protected_hwp() -> Vec<u8> {
+    let mut blank = rhwp::DocumentCore::new_empty();
+    blank.create_blank_document_native().unwrap();
+    blank
+        .export_hwp_with_adapter_with_password(PASSWORD)
+        .unwrap()
+}
+
+fn protected_hwpx() -> Vec<u8> {
+    rhwp::DocumentCore::from_bytes(&hwpx())
+        .unwrap()
+        .export_hwpx_native_with_password(PASSWORD)
+        .unwrap()
+}
+
+#[test]
+fn password_containers_are_recognised_and_plain_ones_are_not() {
+    use easyoffice_formats::is_password_protected;
+    assert!(is_password_protected(DocumentFormat::Hwp, &protected_hwp()));
+    assert!(is_password_protected(
+        DocumentFormat::Hwpx,
+        &protected_hwpx()
+    ));
+    assert!(!is_password_protected(DocumentFormat::Hwp, &hwp()));
+    assert!(!is_password_protected(DocumentFormat::Hwpx, &hwpx()));
+    assert!(!is_password_protected(DocumentFormat::Docx, &docx()));
+    // Bytes that are no container are not called protected (the embedding refuses them on its own).
+    assert!(!is_password_protected(DocumentFormat::Hwp, b"not a file"));
+    assert!(!is_password_protected(DocumentFormat::Hwpx, b"PK\x03\x04"));
+}
+
+#[test]
+fn a_password_hwpx_keeps_its_bytes_through_both_preview_steps_and_still_opens_with_the_password() {
+    let document = protected_hwpx();
+    verify_document_bytes_ok("hwpx", &document);
+    let drawn = SaveRequest::from_bytes("보고서.hwpx", document.clone())
+        .unwrap()
+        .with_thumbnail(A4_SVG, &[]);
+    assert_eq!(drawn.bytes(), document.as_slice(), "with_thumbnail");
+    let again = SaveRequest::from_bytes("보고서.hwpx", document.clone())
+        .unwrap()
+        .with_drawn_thumbnail(&[]);
+    assert_eq!(again.bytes(), document.as_slice(), "with_drawn_thumbnail");
+    assert!(
+        rhwp::DocumentCore::from_bytes_with_password(drawn.bytes(), PASSWORD).is_ok(),
+        "the file opens with its password"
+    );
+    // The embedding itself refuses too, so no other caller can rewrite the package.
+    assert!(with_first_page("hwpx", &document, A4_SVG, &fonts()).is_err());
+    assert!(embed_thumbnail(
+        DocumentFormat::Hwpx,
+        &document,
+        &render_png(A4_SVG, &fonts()).unwrap()
+    )
+    .is_err());
+}
+
+#[test]
+fn a_password_hwp_gets_no_plain_picture() {
+    let document = protected_hwp();
+    verify_document_bytes_ok("hwp", &document);
+    let drawn = SaveRequest::from_bytes("보고서.hwp", document.clone())
+        .unwrap()
+        .with_thumbnail(A4_SVG, &[]);
+    assert_eq!(drawn.bytes(), document.as_slice(), "with_thumbnail");
+    let again = SaveRequest::from_bytes("보고서.hwp", document.clone())
+        .unwrap()
+        .with_drawn_thumbnail(&[]);
+    assert_eq!(again.bytes(), document.as_slice(), "with_drawn_thumbnail");
+    // The core's own blank template carries a preview picture; nothing of the page is added to it.
+    let picture =
+        |bytes: &[u8]| extract_thumbnail(&mut Cursor::new(bytes)).map(|found| found.bytes);
+    assert_eq!(picture(drawn.bytes()), picture(&document));
+    let plain_pictures = |bytes: &[u8]| {
+        bytes
+            .windows(PNG_SIGNATURE.len())
+            .filter(|window| *window == PNG_SIGNATURE)
+            .count()
+    };
+    assert_eq!(plain_pictures(drawn.bytes()), plain_pictures(&document));
+    assert!(rhwp::DocumentCore::from_bytes_with_password(drawn.bytes(), PASSWORD).is_ok());
+    assert!(embed_thumbnail(
+        DocumentFormat::Hwp,
+        &document,
+        &render_png(A4_SVG, &fonts()).unwrap()
+    )
+    .is_err());
+}
+
+fn verify_document_bytes_ok(extension: &str, bytes: &[u8]) {
+    crate::save_verify::verify_document_bytes(extension, bytes)
+        .unwrap_or_else(|err| panic!("a password .{extension} must pass the save check: {err}"));
+}

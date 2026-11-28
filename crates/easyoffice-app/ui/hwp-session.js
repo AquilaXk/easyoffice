@@ -194,6 +194,8 @@
     let current = null; // { name, saveFormat }
     let dirty = false;
     let editSeq = 0;
+    // Counts the passwords set in the editor, so an autosave that started before one does not store its plain copy.
+    let protectionEpoch = 0;
     let busy = false; // open / restore in flight
     let exportingPdf = false; // a PDF export is running (its save dialog included)
     let saving = false;
@@ -280,6 +282,7 @@
       if (discarded) return;
       autosaving = true;
       const seq = editSeq;
+      const epoch = protectionEpoch;
       try {
         if (await readPasswordProtected()) {
           await store.remove(tabId).catch(() => null);
@@ -294,7 +297,7 @@
           feedback("자동 저장 건너뜀: 문서가 " + MAX_HWP_LABEL + "를 넘습니다. 저장(Ctrl+S)으로 보관하세요");
           return;
         }
-        if (!dirty) return;
+        if (!dirty || epoch !== protectionEpoch) return;
         await store.put({
           tabId, fileName: current?.name || "문서", format, savedAt: Date.now(),
           size: bytes.length, bytes: copyBuffer(bytes),
@@ -314,6 +317,16 @@
       if (!payload || busy) return;
       if (payload.reason === "dirty_changed") {
         setDirty(payload.dirty === true);
+        return;
+      }
+      // 보안 ▸ 문서 암호 설정 (PD-396): an autosave copy made before is plain, so it goes now, and one that is being
+      // made right now is not stored (the epoch). The next autosave sees the password and keeps none.
+      if (payload.reason === "password_set") {
+        protectionEpoch += 1;
+        clearAutosaveTimers();
+        void store.remove(tabId).catch(() => null);
+        if (!passwordNoticeShown) feedback(MSG_PASSWORD_NO_AUTOSAVE);
+        passwordNoticeShown = true;
         return;
       }
       editSeq += 1;
@@ -563,7 +576,9 @@
         const exported = await exportForSave(wanted, gate.withPassword);
         if (!exported.bytes) return failure(exported.format, exported.error);
         const base64 = host.__EASYOFFICE_SHEET_UTILS__.bytesToBase64(exported.bytes, (s) => env.btoa(s));
-        const thumbnailSvg = await readThumbnailSvg();
+        // A file written with a password gets no preview picture: it would be the first page in plain text (HWP) or
+        // break the package's recorded sizes (HWPX). The shell refuses to add one as well (PD-396).
+        const thumbnailSvg = gate.withPassword ? null : await readThumbnailSvg();
         const delivery = await gate.deliver(base64, options.baseName, exported.format, thumbnailSvg ? { thumbnailSvg } : undefined);
         if (delivery?.cancelled) return failure(exported.format, "", true);
         if (!delivery?.ok) return failure(exported.format, delivery?.error || "파일 다운로드를 시작하지 못했습니다");
