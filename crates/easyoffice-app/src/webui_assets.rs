@@ -173,6 +173,8 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "sheet-cell-edit.js",
     "sheet-cell-write.js",
     "sheet-clear-ui.js",
+    "sheet-adv-filter.js",
+    "sheet-goal-seek.js",
     "sheet-format-painter.js",
     "sheet-cf-bar-ui.js",
     "sheet-cf-presets.js",

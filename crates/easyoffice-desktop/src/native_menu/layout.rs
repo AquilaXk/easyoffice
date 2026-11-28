@@ -109,6 +109,8 @@ pub const SHEET_TAB: &str = "@sheet-tab";
 pub const SHEET_FREEZE: &str = "@sheet-freeze";
 /// The 지우기 submenu of the spreadsheet's 편집 menu (PD-400).
 pub const SHEET_CLEAR: &str = "@sheet-clear";
+/// The 가상 분석 submenu of the spreadsheet's 데이터 menu (PD-400).
+pub const SHEET_WHATIF: &str = "@sheet-whatif";
 pub const PASTE: &str = "@paste";
 pub const SELECT_ALL: &str = "@select-all";
 pub const SERVICES: &str = "@services";
@@ -378,7 +380,12 @@ pub fn cf_submenu(token: &str) -> Option<&'static TokenSubmenu> {
 
 /// The submenus of the spreadsheet's 서식 menu (행, 열, 시트) and 보기 menu (틀 고정), as in the spreadsheet
 /// program's menu bar: the row, column and sheet commands that the page's old 시트 menu held.
-pub const SHEET_SUBMENUS: [TokenSubmenu; 5] = [
+pub const SHEET_SUBMENUS: [TokenSubmenu; 6] = [
+    TokenSubmenu {
+        token: SHEET_WHATIF,
+        title: "가상 분석",
+        lines: &["sheet:goal-seek"],
+    },
     TokenSubmenu {
         token: SHEET_ROW,
         title: "행",

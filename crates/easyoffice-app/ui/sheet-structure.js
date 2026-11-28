@@ -120,6 +120,9 @@
     const subtotalUi = host.__EASYOFFICE_CREATE_SHEET_SUBTOTAL_UI__?.({ ...deps, kit, say, editAxis: (...args) => editAxis(...args) }) ?? null;
     // 서식 복사: the brush, 서식 > 서식 복사 and 서식 붙여넣기, Ctrl+Shift+C and Ctrl+Shift+V (PD-400).
     const painter = host.__EASYOFFICE_CREATE_SHEET_FORMAT_PAINTER__?.({ ...deps, say }) ?? null;
+    // 데이터 > 고급 필터 and 데이터 > 가상 분석 > 목표값 찾기 (PD-400).
+    const advFilter = host.__EASYOFFICE_CREATE_SHEET_ADV_FILTER__?.({ ...deps, kit, say, getFilter: () => filter }) ?? null;
+    const goalSeek = host.__EASYOFFICE_CREATE_SHEET_GOAL_SEEK__?.({ ...deps, kit, say }) ?? null;
     // 편집 > 지우기 (PD-400).
     const clearUi = host.__EASYOFFICE_CREATE_SHEET_CLEAR_UI__?.({ ...deps, say, getNoteUi: () => noteUi }) ?? null;
     const pickList = host.__EASYOFFICE_CREATE_SHEET_PICK_LIST__?.({ ...deps, say }) ?? null;
@@ -580,6 +583,8 @@
       ...(subtotalUi?.actions || {}),
       ...(clearUi?.actions || {}),
       ...(painter?.actions || {}),
+      ...(advFilter?.actions || {}),
+      ...(goalSeek?.actions || {}),
       "tab-add": () => tabs.insert(null),
       "tab-color": () => Promise.resolve(tabMenu.openColor(getActiveSheetName())),
       ...tabs.actions,

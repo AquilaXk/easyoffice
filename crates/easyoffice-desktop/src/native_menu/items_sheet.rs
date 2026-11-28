@@ -20,4 +20,6 @@ pub const SHEET_ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:format-painter", "서식 복사", "format-painter"),
     sa!("sheet:format-paste", "서식 붙여넣기", "format-paste"),
     sa!("sheet:view-formulas", "수식 표시", "view-formulas"),
+    sa!("sheet:adv-filter", "고급 필터…", "adv-filter"),
+    sa!("sheet:goal-seek", "목표값 찾기…", "goal-seek"),
 ];

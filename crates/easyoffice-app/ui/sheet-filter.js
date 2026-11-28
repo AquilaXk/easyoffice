@@ -725,6 +725,31 @@
       });
     }
 
+    // 고급 필터 (PD-400, `sheet-adv-filter.js`): the rows of `range` that `columns` (the conditions of the auto filter's columns,
+    // `{ col, conditions, and? }`) hide, judged by the same engine request; `null` when it cannot say.
+    async function judge(range, columns) {
+      syncCells();
+      return evaluate({ range, columns, hidden: [] });
+    }
+
+    // 고급 필터 in place: the rows `hidden` (runs of sheet rows) go out of view in one undo step. The range keeps the sheet's filter
+    // with no conditions and no buttons, so 데이터 > 필터 지우기 shows the rows again, as 지우기 of the spreadsheet program does.
+    function showOnly(range, hidden) {
+      return change(async (name) => {
+        const columns = [];
+        const buttons = [];
+        for (let c = range.c1; c <= range.c2; c += 1) buttons.push(c);
+        layoutApi.setFilter(name, { range, columns, hidden, hiddenButtons: buttons });
+        grid.layoutChanged();
+        refreshWindowFromModel();
+        const rows = range.r2 - range.r1;
+        const shown = rows - hidden.reduce((n, [first, last]) => n + (last - first + 1), 0);
+        say("필터: " + rows + "행 중 " + (rows - shown) + "행 표시");
+        changed();
+        return true;
+      });
+    }
+
     function run(action) {
       if (action === "filter-toggle") return toggle();
       if (action === "filter-reapply") return reapply();
@@ -742,6 +767,8 @@
       hasTableFilters,
       clearAll,
       setCriteria,
+      judge,
+      showOnly,
       reapplyAfterEdit,
       values,
       sortBy,

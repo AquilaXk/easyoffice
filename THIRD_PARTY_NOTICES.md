@@ -10845,6 +10845,40 @@ SOFTWARE.
 
 ---
 
+## Spreadsheet window: goal seek and advanced filter (`PD-400`)
+
+### goal-seek 0.1.4 (MIT)
+
+Source: https://github.com/adam-hanna/goalSeek.js (npm `goal-seek` 0.1.4, `lib/index.js` lines 6-69). Adapted into `crates/easyoffice-app/ui/sheet-goal-seek.js` (`seek`): the residual and the first step `x + y`, the secant step `x - y / g` with `g = (y1 - y) / y`, the cap of a step. Changes: asynchronous evaluation (the engine answers each value), an absolute tolerance of 0.001 and at most 100 iterations (the defaults of the spreadsheet program's 목표값 찾기), a result object instead of thrown errors, and a fail-closed stop when a value is not a finite number.
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2020 Adam Hanna
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Advanced filter
+
+`crates/easyoffice-app/ui/sheet-adv-filter.js` takes no code. The two spreadsheet libraries that were searched (Univer, Apache-2.0, `packages/sheets-filter`, checked at its `dev` branch; FortuneSheet, MIT, `packages/core/src/modules/filter.ts`) filter one column by values and conditions and have no criteria range, so there was nothing to port. The meaning of the criteria range (the first row names list columns, the rows below are alternatives, the cells of a row all hold) follows the help of the open-source spreadsheet suite and of the Korean spreadsheet program; each criteria row is judged by the engine's existing auto filter conditions (`crates/easyoffice-sheet/src/filter`).
+
 ## Copilot panel chat screen (assistant-ui, MIT; `PD-388`)
 
 Source: https://github.com/assistant-ui/assistant-ui at commit `98c2aa0873e5c03a2ea6936f71a882785f0f9b07` (Copyright (c) 2026 AgentbaseAI Inc.). Nothing is vendored or linked at runtime. The files were read into a scratch directory outside the repository; no script or build of them was run.

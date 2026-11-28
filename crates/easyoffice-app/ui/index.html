@@ -758,6 +758,7 @@
               <div class="md-item" data-sheet-act="filter-toggle" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="md-label">필터</span><span class="md-shortcut">Ctrl+Shift+L</span></div>
               <div class="md-item" data-sheet-act="filter-reapply" role="menuitem" tabindex="-1"><span class="md-label">다시 적용</span></div>
               <div class="md-item" data-sheet-act="filter-clear" role="menuitem" tabindex="-1"><span class="md-label">필터 지우기</span></div>
+              <div class="md-item" data-sheet-act="adv-filter" role="menuitem" tabindex="-1"><span class="md-label">고급 필터…</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-sheet-act="group" role="menuitem" tabindex="-1"><span class="md-label">그룹</span></div>
               <div class="md-item" data-sheet-act="ungroup" role="menuitem" tabindex="-1"><span class="md-label">그룹 해제</span></div>
@@ -768,6 +769,12 @@
               <div class="md-sep"></div>
               <div class="md-item" data-sheet-act="dedupe-dialog" role="menuitem" tabindex="-1"><span class="md-label">중복된 항목 제거…</span></div>
               <div class="md-item" data-sheet-act="text-to-columns" role="menuitem" tabindex="-1"><span class="md-label">텍스트 나누기…</span></div>
+              <div class="md-sub" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">가상 분석</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="가상 분석">
+                  <div class="md-item" data-sheet-act="goal-seek" role="menuitem" tabindex="-1"><span class="md-label">목표값 찾기…</span></div>
+                </div>
+              </div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="sheet-mod-pivot" role="menuitem" tabindex="-1"><span class="md-label">피벗 테이블…</span></div>
               <div class="md-item" data-studio-menu-cmd="sheet-mod-condfmt" role="menuitem" tabindex="-1"><span class="md-label">조건부 서식…</span></div>
@@ -2829,6 +2836,58 @@
       </div>
     </dialog>
 
+    <dialog id="sheet-advfilter-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-advfilter-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-advfilter-title">고급 필터</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-stack" role="radiogroup" aria-label="작업">
+            <label class="dialog-checkbox"><input id="sheet-advfilter-inplace" type="radio" name="sheet-advfilter-action" value="inplace" checked /> 현재 위치에 필터(F)</label>
+            <label class="dialog-checkbox"><input id="sheet-advfilter-copy" type="radio" name="sheet-advfilter-action" value="copy" /> 다른 장소에 복사(O)</label>
+          </div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-advfilter-list">목록 범위(L):</label><input id="sheet-advfilter-list" class="dialog-text-input" type="text" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-advfilter-criteria">조건 범위(C):</label><input id="sheet-advfilter-criteria" class="dialog-text-input" type="text" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-advfilter-target">복사 위치(T):</label><input id="sheet-advfilter-target" class="dialog-text-input" type="text" autocomplete="off" spellcheck="false" disabled /></div>
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="sheet-advfilter-unique" type="checkbox" /> 고유 레코드만(R)</label></div>
+          <p id="sheet-advfilter-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-advfilter-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-goalseek-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-goalseek-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-goalseek-title">목표값 찾기</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="sheet-goalseek-formula">수식 셀(E):</label><input id="sheet-goalseek-formula" class="dialog-text-input" type="text" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-goalseek-goal">찾는 값(V):</label><input id="sheet-goalseek-goal" class="dialog-text-input" type="text" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-goalseek-changing">값을 바꿀 셀(C):</label><input id="sheet-goalseek-changing" class="dialog-text-input" type="text" autocomplete="off" spellcheck="false" /></div>
+          <p id="sheet-goalseek-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-goalseek-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-goalseek-result-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-goalseek-result-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-goalseek-result-title">목표값 찾기 상태</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <p id="sheet-goalseek-result-text" class="dialog-pdf-note" role="status"></p>
+          <p id="sheet-goalseek-result-goal" class="dialog-pdf-note"></p>
+          <p id="sheet-goalseek-result-value" class="dialog-pdf-note"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-goalseek-accept" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="sheet-goto-dialog" class="tool-dialog" aria-labelledby="sheet-goto-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="sheet-goto-title">이동</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -4154,6 +4213,8 @@
     <script src="./sheet-subtotal-ui.js"></script>
     <script src="./sheet-clear-ui.js"></script>
     <script src="./sheet-format-painter.js"></script>
+    <script src="./sheet-adv-filter.js"></script>
+    <script src="./sheet-goal-seek.js"></script>
     <script src="./sheet-structure.js"></script>
     <script src="./sheet-cell-write.js"></script>
     <script src="./sheet-view-live.js"></script>
