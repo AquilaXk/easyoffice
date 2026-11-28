@@ -14,6 +14,8 @@ use crate::rich_slide::{
     RichSlide, RichSlideDeck, SlideBox, SlideChartSeries, SlideElement, SlideMasterLayout,
     SlideShapeType, SlideTextAlign,
 };
+use crate::rich_slide_ext::ElementFx;
+use crate::rich_slide_table::{cover_map, CellCover, TableSpan};
 use crate::sheet_chart::{ChartKind, ChartLegendPos};
 use crate::{EasyOfficeError, PdfSerializer};
 
@@ -275,6 +277,7 @@ fn draw_table(
     rows: &[Vec<String>],
     header_row: bool,
     fill: Option<&str>,
+    spans: &[TableSpan],
 ) {
     if r.w <= 0.0 || r.h <= 0.0 {
         return;
@@ -284,6 +287,7 @@ fn draw_table(
     let (cw, rh) = (r.w / n_cols as f64, r.h / n_rows as f64);
     let pt = (rh * 0.44).clamp(7.0, 12.0);
     let hdr_rgb = parse_rgb(fill).unwrap_or(0x1E3A8A);
+    let cover = cover_map(spans, rows.len(), n_cols);
 
     for (ri, row) in rows.iter().enumerate() {
         let cell_top = r.y + ri as f64 * rh;
@@ -297,14 +301,20 @@ fn draw_table(
         let t_rgb = contrast_rgb(bg, None);
         for ci in 0..n_cols {
             let cx = r.x + ci as f64 * cw;
+            // A merged cell is drawn once over the cells it covers.
+            let (span_w, span_h) = match cover[ri][ci] {
+                CellCover::Covered { .. } => continue,
+                CellCover::Origin(s) => (cw * f64::from(s.col_span), rh * f64::from(s.row_span)),
+                CellCover::Plain => (cw, rh),
+            };
             if let Some(rgb) = bg {
-                cv.fill_rect(cx, cell_top, cw, rh, rgb);
+                cv.fill_rect(cx, cell_top, span_w, span_h, rgb);
             }
-            cv.stroke_rect(cx, cell_top, cw, rh, 0xCBD5E1, 0.5);
+            cv.stroke_rect(cx, cell_top, span_w, span_h, 0xCBD5E1, 0.5);
             let txt = row.get(ci).map_or("", String::as_str);
             let first = txt.split('\n').next().unwrap_or("");
-            let fitted = fit_text(first, pt, (cw - 8.0).max(4.0));
-            let base_y = cv.ph - (cell_top + (rh + pt * 0.72) * 0.5);
+            let fitted = fit_text(first, pt, (span_w - 8.0).max(4.0));
+            let base_y = cv.ph - (cell_top + (span_h + pt * 0.72) * 0.5);
             cv.text_line(
                 cx + 4.0,
                 base_y,
@@ -760,7 +770,7 @@ fn draw_placeholders(cv: &mut PdfCanvas, slide: &RichSlide) {
     }
 }
 
-fn render_element(cv: &mut PdfCanvas, el: &SlideElement) {
+fn render_element(cv: &mut PdfCanvas, el: &SlideElement, fx: Option<&ElementFx>) {
     match el {
         SlideElement::TextBox {
             rect,
@@ -879,7 +889,8 @@ fn render_element(cv: &mut PdfCanvas, el: &SlideElement) {
             fill,
             ..
         } => {
-            draw_table(cv, *rect, rows, *header_row, fill.as_deref());
+            let spans = fx.map_or(&[][..], |f| f.spans.as_slice());
+            draw_table(cv, *rect, rows, *header_row, fill.as_deref(), spans);
         }
         SlideElement::Chart {
             rect,

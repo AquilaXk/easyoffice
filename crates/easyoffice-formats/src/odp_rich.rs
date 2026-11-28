@@ -14,6 +14,7 @@ use crate::pptx_master::{odp_layout_boxes_pt, slide_placeholder_visibility};
 use crate::rich_image_writers::MediaParts;
 use crate::rich_slide::{RichSlideDeck, SlideBox, SlideElement, SlideMasterLayout, SlideTextAlign};
 use crate::rich_slide_ext::{hex6, ElementFx, SlideBullet, SlideExt, SlideNode, SlideParaFmt};
+use crate::rich_slide_table::{cover_map, CellCover};
 use crate::{EasyOfficeError, XmlSanitizer};
 
 const ODP_CONTENT_NS: &str = concat!(
@@ -318,12 +319,27 @@ impl PageEmit<'_> {
                     "<draw:frame draw:name=\"{}\"{idx} draw:style-name=\"{gid}\" {}><table:table table:use-first-row-styles=\"{header_row}\"><table:table-column table:number-columns-repeated=\"{cols}\"/>",
                     XmlSanitizer::escape(id), place_attrs(*rect, None)
                 );
-                for row in rows {
+                let cover = cover_map(fx.map_or(&[][..], |f| f.spans.as_slice()), rows.len(), cols);
+                for (r, row) in rows.iter().enumerate() {
                     self.body.push_str("<table:table-row>");
                     for c in 0..cols {
                         let cell = row.get(c).map_or("", String::as_str);
-                        self.body
-                            .push_str("<table:table-cell office:value-type=\"string\">");
+                        match cover[r][c] {
+                            CellCover::Covered { .. } => {
+                                self.body.push_str("<table:covered-table-cell/>");
+                                continue;
+                            }
+                            CellCover::Origin(s) => {
+                                let _ = write!(
+                                    self.body,
+                                    "<table:table-cell office:value-type=\"string\" table:number-columns-spanned=\"{}\" table:number-rows-spanned=\"{}\">",
+                                    s.col_span, s.row_span
+                                );
+                            }
+                            CellCover::Plain => self
+                                .body
+                                .push_str("<table:table-cell office:value-type=\"string\">"),
+                        }
                         for line in cell.split('\n') {
                             let _ = write!(
                                 self.body,

@@ -21,6 +21,7 @@ use crate::rich_slide::{
     MAX_SLIDE_STROKE_PT, MAX_SLIDE_TABLE_COLS, MAX_SLIDE_TABLE_ROWS, MIN_SLIDE_FONT_PT,
 };
 use crate::rich_slide_ext::{charge_background, ElementFx, SlideOutline};
+use crate::rich_slide_table::{scan_spans, ODF};
 use crate::rtf_xml_helpers::{extract_attr, extract_tag_bodies};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{EasyOfficeError, RichImage, XmlSanitizer, ZipArchiveEntry};
@@ -327,6 +328,15 @@ fn parse_odp_frame(
                     in_tc = true;
                     cur_cell_p.clear();
                 }
+                // A cell a merge covers holds no text; it still takes its column so the grid stays rectangular.
+                "covered-table-cell" if has_tbl => {
+                    if cur_row.len() >= MAX_SLIDE_TABLE_COLS {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(
+                            "ODP 표 열 수 상한 초과".to_string(),
+                        ));
+                    }
+                    cur_row.push(String::new());
+                }
                 "p" if in_tc => {
                     in_p = true;
                     cur_p.clear();
@@ -582,9 +592,14 @@ fn element_fx(
             (fx.flip_h, fx.flip_v) = g.flip;
             fx.outline = line;
         }
-        SlideElement::Table { .. } | SlideElement::Chart { .. } => {
-            return (ElementFx::default(), odf_id)
+        SlideElement::Table { rows, .. } => {
+            let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
+            fx = ElementFx {
+                spans: scan_spans(sub, &ODF, rows.len(), cols),
+                ..ElementFx::default()
+            };
         }
+        SlideElement::Chart { .. } => return (ElementFx::default(), odf_id),
     }
     (fx, odf_id)
 }

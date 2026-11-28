@@ -69,7 +69,11 @@ fn with_size(pptx: &[u8], cx: u64, cy: u64) -> Vec<u8> {
 
 #[test]
 fn a_custom_size_round_trips_through_pptx_exactly() {
-    for (cx, cy) in [(9_144_000, 5_143_500), (9_144_000, 5_715_000), (7_000_001, 3_333_333)] {
+    for (cx, cy) in [
+        (9_144_000, 5_143_500),
+        (9_144_000, 5_715_000),
+        (7_000_001, 3_333_333),
+    ] {
         let aspect = SlideAspect::custom(cx, cy).unwrap();
         let src = deck(aspect, SlideOrientation::Landscape);
         let bytes = OoxmlCodec::pack_pptx_rich(&src, false).unwrap();
@@ -106,7 +110,13 @@ fn a_preset_size_stays_a_preset_and_a_pptxgenjs_size_becomes_custom() {
     // PptxGenJS `LAYOUT_16x9` is 10 in x 5.625 in, not the 13.333 in x 7.5 in wide preset.
     let gen = with_size(&bytes, 9_144_000, 5_143_500);
     let back = OoxmlCodec::unpack_pptx_rich(&gen).unwrap();
-    assert_eq!(back.aspect, SlideAspect::Custom { cx: 9_144_000, cy: 5_143_500 });
+    assert_eq!(
+        back.aspect,
+        SlideAspect::Custom {
+            cx: 9_144_000,
+            cy: 5_143_500
+        }
+    );
 }
 
 #[test]

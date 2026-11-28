@@ -311,6 +311,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "slide-stage-size.js",
     "slide-studio.js",
     "slide-svg.js",
+    "slide-table-span.js",
     "slide-table.js",
     "theme.js",
     "toolbar-scroll.js",

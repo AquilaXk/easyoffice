@@ -8,6 +8,7 @@
   const slideExt = host.__EASYOFFICE_SLIDE_EXT__;
   const groups = host.__EASYOFFICE_SLIDE_GROUP__;
   const { STAGE_SIZES, isKnownAspect, stageSizeOf, applyStageSize } = host.__EASYOFFICE_SLIDE_STAGE_SIZE__;
+  const tableSpan = host.__EASYOFFICE_SLIDE_TABLE_SPAN__;
   const LAYOUT_LABELS = Object.freeze({
     titleSlide: "제목 슬라이드", titleAndContent: "제목 및 내용",
     sectionHeader: "구역 머리글", twoColumn: "콘텐츠 2개", blank: "빈 화면",
@@ -202,10 +203,11 @@
       };
     }
     if (kind === "table") {
+      const rows = sanitizeRows(raw.rows);
       return {
         id, kind, x, y, w, h,
         headerRow: raw.headerRow !== undefined ? Boolean(raw.headerRow) : true,
-        fill: normalizeHex6(raw.fill, "DBEAFE"), rows: sanitizeRows(raw.rows),
+        fill: normalizeHex6(raw.fill, "DBEAFE"), rows, merges: tableSpan.normalizeMerges(raw.merges, rows.length, rows[0]?.length ?? 0),
       };
     }
     const { categories, series } = sanitizeChartSeries(raw.categories, raw.series);
@@ -250,7 +252,8 @@
       return { ...base, mime: el.mime === "image/jpeg" ? "image/jpeg" : "image/png", data, alt: String(el.alt ?? "") };
     }
     if (el.kind === "table") {
-      return { ...base, headerRow: Boolean(el.headerRow), fill: normalizeHex6(el.fill, "DBEAFE"), rows: sanitizeRows(el.rows) };
+      const rows = sanitizeRows(el.rows);
+      return { ...base, headerRow: Boolean(el.headerRow), fill: normalizeHex6(el.fill, "DBEAFE"), rows, merges: tableSpan.normalizeMerges(el.merges, rows.length, rows[0]?.length ?? 0) };
     }
     const { categories, series } = sanitizeChartSeries(el.categories, el.series);
     return {
@@ -412,10 +415,19 @@
       const rows = sanitizeRows(el.rows);
       const headFill = el.fill ? "#" + normalizeHex6(el.fill, "DBEAFE") : "";
       let bodyStart = 0;
+      // A merge is one cell with `colSpan`/`rowSpan`; the cells it covers are not drawn.
+      const cover = tableSpan.coverMap(el.merges, rows.length, rows[0]?.length ?? 0);
+      const spanOf = (cellEl, r, c) => {
+        const m = cover[r]?.[c]?.origin;
+        if (m?.colSpan > 1) cellEl.colSpan = m.colSpan;
+        if (m?.rowSpan > 1) cellEl.rowSpan = m.rowSpan;
+      };
       if (el.headerRow && rows.length > 0) {
         const thead = document.createElement("thead"), tr = document.createElement("tr");
         rows[0].forEach((cellText, cIdx) => {
+          if (cover[0]?.[cIdx]?.covered) return;
           const th = document.createElement("th");
+          spanOf(th, 0, cIdx);
           th.textContent = cellText;
           th.dataset.rowIdx = "0";
           th.dataset.colIdx = String(cIdx);
@@ -430,7 +442,9 @@
       for (let r = bodyStart; r < rows.length; r += 1) {
         const tr = document.createElement("tr");
         rows[r].forEach((cellText, cIdx) => {
+          if (cover[r]?.[cIdx]?.covered) return;
           const td = document.createElement("td");
+          spanOf(td, r, cIdx);
           td.textContent = cellText;
           td.dataset.rowIdx = String(r);
           td.dataset.colIdx = String(cIdx);

@@ -5,11 +5,12 @@
 use std::fmt::Write;
 
 use easyoffice_formats::{
-    base64_codec, clean_face, normalize_hex_color, AnimClass, AnimDir, AnimEffect, AnimStart,
-    ColorScheme, DeckSettings, EasyOfficeError, ElementFx, RichImage, SlideAnim, SlideBackground,
-    SlideBullet, SlideDash, SlideDate, SlideExt, SlideFooter, SlideGroup, SlideNumberStyle,
-    SlideOutline, SlideParaFmt, SlideShadow, StrictJsonValue, COLOR_SCHEME_SLOTS, DEFAULT_ANIM_MS,
-    MAX_ADVANCE_MS, MAX_SLIDE_ANIMS, MAX_SLIDE_GROUPS, MAX_SLIDE_TOTAL_IMAGE_BYTES,
+    base64_codec, check_spans, clean_face, normalize_hex_color, AnimClass, AnimDir, AnimEffect,
+    AnimStart, ColorScheme, DeckSettings, EasyOfficeError, ElementFx, RichImage, SlideAnim,
+    SlideBackground, SlideBullet, SlideDash, SlideDate, SlideExt, SlideFooter, SlideGroup,
+    SlideNumberStyle, SlideOutline, SlideParaFmt, SlideShadow, StrictJsonValue, TableSpan,
+    COLOR_SCHEME_SLOTS, DEFAULT_ANIM_MS, MAX_ADVANCE_MS, MAX_SLIDE_ANIMS, MAX_SLIDE_GROUPS,
+    MAX_SLIDE_TOTAL_IMAGE_BYTES,
 };
 
 use crate::convert_structured::{as_array, as_object, field, invalid, opt_str, Budget, JsonObject};
@@ -136,6 +137,42 @@ pub(crate) fn parse_element_fx(
         .filter(|p| !p.is_default());
     fx.font = face(obj, "font")?;
     fx.east_font = face(obj, "eastFont")?;
+    Ok((!fx.is_default()).then_some(fx))
+}
+
+/// Merged cells (`merges`) of a table object, PD-402: `None` when it has none. A span outside the `rows` x `cols`
+/// grid, over another span or over the table limits refuses the save (Fail-Closed).
+pub(crate) fn parse_table_fx(
+    obj: &JsonObject,
+    id: &str,
+    rows: usize,
+    cols: usize,
+) -> Result<Option<ElementFx>, EasyOfficeError> {
+    let Some(list) = field(obj, "merges") else {
+        return Ok(None);
+    };
+    let int = |o: &JsonObject, key: &str| -> Result<u16, EasyOfficeError> {
+        let v = num(o, key)?.ok_or_else(|| invalid(format!("표 병합에 '{key}'가 필요합니다.")))?;
+        if v.fract() != 0.0 || !(0.0..=f64::from(u16::MAX)).contains(&v) {
+            return Err(invalid(format!(
+                "표 병합 '{key}'는 0 이상의 정수여야 합니다."
+            )));
+        }
+        Ok(v as u16)
+    };
+    let mut spans = Vec::new();
+    for item in as_array(list, "merges")? {
+        let o = as_object(item, "merges")?;
+        spans.push(TableSpan {
+            row: int(o, "row")?,
+            col: int(o, "col")?,
+            row_span: int(o, "rowSpan")?,
+            col_span: int(o, "colSpan")?,
+        });
+    }
+    check_spans(&spans, rows, cols)?;
+    let mut fx = ElementFx::new(id);
+    fx.spans = spans;
     Ok((!fx.is_default()).then_some(fx))
 }
 
@@ -445,6 +482,18 @@ pub(crate) fn write_element_fx(
             let _ = write!(out, ",\"{key}\":");
             push_str(out, face);
         }
+    }
+    if !fx.spans.is_empty() {
+        out.push_str(",\"merges\":[");
+        for (i, s) in fx.spans.iter().enumerate() {
+            let sep = if i > 0 { "," } else { "" };
+            let _ = write!(
+                out,
+                "{sep}{{\"row\":{},\"col\":{},\"rowSpan\":{},\"colSpan\":{}}}",
+                s.row, s.col, s.row_span, s.col_span
+            );
+        }
+        out.push(']');
     }
 }
 

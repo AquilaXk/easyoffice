@@ -24,6 +24,7 @@ use crate::rich_slide::{
     SlideTextAlign,
 };
 use crate::rich_slide_ext::{hex6, ElementFx, SlideDash, SlideExt, SlideNode, SlideParaFmt};
+use crate::rich_slide_table::{cover_map, CellCover};
 use crate::{EasyOfficeError, XmlSanitizer};
 
 fn push_xfrm(out: &mut String, tag: &str, r: SlideBox, fx: Option<&ElementFx>) {
@@ -325,6 +326,8 @@ impl Emit<'_> {
         fill: Option<&str>,
     ) {
         let cols = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
+        let spans = self.ext.fx_of(id).map_or(&[][..], |f| f.spans.as_slice());
+        let cover = cover_map(spans, rows.len(), cols);
         let (col_emu, row_emu) = (
             (pt_to_emu(rect.w) / cols as u64).max(1),
             (pt_to_emu(rect.h) / rows.len().max(1) as u64).max(1),
@@ -350,7 +353,30 @@ impl Emit<'_> {
             let cell_fill = fill.filter(|_| !header_row || r_idx == 0);
             for c_idx in 0..cols {
                 let cell = row.get(c_idx).map_or("", String::as_str);
-                out.push_str("<a:tc><a:txBody><a:bodyPr/><a:lstStyle/>");
+                match cover[r_idx][c_idx] {
+                    CellCover::Plain => out.push_str("<a:tc>"),
+                    CellCover::Origin(s) => {
+                        out.push_str("<a:tc");
+                        if s.col_span > 1 {
+                            let _ = write!(out, " gridSpan=\"{}\"", s.col_span);
+                        }
+                        if s.row_span > 1 {
+                            let _ = write!(out, " rowSpan=\"{}\"", s.row_span);
+                        }
+                        out.push('>');
+                    }
+                    CellCover::Covered { h, v } => {
+                        // A covered cell is empty; it only marks the direction it is covered from.
+                        let _ = write!(
+                            out,
+                            "<a:tc{}{}><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang=\"ko-KR\"/></a:p></a:txBody><a:tcPr/></a:tc>",
+                            if h { " hMerge=\"1\"" } else { "" },
+                            if v { " vMerge=\"1\"" } else { "" }
+                        );
+                        continue;
+                    }
+                }
+                out.push_str("<a:txBody><a:bodyPr/><a:lstStyle/>");
                 for line in cell.split('\n') {
                     let _ = write!(
                         out,

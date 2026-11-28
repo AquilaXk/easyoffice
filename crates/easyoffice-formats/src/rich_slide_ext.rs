@@ -9,6 +9,7 @@ use crate::rich_document::normalize_hex_color;
 use crate::rich_slide::{
     SlideBox, SlideElement, MAX_ELEMENTS_PER_SLIDE, MAX_SLIDE_STROKE_PT, MAX_SLIDE_TEXT_BYTES,
 };
+pub use crate::rich_slide_table::TableSpan;
 use crate::{EasyOfficeError, RichImage};
 
 pub const MAX_SLIDE_GROUPS: usize = 64;
@@ -190,6 +191,8 @@ pub struct ElementFx {
     pub font: Option<String>,
     /// East Asian typeface of the text (`a:ea`), PD-398.
     pub east_font: Option<String>,
+    /// Merged cells of a table element, PD-402 (see `rich_slide_table.rs`).
+    pub spans: Vec<TableSpan>,
 }
 
 /// Longest typeface name a slide keeps (in characters).
@@ -224,6 +227,7 @@ impl ElementFx {
             && self.para.is_none_or(|p| p.is_default())
             && self.font.is_none()
             && self.east_font.is_none()
+            && self.spans.is_empty()
     }
 
     fn validate(&self) -> Result<(), EasyOfficeError> {

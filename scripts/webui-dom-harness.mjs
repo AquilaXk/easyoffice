@@ -132,6 +132,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/slide-ext.js",
   "../crates/easyoffice-app/ui/slide-group.js",
   "../crates/easyoffice-app/ui/slide-stage-size.js",
+  "../crates/easyoffice-app/ui/slide-table-span.js",
   "../crates/easyoffice-app/ui/slide-canvas.js",
   "../crates/easyoffice-app/ui/slide-clipboard.js",
   "../crates/easyoffice-app/ui/slide-context-menu.js",

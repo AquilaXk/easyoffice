@@ -82,7 +82,7 @@ pub(super) fn draw_background(cv: &mut PdfCanvas, slide: &RichSlide) {
                 image: image.clone(),
                 alt: String::new(),
             };
-            render_element(cv, &full);
+            render_element(cv, &full, None);
         }
     }
 }
@@ -90,7 +90,7 @@ pub(super) fn draw_background(cv: &mut PdfCanvas, slide: &RichSlide) {
 /// Draws one element, turned and flipped about its center when its effects ask for it.
 pub(super) fn draw_element(cv: &mut PdfCanvas, slide: &RichSlide, el: &SlideElement) {
     let Some(fx) = slide.ext.fx_of(el.id()) else {
-        render_element(cv, el);
+        render_element(cv, el, None);
         return;
     };
     let r = el.rect();
@@ -105,7 +105,7 @@ pub(super) fn draw_element(cv: &mut PdfCanvas, slide: &RichSlide, el: &SlideElem
     let (e, f) = (cx - a * cx - c * cy, cy - b * cx - d * cy);
     cv.ops
         .push(format!("q {a:.5} {b:.5} {c:.5} {d:.5} {e:.3} {f:.3} cm"));
-    render_element(cv, el);
+    render_element(cv, el, Some(fx));
     if let (Some(o), true) = (&fx.outline, !matches!(el, SlideElement::Shape { .. })) {
         if let Some(rgb) = parse_rgb(Some(&o.color)) {
             cv.stroke_rect(r.x, r.y, r.w, r.h, rgb, o.width_pt.max(0.25));

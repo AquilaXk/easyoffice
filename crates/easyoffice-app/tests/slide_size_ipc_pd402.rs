@@ -63,13 +63,19 @@ fn custom_size_and_orientation_survive_pptx_and_the_pdf_page_has_the_size() {
 fn custom_size_survives_odp_within_the_unit_rounding() {
     let odp = converted(&save_req("odp", "custom:9144000x5143500", "landscape"));
     let back = decode("odp", &odp);
-    let wire = field(back.as_object().unwrap(), "aspect").as_str().unwrap().to_string();
+    let wire = field(back.as_object().unwrap(), "aspect")
+        .as_str()
+        .unwrap()
+        .to_string();
     let (cx, cy) = wire
         .strip_prefix("custom:")
         .and_then(|s| s.split_once('x'))
         .unwrap_or_else(|| panic!("not custom: {wire}"));
     let (cx, cy): (i64, i64) = (cx.parse().unwrap(), cy.parse().unwrap());
-    assert!((cx - 9_144_000).abs() < 400 && (cy - 5_143_500).abs() < 400, "{wire}");
+    assert!(
+        (cx - 9_144_000).abs() < 400 && (cy - 5_143_500).abs() < 400,
+        "{wire}"
+    );
 }
 
 #[test]

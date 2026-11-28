@@ -12,7 +12,9 @@ use easyoffice_formats::{
 };
 
 use crate::convert_structured::{as_array, as_object, field, invalid, opt_str, Budget, JsonObject};
-use crate::slide_ext_json::{parse_element_fx, parse_slide_ext, write_element_fx, write_slide_ext};
+use crate::slide_ext_json::{
+    parse_element_fx, parse_slide_ext, parse_table_fx, write_element_fx, write_slide_ext,
+};
 use crate::slide_image_table::{image_by_ref, parse_image_table, ImageRefs, ImageTable};
 
 fn push_f64(out: &mut String, v: f64) {
@@ -349,8 +351,14 @@ pub(crate) fn parse_slide_deck(
                     )));
                 }
                 let el = parse_element(e_item, ei, budget, &mut total_img_bytes, &images)?;
-                if !matches!(el, SlideElement::Table { .. } | SlideElement::Chart { .. }) {
-                    fxs.extend(parse_element_fx(as_object(e_item, "elements")?, el.id())?);
+                match &el {
+                    SlideElement::Table { rows, .. } => {
+                        let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
+                        let obj = as_object(e_item, "elements")?;
+                        fxs.extend(parse_table_fx(obj, el.id(), rows.len(), cols)?);
+                    }
+                    SlideElement::Chart { .. } => {}
+                    _ => fxs.extend(parse_element_fx(as_object(e_item, "elements")?, el.id())?),
                 }
                 elements.push(el);
             }

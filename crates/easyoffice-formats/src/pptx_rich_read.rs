@@ -22,6 +22,7 @@ use crate::rich_slide::{
     SlideBox, SlideElement,
 };
 use crate::rich_slide_ext::{charge_background, ElementFx};
+use crate::rich_slide_table::{scan_spans, DRAWINGML};
 use crate::rtf_xml_helpers::{extract_attr, extract_attr_from_fragment, extract_balanced_elements};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
@@ -467,7 +468,13 @@ fn dispatch_shape_subtree(
         let scan = scan_fx(sub, ctx.palette, ctx.clr_map);
         let mut fx = scan.fx;
         match kind {
-            FxKind::None => fx = ElementFx::default(),
+            FxKind::None => {
+                fx = ElementFx::default();
+                if let SlideElement::Table { rows, .. } = &acc.els[idx] {
+                    let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
+                    fx.spans = scan_spans(sub, &DRAWINGML, rows.len(), cols);
+                }
+            }
             FxKind::Shape => fx.outline = None,
             FxKind::Overlay => fx.outline = scan.line,
             FxKind::Picture => {
