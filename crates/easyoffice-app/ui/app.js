@@ -801,7 +801,7 @@
       "slide-move-down": () => slideStudio.moveDown(),
       "slide-delete": () => slideStudio.removeSlide(),
       "slide-group": () => slideStudio.runAct("group"),
-      "slide-ungroup": () => slideStudio.runAct("ungroup"), ...host.__EASYOFFICE_PAGES_COMMANDS__.shortcutActions(runNativeMenu), palette: () => togglePaletteModal(modal, cmdSearchInput),
+      "slide-ungroup": () => slideStudio.runAct("ungroup"), ...host.__EASYOFFICE_PAGES_COMMANDS__.shortcutActions(runNativeMenu), ...host.__EASYOFFICE_DOC_TEXT_CASE__.shortcutActions(), palette: () => togglePaletteModal(modal, cmdSearchInput),
       "slide-format-copy": () => slideStudio.runAct("format-copy"),
       "slide-format-paste": () => slideStudio.runAct("format-paste"),
       "copilot-toggle": () => copilotUi.toggle(),
@@ -951,6 +951,7 @@
     slideStudio.bind();
     host.__EASYOFFICE_PAGES_UI__ = host.__EASYOFFICE_CREATE_PAGES_UI__?.({ document, getDocRuns: () => docRunsUi, systemFonts: desktopBridge.isAvailable() ? desktopBridge.systemFonts : null });
     host.__EASYOFFICE_PAGES_UI__?.bind?.();
+    host.__EASYOFFICE_DOC_RUNS_UI__ = docRunsUi;
     host.__EASYOFFICE_BASE_BOARD_HOST__?.init({ document, env: host, invokeIpc, desktopBridge, shellChrome, getActiveModule: () => activeModule, getWindowBridge: () => windowBridge, setFeedback: (t) => setStatusFeedback(t), recordUndo: () => ribbonHistory.pushUndoSnapshot(false), captureUndo: () => ribbonHistory.captureWorkspaceSnapshot(false), commitUndo: ribbonHistory.commitDeferredUndoSnapshot, noteActivity: () => workspaceSession?.noteActivity() });
     workspacePanels.renderSlideDeck(0);
     activeShortcutModifier = workspaceSession.applyPlatformChrome(

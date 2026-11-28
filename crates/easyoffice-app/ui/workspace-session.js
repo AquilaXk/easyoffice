@@ -68,7 +68,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   if (sharedCatalog && Array.isArray(sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS) && !sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS.some((b) => b.keys === "Ctrl+Shift+K")) {
     sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS = Object.freeze([
       ...sharedCatalog.WORKSPACE_SHORTCUT_BINDINGS,
-      { keys: "Ctrl+Shift+K", action: "copilot-toggle", modules: ["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"] },
+      { keys: "Ctrl+Shift+K", action: "copilot-toggle", modules: ["DOC", "HWP", "SHEET", "SLIDE", "BASE", "BOARD", "PDF"], notPages: true },
     ]);
   }
   const BLOCKED_SPEC_TAGS = new Set([
@@ -875,7 +875,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     // combos only on macOS (the other systems keep the key for the editor). Of a combo's bindings the
     // one for the window's module wins, then one for every module. A `flavor: "pages"` binding is the Pages window's (PD-399).
     function bindingFor(combo) {
-      const module = getActiveModule(), pages = module === "DOC" && document.getElementById("doc-editor")?.dataset?.eoDocFlavor === "pages", list = (bindingsByKeys.get(combo) || []).filter((b) => !b.flavor || pages);
+      const module = getActiveModule(), pages = module === "DOC" && document.getElementById("doc-editor")?.dataset?.eoDocFlavor === "pages", list = (bindingsByKeys.get(combo) || []).filter((b) => (!b.flavor || pages) && !(b.notPages && pages));
       const binding = list.find((b) => b.module === module || b.modules?.includes(module)) || list.find((b) => !b.module && !b.modules) || list[0];
       if (!binding || binding.native || binding.external) return null;
       if (binding.macOnly && !isMacClient()) return null;

@@ -110,6 +110,7 @@
     "format:case-none": "studio-cmd:text-case-none",
     "format:case-all": "studio-cmd:text-case-all",
     "format:case-small": "studio-cmd:text-case-small",
+    "format:case-title": "studio-cmd:text-case-title",
     "arrange:wrap-inline": "studio-cmd:image-wrap-inline",
     "arrange:wrap-square": "studio-cmd:image-wrap-square",
     "arrange:wrap-top-bottom": "studio-cmd:image-wrap-top-bottom",
@@ -431,12 +432,12 @@
     "page:doc-paper", "page:paper", "page:margins", "page:columns", "page:slide-transition",
     "table:insert", "table:sort", "table:validation", "table:fn-browser", "table:doc-formula", "table:border-bg", "table:cell-props", "table:sheet-pivot", "table:sheet-condfmt", "table:sheet-freeze", "table:hwp-border",
     "tool:diagnose", "tool:scrub-pii", "tool:doc-inspect", "tool:review-comment", "tool:review-stats", "tool:pdf-highlight", "tool:pdf-rotate", "tool:pdf-splitmerge", "tool:pdf-tooffice", "tool:palette",
-    "insert:datetime", "insert:pages-bookmark", "format:highlight", "format:case-none", "format:case-all", "format:case-small", "arrange:watermark",
+    "insert:datetime", "insert:pages-bookmark", "format:highlight", "format:case-none", "format:case-all", "format:case-small", "format:case-title", "arrange:watermark",
     "arrange:wrap-inline", "arrange:wrap-square", "arrange:wrap-top-bottom", "arrange:wrap-behind", "arrange:wrap-front", "arrange:crop", "arrange:rotate-right", "arrange:rotate-left",
   ]);
   const FIELD_GATED_NATIVE_IDS = new Set([
     "insert:link", "edit:paste-special", "format:bold", "format:italic", "format:underline", "format:strike", "format:superscript", "format:subscript",
-    "format:highlight", "format:case-none", "format:case-all", "format:case-small",
+    "format:highlight", "format:case-none", "format:case-all", "format:case-small", "format:case-title",
     "format:cell-format", "format:row-height", "format:row-autofit", "format:col-width", "format:col-autofit",
     "sheet:remove-duplicates", "sheet:text-to-columns", "slide:bring-forward", "slide:send-backward",
     "slide:align-left", "slide:align-center", "slide:align-right", "slide:align-top", "slide:align-middle", "slide:align-bottom",

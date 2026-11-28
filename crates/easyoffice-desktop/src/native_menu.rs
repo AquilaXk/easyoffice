@@ -119,6 +119,9 @@ fn accelerator_for(kind: MenuKind, spec: &MenuItemSpec) -> Option<&'static str> 
         return None;
     }
     if kind == MenuKind::Pages {
+        if items_pages::copilot_has_no_key(spec.id) {
+            return None;
+        }
         if let Some(accelerator) = items_pages::accelerator(spec.id) {
             return Some(accelerator);
         }

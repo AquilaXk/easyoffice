@@ -22,6 +22,7 @@ pub const PAGES_ITEMS: &[MenuItemSpec] = &[
     sc!("format:case-none", "없음", "text-case-none"),
     sc!("format:case-all", "모두 대문자", "text-case-all"),
     sc!("format:case-small", "작은 대문자", "text-case-small"),
+    sc!("format:case-title", "첫 글자만 대문자", "text-case-title"),
     sc!("arrange:wrap-inline", "줄 안", "image-wrap-inline"),
     sc!("arrange:wrap-square", "정사각형", "image-wrap-square"),
     sc!(
@@ -84,6 +85,11 @@ pub fn label(id: &str) -> Option<&'static str> {
     })
 }
 
+/// The copilot item has no key in the Pages window: its key is the reference app's comment key (PD-400).
+pub fn copilot_has_no_key(id: &str) -> bool {
+    id == "tool:copilot"
+}
+
 /// The key the Pages window gives an item (the reference app's keys; the others keep the table's).
 pub fn accelerator(id: &str) -> Option<&'static str> {
     Some(match id {
@@ -91,6 +97,8 @@ pub fn accelerator(id: &str) -> Option<&'static str> {
         "format:highlight" => "CmdOrCtrl+Shift+H",
         "insert:pages-bookmark" => "CmdOrCtrl+Alt+B",
         "tool:review-stats" => "CmdOrCtrl+Shift+W",
+        // The reference app's comment key; the copilot gives it up in this window (`copilot_has_no_key`).
+        "tool:review-comment" => "CmdOrCtrl+Shift+K",
         "view:para-marks" => "CmdOrCtrl+Shift+I",
         _ => return None,
     })

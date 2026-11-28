@@ -425,6 +425,11 @@
     // 서식 복사 and 서식 붙여넣기 of the slide objects (PD-398), the keys of the word processor window. Ctrl+Shift+C is a browser key.
     { keys: "Ctrl+Shift+C", action: "slide-format-copy", module: "SLIDE", desktopOnly: true, bareKey: true },
     { keys: "Ctrl+Shift+V", action: "slide-format-paste", module: "SLIDE", bareKey: true },
+    // 주석 추가 is ⇧⌘K in the reference app, so the Pages window takes the key from the copilot (`notPages` in workspace-session.js):
+    // the copilot is the toolbar button there. The other windows keep Ctrl+Shift+K for the copilot (PD-400).
+    { keys: "Ctrl+Shift+K", action: "pages-comment", module: "DOC", flavor: "pages", notInField: true },
+    // 대/소문자 바꾸기 cycle of the word processor window (`doc-text-case.js`); the Pages window has no such key.
+    { keys: "Shift+F3", action: "doc-case-cycle", module: "DOC", notPages: true },
   ]);
 
   // ---- menu bar -> ribbon command (PD-098) ----------------------------------------------------

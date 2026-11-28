@@ -33,7 +33,7 @@
     "review-comment": "주석 추가",
     "review-stats": "단어 수 보기",
   });
-  const PALETTE_KEYS = Object.freeze({ "review-stats": "⇧⌘W" });
+  const PALETTE_KEYS = Object.freeze({ "review-stats": "⇧⌘W", "review-comment": "⇧⌘K" });
   const PALETTE_EXTRA = Object.freeze([
     { id: "page:break", title: "페이지 나누기", keys: "⌘Enter", section: "삽입", english: "page break" },
     { id: "insert:datetime", title: "날짜 및 시간…", keys: "", section: "삽입", english: "date time" },
@@ -43,6 +43,7 @@
     { id: "format:case-none", title: "대문자: 없음", keys: "", section: "포맷", english: "capitalization none" },
     { id: "format:case-all", title: "대문자: 모두 대문자", keys: "", section: "포맷", english: "capitalization all caps" },
     { id: "format:case-small", title: "대문자: 작은 대문자", keys: "", section: "포맷", english: "capitalization small caps" },
+    { id: "format:case-title", title: "대문자: 첫 글자만 대문자", keys: "", section: "포맷", english: "capitalization title case" },
     { id: "arrange:watermark", title: "워터마크…", keys: "", section: "정렬", english: "watermark" },
     { id: "tool:bench-run", title: "문서 엔진 성능 진단", keys: "", section: "도구", english: "benchmark" },
   ]);
@@ -53,6 +54,7 @@
     "pages-bookmark": "insert:pages-bookmark",
     "pages-word-count": "tool:review-stats",
     "pages-marks": "view:para-marks",
+    "pages-comment": "tool:review-comment",
   });
 
   // The command search entries only this window has; `run` runs a native menu item (`runNativeMenu` of app.js), `fmt` writes a key.

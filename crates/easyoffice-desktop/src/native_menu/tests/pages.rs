@@ -75,6 +75,7 @@ fn the_new_items_run_the_commands_the_document_window_already_has() {
         ("format:case-all", "text-case-all"),
         ("format:case-small", "text-case-small"),
         ("format:case-none", "text-case-none"),
+        ("format:case-title", "text-case-title"),
         ("arrange:wrap-front", "image-wrap-front"),
         ("page:break", "doc-mod-page-break"),
         ("format:font-dialog", "font-dialog"),
@@ -154,8 +155,17 @@ fn no_label_of_the_bar_is_a_word_of_another_product_and_no_key_repeats() {
             assert!(keys.insert(accelerator), "{accelerator} repeats ({id})");
         }
     }
-    // The app's own keys stay: the copilot has Shift+K, so the reference app's comment key is not bound.
-    assert!(keys.contains("CmdOrCtrl+Shift+K"));
+    // The reference app's comment key is bound to 주석 추가 and the copilot has no key in this window (PD-400); the other
+    // windows keep Shift+K for the copilot.
+    assert_eq!(
+        accelerator_for(MenuKind::Pages, spec("tool:review-comment")),
+        Some("CmdOrCtrl+Shift+K")
+    );
+    assert_eq!(accelerator_for(MenuKind::Pages, spec("tool:copilot")), None);
+    assert_eq!(
+        accelerator_for(MenuKind::Doc, spec("tool:copilot")),
+        Some("CmdOrCtrl+Shift+K")
+    );
 }
 
 #[test]

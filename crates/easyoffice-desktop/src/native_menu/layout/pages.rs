@@ -42,7 +42,12 @@ pub const PAGES_SUBMENUS: [TokenSubmenu; 3] = [
     TokenSubmenu {
         token: PAGES_CASE,
         title: "대문자",
-        lines: &["format:case-none", "format:case-all", "format:case-small"],
+        lines: &[
+            "format:case-none",
+            "format:case-all",
+            "format:case-small",
+            "format:case-title",
+        ],
     },
     TokenSubmenu {
         token: PAGES_WRAP,

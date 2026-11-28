@@ -10,7 +10,7 @@
   const handlers = new Map();
 
   const PAGES_COMMANDS = new Set([
-    "insert-datetime", "insert-bookmark", "layout-watermark", "home-highlight", "text-case-none", "text-case-all", "text-case-small",
+    "insert-datetime", "insert-bookmark", "layout-watermark", "home-highlight", "text-case-none", "text-case-all", "text-case-small", "text-case-title",
     "image-wrap-inline", "image-wrap-square", "image-wrap-topBottom", "image-wrap-top-bottom", "image-wrap-behind", "image-wrap-front",
     "image-crop", "image-rotate-right", "image-rotate-left",
   ]);

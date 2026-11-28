@@ -308,6 +308,8 @@
         ["#btn-size-down", `${sizeWord} 작게`],
         ["#btn-zoom-fit-width", word ? "페이지 너비" : "폭 맞춤"],
         ["#btn-zoom-fit-page", word ? "한 페이지" : "쪽 맞춤"],
+        // The Pages window gives ⇧⌘K to 주석 추가 (PD-400), so the copilot is the toolbar button only.
+        ["#btn-copilot-toggle", "코파일럿", pages ? "코파일럿" : "코파일럿 (Ctrl+Shift+K)"],
         ['[data-hf-action="page-number"]', word || pages ? "페이지 번호 삽입" : "쪽 번호 삽입"],
         ['[data-hf-action="total-pages"]', word || pages ? "페이지 수 삽입" : "총 쪽수 삽입"],
       ];
