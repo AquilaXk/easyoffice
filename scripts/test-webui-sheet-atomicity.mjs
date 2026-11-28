@@ -624,7 +624,11 @@ test("workspace snapshot SSOT restores doc layout styles, slide title styles, an
   switchModule(document, "DOC");
   await flushAsyncTurns();
 
+  // The word processor window's 단 command opens the dialog (PD-401); two columns are what the dialog's 확인 sets.
   userClick(commandItem(document, "document-layout-columns"));
+  await flushAsyncTurns();
+  document.getElementById("doc-col-count").value = "2";
+  userClick(document.getElementById("btn-doc-col-ok"));
   await flushAsyncTurns();
   userClick(commandItem(document, "document-layout-orientation"));
   await flushAsyncTurns();

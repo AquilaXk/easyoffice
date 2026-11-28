@@ -2,7 +2,7 @@
   "use strict";
 
   // 레이아웃 > 단 (하나, 둘, 셋, 왼쪽, 오른쪽, 기타 단…) and 단 나누기 of the word processor window (PD-401). The editor shows the
-  // columns the way the DOCX renderer docx-preview does (`section.columns` of its `html-renderer.ts`: CSS `column-count`,
+  // columns the way the DOCX renderer docx-preview does (`section.columns` of its `src/html-renderer.ts` lines 313-319, commit 28682e30: CSS `column-count`,
   // `column-gap` and, with a separator, `column-rule`; the widths of unequal columns are not drawn), and the file keeps what the
   // CSS cannot show: the narrow side of the two-column presets, in `eoWordMeta.columns` (`save-payload-doc-meta.js`). A column
   // break is a paragraph's `data-eo-col-break`, drawn as `break-before: column`. Reuse (구현 원칙 3단계): (1) no library does

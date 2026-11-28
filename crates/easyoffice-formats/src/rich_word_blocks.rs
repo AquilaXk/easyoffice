@@ -4,11 +4,12 @@
 //! (`w:pict` with `v:textbox`, `wps:txbx`), equations (the `m:` math of OMML, kept as the file wrote it) and the styles the
 //! user made (`w:style w:customStyle`).
 //!
-//! Reference implementations: the element shapes follow the MIT DOCX writer library `docx` (`src/file/paragraph/formatting/
-//! tab-stop.ts` and `border.ts`, `src/file/textbox/textbox.ts` and `shape/shape.ts`, `src/file/styles/style/paragraph-style.ts`
-//! of its master branch, commit d15c565e) and the reading rules follow the Apache-2.0 DOCX renderer `docx-preview`
-//! (`src/document-parser.ts` `parseFrame` and `parseBorderProperties`, commit 28682e30). Neither is a crate this workspace can
-//! use: both hold their own object models and write or draw HTML. Every value that comes from a file is checked here: a count,
+//! Reference implementations (구현 원칙 3단계: (1) no crate: both libraries below hold their own object models and write or draw
+//! HTML; (2) no dependency of the workspace reads these elements; (3) the element shapes are followed, no code is copied): the
+//! MIT DOCX writer library `docx` (`src/file/paragraph/formatting/tab-stop.ts` lines 103-146, `border.ts` 69-96,
+//! `src/file/textbox/textbox.ts` 100-128, `shape/shape.ts` 101-107, `src/file/styles/style/paragraph-style.ts`, commit
+//! d15c565e) and the Apache-2.0 DOCX renderer `docx-preview` (`src/document-parser.ts` `parseFrame` lines 582-587,
+//! `parseBorderProperties` 1536 and on, commit 28682e30). Every value that comes from a file is checked here: a count,
 //! a size or a name past its bound reads as absent, and a save request that carries one is refused.
 
 use crate::rich_image_layout::RichImageWrap;

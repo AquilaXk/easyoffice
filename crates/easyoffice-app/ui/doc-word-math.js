@@ -3,8 +3,9 @@
 
   // Equations of the word processor window (PD-401): the OMML of a DOCX equation (`span.eo-math[data-eo-omml]`) is drawn as
   // MathML, which WebKit shows. Reference implementation: the Apache-2.0 DOCX renderer docx-preview (Copyright (c) 2016-2023
-  // Volodymyr Baydalka, see THIRD_PARTY_NOTICES.md; `src/document-parser.ts` `mmlTagMap` and `parseMathElement`, `src/html-renderer.ts` `renderMmlRadical`,
-  // `renderMmlDelimiter`, `renderMmlNary`, `renderMmlPreSubSuper`, `renderMmlGroupChar`, `renderMmlBar`, commit 28682e30). The
+  // Volodymyr Baydalka, see THIRD_PARTY_NOTICES.md; `src/document-parser.ts` `mmlTagMap` lines 29-54 and `parseMathElement` 747-766, `src/html-renderer.ts`
+  // the math cases of `renderElement` lines 806-871, `renderMmlRadical` 1237, `renderMmlDelimiter` 1248, `renderMmlNary` 1258,
+  // `renderMmlPreSubSuper` 1284, `renderMmlGroupChar` 1300, `renderMmlBar` 1311, `renderMllList` 1326, commit 28682e30). The
   // element map is ported as it is; five places differ because the original draws them wrongly: an argument (degree,
   // superscript, subscript, function name) is an `mrow` and not an `mn`/`ms` (a token element holds no elements), a run is an
   // `mi`, `mn` or `mo` by its character and not an `ms` (a string literal), an n-ary operator with only one limit is an

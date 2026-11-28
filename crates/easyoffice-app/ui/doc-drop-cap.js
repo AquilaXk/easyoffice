@@ -4,7 +4,7 @@
   // 삽입 > 드롭 캡 (없음, 텍스트에 넣기, 여백에 넣기, 드롭 캡 옵션…) of the word processor window (PD-401). As the word
   // processor does, the drop cap is a paragraph of its own that holds the first letter and the next paragraph wraps around it
   // (DOCX `w:framePr w:dropCap`). The editor floats that paragraph left, which is the rule of the DOCX renderer docx-preview
-  // (`parseFrame` of `src/document-parser.ts`: `dropCap="drop"` is `float: left`); its size follows its line count in CSS
+  // (`parseFrame` of `src/document-parser.ts` lines 582-587, commit 28682e30: `dropCap="drop"` is `float: left`); its size follows its line count in CSS
   // (`content.css`). Removing the drop cap puts the letter back in front of the next paragraph. Reuse (구현 원칙 3단계): (1) no
   // library does this on the editor's DOM; (2) the dialog kit and the undo wrapper are used; (3) the split and the merge are
   // plain DOM work.

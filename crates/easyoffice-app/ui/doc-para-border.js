@@ -4,8 +4,8 @@
   // 서식 > 테두리 및 음영…: the border and the shading of a paragraph (PD-401). The dialog is the one the word processor has
   // (the 테두리 and 음영 tabs, 설정 없음/상자, 스타일, 색, 너비, 미리 보기 with the four side buttons) in the markup of the table
   // cell border dialog (`#doc-cell-border-dialog`, `doc-table-style.js`), whose line list and swatch classes it uses. The
-  // paragraph shows the border as inline border styles, as the DOCX renderer docx-preview does (`parseBorderProperties`: the
-  // `w:pBdr` sides become CSS borders of the paragraph), and keeps the values in `data-eo-border` and `data-eo-shade`
+  // paragraph shows the border as inline border styles, as the DOCX renderer docx-preview does (`parseBorderProperties`, `src/document-parser.ts`
+  // lines 1536 and on, and its `pBdr` case at 1304, commit 28682e30: the `w:pBdr` sides become CSS borders of the paragraph), and keeps the values in `data-eo-border` and `data-eo-shade`
   // (`doc-word-blocks.js`). Reuse (구현 원칙 3단계): (1) no library does this on the editor's DOM; (2) the dialog kit, the
   // undo wrapper, the swatch classes and the border model of PD-401 are used; (3) the preview is a box with the same CSS.
 

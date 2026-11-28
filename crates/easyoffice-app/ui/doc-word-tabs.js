@@ -3,7 +3,7 @@
 
   // 서식 > 탭…: the tab stops of a paragraph (PD-401) and how the editor draws them. Each tab character of a paragraph that has
   // stops sits in its own `span.eo-tab` whose width the stop gives. The rule is `updateTabStop` of the Apache-2.0 DOCX renderer
-  // docx-preview (`src/javascript.ts`, commit 28682e30): the stops are sorted, default stops fill the width past the last one,
+  // docx-preview (`src/javascript.ts` lines 24-93, commit 28682e30): the stops are sorted, default stops fill the width past the last one,
   // the tab takes the first stop to the right of where it begins, and a right or center stop leaves room for the text up to the
   // next tab (the decimal stop for the text up to the decimal point). docx-preview widens a non-breaking space with
   // `word-spacing`; here the span is an inline box of the width itself and the leader is a background pattern. The text of the
