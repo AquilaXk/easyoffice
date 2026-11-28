@@ -18,6 +18,7 @@ use crate::rich_slide::{
     RichSlideDeck, SlideAspect, SlideChartSeries, SlideMasterLayout, SlideOrientation,
     MAX_SLIDE_CHART_POINTS, MAX_SLIDE_CHART_SERIES, MAX_SLIDE_SIZE_EMU, MIN_SLIDE_SIZE_EMU,
 };
+use crate::rich_slide_guides::{needs_view_props, view_props_xml, VIEW_PROPS_CT, VIEW_PROPS_PATH};
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_balanced_elements, extract_tag_bodies,
 };
@@ -251,6 +252,13 @@ pub(crate) fn finish_pptx_package(
         ct,
         "<Override PartName=\"/{PRES_PROPS_PATH}\" ContentType=\"{PRES_PROPS_CT}\"/>"
     );
+    let has_view = needs_view_props(&deck.settings);
+    if has_view {
+        let _ = write!(
+            ct,
+            "<Override PartName=\"/{VIEW_PROPS_PATH}\" ContentType=\"{VIEW_PROPS_CT}\"/>"
+        );
+    }
     if has_notes {
         let _ = write!(ct, "<Override PartName=\"/ppt/theme/theme2.xml\" ContentType=\"{CT_PREFIX}.theme+xml\"/><Override PartName=\"/ppt/notesMasters/notesMaster1.xml\" ContentType=\"{pml}.notesMaster+xml\"/>");
     }
@@ -306,6 +314,9 @@ pub(crate) fn finish_pptx_package(
         ("rIdTheme1".into(), "theme", "theme/theme1.xml".into()),
         ("rIdPresProps1".into(), "presProps", "presProps.xml".into()),
     ]);
+    if has_view {
+        pres_rels.push(("rIdViewProps1".into(), "viewProps", "viewProps.xml".into()));
+    }
     if has_notes {
         pres_rels.push((
             "rIdNotesMaster1".into(),
@@ -367,6 +378,12 @@ pub(crate) fn finish_pptx_package(
             pres_props_xml(&deck.settings).into_bytes(),
         ),
     ];
+    if has_view {
+        entries.push((
+            VIEW_PROPS_PATH.into(),
+            view_props_xml(&deck.settings).into_bytes(),
+        ));
+    }
     let layout_rels = rels_xml(&[("rId1", "slideMaster", "../slideMasters/slideMaster1.xml")]);
     for layout in SlideMasterLayout::ALL {
         let k = layout.layout_index();

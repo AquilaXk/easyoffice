@@ -301,6 +301,7 @@ const JS_ASSETS: &[(&str, &str, &str)] = ui_js_table![
     "slide-format.js",
     "slide-fx.js",
     "slide-group.js",
+    "slide-guides.js",
     "slide-overview.js",
     "slide-page.js",
     "slide-painter.js",

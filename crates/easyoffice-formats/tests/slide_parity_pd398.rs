@@ -115,6 +115,7 @@ fn a_click_that_does_not_advance_and_the_repeat_flag_are_kept() {
             show_loop: true,
             manual_advance: true,
             color_scheme: None,
+            ..DeckSettings::default()
         },
         ..RichSlideDeck::default()
     };
@@ -167,6 +168,7 @@ fn text_typefaces_and_the_color_scheme_round_trip() {
             show_loop: false,
             manual_advance: false,
             color_scheme: Some(scheme.clone()),
+            ..DeckSettings::default()
         },
         ..RichSlideDeck::default()
     };

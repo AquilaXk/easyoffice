@@ -5,12 +5,13 @@
 use std::fmt::Write;
 
 use easyoffice_formats::{
-    base64_codec, check_spans, clean_face, normalize_hex_color, AnimClass, AnimDir, AnimEffect,
-    AnimStart, ColorScheme, DeckSettings, EasyOfficeError, ElementFx, RichImage, RichImageCrop,
-    SlideAnim, SlideBackground, SlideBullet, SlideDash, SlideDate, SlideExt, SlideFooter,
-    SlideGroup, SlideNumberStyle, SlideOutline, SlideParaFmt, SlideShadow, StrictJsonValue,
-    TableSpan, COLOR_SCHEME_SLOTS, DEFAULT_ANIM_MS, MAX_ADVANCE_MS, MAX_CROP_SIDE, MAX_SLIDE_ANIMS,
-    MAX_SLIDE_GROUPS, MAX_SLIDE_TOTAL_IMAGE_BYTES,
+    base64_codec, check_guides, check_spans, clean_face, normalize_hex_color, AnimClass, AnimDir,
+    AnimEffect, AnimStart, ColorScheme, DeckSettings, EasyOfficeError, ElementFx, RichImage,
+    RichImageCrop, SlideAnim, SlideBackground, SlideBullet, SlideDash, SlideDate, SlideExt,
+    SlideFooter, SlideGroup, SlideGuide, SlideNumberStyle, SlideOutline, SlideParaFmt, SlideShadow,
+    StrictJsonValue, TableSpan, COLOR_SCHEME_SLOTS, DEFAULT_ANIM_MS, GUIDE_UNITS_PER_PT,
+    MAX_ADVANCE_MS, MAX_CROP_SIDE, MAX_GUIDE_POS, MAX_SLIDE_ANIMS, MAX_SLIDE_GROUPS,
+    MAX_SLIDE_TOTAL_IMAGE_BYTES,
 };
 
 use crate::convert_structured::{as_array, as_object, field, invalid, opt_str, Budget, JsonObject};
@@ -431,10 +432,39 @@ pub(crate) fn parse_deck_settings(obj: &JsonObject) -> Result<DeckSettings, Easy
                 .ok_or_else(|| invalid("색 구성표의 색은 RRGGBB여야 합니다."))
         })
         .transpose()?;
+    let guides = field(obj, "guides")
+        .map(|v| {
+            as_array(v, "guides")?
+                .iter()
+                .map(|item| {
+                    let o = as_object(item, "guides")?;
+                    let vertical = match opt_str(o, "orient")? {
+                        Some("vert") => true,
+                        Some("horz") => false,
+                        _ => return Err(invalid("안내선 'orient'는 vert 또는 horz여야 합니다.")),
+                    };
+                    let pt = num(o, "posPt")?
+                        .ok_or_else(|| invalid("안내선에 'posPt'가 필요합니다."))?;
+                    let pos = (pt * f64::from(GUIDE_UNITS_PER_PT)).round();
+                    if pos.abs() > f64::from(MAX_GUIDE_POS) {
+                        return Err(invalid("안내선 위치가 슬라이드 좌표 범위를 벗어났습니다."));
+                    }
+                    Ok(SlideGuide {
+                        vertical,
+                        pos: pos as i32,
+                    })
+                })
+                .collect::<Result<Vec<_>, EasyOfficeError>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    check_guides(&guides)?;
     Ok(DeckSettings {
         show_loop: flag(obj, "showLoop")?,
         manual_advance: flag(obj, "manualAdvance")?,
         color_scheme,
+        guides,
+        show_guides: flag(obj, "showGuides")?,
     })
 }
 
@@ -449,6 +479,23 @@ pub(crate) fn write_deck_settings(
     }
     if settings.manual_advance {
         out.push_str(",\"manualAdvance\":true");
+    }
+    if settings.show_guides {
+        out.push_str(",\"showGuides\":true");
+    }
+    if !settings.guides.is_empty() {
+        out.push_str(",\"guides\":[");
+        for (i, g) in settings.guides.iter().enumerate() {
+            let _ = write!(
+                out,
+                "{}{{\"orient\":\"{}\",\"posPt\":",
+                if i > 0 { "," } else { "" },
+                if g.vertical { "vert" } else { "horz" }
+            );
+            push_f64(out, f64::from(g.pos) / f64::from(GUIDE_UNITS_PER_PT));
+            out.push('}');
+        }
+        out.push(']');
     }
     if let Some(s) = &settings.color_scheme {
         out.push_str(",\"colorScheme\":{\"name\":");

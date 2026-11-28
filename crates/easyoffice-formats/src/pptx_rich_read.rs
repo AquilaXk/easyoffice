@@ -22,6 +22,7 @@ use crate::rich_slide::{
     SlideBox, SlideElement,
 };
 use crate::rich_slide_ext::{charge_background, ElementFx};
+use crate::rich_slide_guides::read_guides;
 use crate::rich_slide_table::{scan_spans, DRAWINGML};
 use crate::rtf_xml_helpers::{extract_attr, extract_attr_from_fragment, extract_balanced_elements};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
@@ -813,10 +814,14 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
             .get(path)
             .and_then(|e| std::str::from_utf8(&e.data).ok())
     };
-    let settings = read_deck_settings(
+    let mut settings = read_deck_settings(
         text_of("ppt/presProps.xml"),
         text_of("ppt/theme/theme1.xml"),
     )?;
+    if let Some(view) = text_of("ppt/viewProps.xml") {
+        budget.charge(view.len(), "PPTX 보기 속성")?;
+        (settings.guides, settings.show_guides) = read_guides(view)?;
+    }
     let deck = RichSlideDeck {
         title,
         is_slideshow,

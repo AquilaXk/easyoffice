@@ -739,7 +739,7 @@
         if (d.dir.includes("w")) { const r = d.orig.x + d.orig.w; next.x = clamp(d.orig.x + dxPt, 0, r - MIN_EL_W); next.w = r - next.x; }
         if (d.dir.includes("n")) { const b = d.orig.y + d.orig.h; next.y = clamp(d.orig.y + dyPt, 0, b - MIN_EL_H); next.h = b - next.y; }
       }
-      const snapped = computeSmartSnap(next, d.siblings, d.stage, snapEnabled, d.mode, d.dir);
+      const snapped = computeSmartSnap(next, d.siblings, d.stage, snapEnabled, d.mode, d.dir, host.__EASYOFFICE_SLIDE_GUIDES__?.targets());
       d.el.x = snapped.x; d.el.y = snapped.y; d.el.w = snapped.w; d.el.h = snapped.h;
       d.moved = d.moved || snapped.x !== d.orig.x || snapped.y !== d.orig.y || snapped.w !== d.orig.w || snapped.h !== d.orig.h;
       positionElementDom(d.card, d.el, d.stage);

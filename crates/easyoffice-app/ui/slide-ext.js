@@ -307,6 +307,10 @@
     if (res?.manualAdvance === true) out.manualAdvance = true;
     const scheme = normalizeScheme(res?.colorScheme);
     if (scheme) out.colorScheme = scheme;
+    // The drawing guides (PD-402): at most 64 lines inside the page cap, shown or not.
+    const guides = host.__EASYOFFICE_SLIDE_GUIDES_MATH__?.normalizeGuides(res?.guides) ?? [];
+    if (guides.length > 0) out.guides = guides;
+    if (res?.showGuides === true) out.showGuides = true;
     return out;
   }
 

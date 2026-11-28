@@ -654,6 +654,7 @@ impl RichSlideDeck {
             )));
         }
         check_text_len(&self.title, "프레젠테이션 제목")?;
+        crate::rich_slide_guides::check_guides(&self.settings.guides)?;
         let mut total_elements = 0usize;
         let (mut total_image_bytes, mut seen_bg) = (0usize, HashSet::new());
         for slide in &self.slides {

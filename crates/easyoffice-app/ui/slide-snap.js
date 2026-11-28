@@ -4,12 +4,14 @@
   // Smart-guide snapping of an element being moved or resized to the stage center and the edges and
   // centers of its siblings. Split from slide-canvas.js, which hands in its limits and helpers.
   function createSlideSnap({ clamp, round2, SNAP_TOLERANCE_PT, MIN_EL_W, MIN_EL_H }) {
-    function computeSmartSnap(box, siblings, stage, snapEnabled, mode, dir) {
+    // `guides` (PD-402) are the drawing guides shown: `{ v, h }`, the x of the vertical lines and the y of the horizontal ones, which
+    // snap like the edges of a sibling.
+    function computeSmartSnap(box, siblings, stage, snapEnabled, mode, dir, guides) {
       if (!snapEnabled) return { x: box.x, y: box.y, w: box.w, h: box.h, vLine: null, hLine: null };
       let { x, y, w, h } = box;
       let bestDx = SNAP_TOLERANCE_PT + 0.001, bestDy = SNAP_TOLERANCE_PT + 0.001;
       let vLine = null, hLine = null;
-      const vTargets = [stage.w / 2], hTargets = [stage.h / 2];
+      const vTargets = [stage.w / 2, ...(guides?.v ?? [])], hTargets = [stage.h / 2, ...(guides?.h ?? [])];
       for (let i = 0; i < siblings.length; i += 1) {
         const s = siblings[i];
         vTargets.push(s.x, s.x + s.w / 2, s.x + s.w);

@@ -10,6 +10,7 @@ use crate::rich_image_layout::RichImageCrop;
 use crate::rich_slide::{
     SlideBox, SlideElement, MAX_ELEMENTS_PER_SLIDE, MAX_SLIDE_STROKE_PT, MAX_SLIDE_TEXT_BYTES,
 };
+use crate::rich_slide_guides::SlideGuide;
 pub use crate::rich_slide_table::TableSpan;
 use crate::{EasyOfficeError, RichImage};
 
@@ -413,6 +414,9 @@ pub struct DeckSettings {
     pub manual_advance: bool,
     /// The theme's color scheme when it is not the default one.
     pub color_scheme: Option<ColorScheme>,
+    /// The drawing guides (`p:guideLst` of the view part) and whether they are shown, PD-402.
+    pub guides: Vec<SlideGuide>,
+    pub show_guides: bool,
 }
 
 /// Number of colors in a DrawingML color scheme: dk1, lt1, dk2, lt2, accent1 to accent6, hlink, folHlink.

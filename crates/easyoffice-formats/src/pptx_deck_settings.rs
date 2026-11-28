@@ -92,6 +92,7 @@ pub(crate) fn read_deck_settings(
         show_loop,
         manual_advance,
         color_scheme,
+        ..DeckSettings::default()
     })
 }
 
@@ -130,6 +131,7 @@ mod tests {
             show_loop: true,
             manual_advance: true,
             color_scheme: Some(scheme("AA0011")),
+            ..DeckSettings::default()
         };
         let theme = theme_xml("EasyOffice", &settings);
         let props = pres_props_xml(&settings);

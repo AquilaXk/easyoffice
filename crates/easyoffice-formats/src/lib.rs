@@ -108,6 +108,7 @@ mod rich_run_writers;
 pub mod rich_slide;
 pub mod rich_slide_aspect;
 pub mod rich_slide_ext;
+pub mod rich_slide_guides;
 pub mod rich_slide_table;
 mod rich_table;
 mod rich_table_cells;
@@ -199,6 +200,9 @@ pub use rich_notes::{
 pub use rich_readers::{DecodedContent, DecodedDocument, DecodedSlide};
 pub use rich_slide::*;
 pub use rich_slide_ext::*;
+pub use rich_slide_guides::{
+    check_guides, SlideGuide, GUIDE_UNITS_PER_PT, MAX_GUIDE_POS, MAX_SLIDE_GUIDES,
+};
 pub use rich_slide_table::{check_spans, CellCover};
 pub use rich_table::{
     CellMerge, CellSpan, RichTable, SpanMap, TableCellLink, MAX_MERGE_SPAN, MAX_TABLE_LINKS,
