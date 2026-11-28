@@ -285,13 +285,17 @@
         ["#btn-zoom-fit-width", word ? "페이지 너비" : "폭 맞춤"],
         ["#btn-zoom-fit-page", word ? "한 페이지" : "쪽 맞춤"],
         ['[data-hf-action="page-number"]', word ? "페이지 번호 삽입" : "쪽 번호 삽입"],
-        ['[data-hf-action="total-pages"]', word ? "총 페이지 수 삽입" : "총 쪽수 삽입"],
+        ['[data-hf-action="total-pages"]', word ? "페이지 수 삽입" : "총 쪽수 삽입"],
       ];
       for (const [selector, label, title = label] of labels) {
         const el = doc.querySelector(selector);
         if (!el) continue;
         el.setAttribute("title", title);
         el.setAttribute("aria-label", label);
+      }
+      for (const [action, text] of [["page-number", word ? "페이지 번호" : "쪽번호"], ["total-pages", word ? "페이지 수" : "총쪽수"]]) {
+        const label = doc.querySelector(`[data-hf-action="${action}"] .tb-label`);
+        if (label) label.textContent = text;
       }
     }
 

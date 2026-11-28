@@ -319,8 +319,8 @@ test("the status line shows the current and total page from the page layout", as
   editor.dispatchEvent({ type: "input", target: editor });
   await flushAsyncTurns();
   const pos = h.document.getElementById("status-studio-pos").textContent;
-  assert.match(pos, /^3\/7 쪽/);
-  assert.match(h.document.getElementById("doc-page-zone-indicator").textContent, /^3 \/ 7 쪽/);
+  assert.equal(pos, "3/7 페이지");
+  assert.match(h.document.getElementById("doc-page-zone-indicator").textContent, /^3 \/ 7 페이지/);
   assert.match(h.document.getElementById("status-doc-filename").textContent, /7쪽$/);
 });
 

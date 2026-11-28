@@ -192,7 +192,7 @@ test("the total-pages and file-name buttons insert their fields, which save as t
   host.__EASYOFFICE_DOC_PAGE_FRAME__.endEdit();
   const frame = host.__EASYOFFICE_SAVE_PAYLOAD__.collectPageFrame(editor);
   assert.deepEqual(frame.footer[0].runs.map((r) => r.field), ["page", "pages", "filename"]);
-  const labels = ["쪽번호", "총쪽수", "파일명"];
+  const labels = ["페이지 번호", "페이지 수", "파일명"];
   const shown = [...document.querySelectorAll("#icon-toolbar .tb-headerfooter-group .tb-label")].map((el) => el.textContent);
   for (const label of labels) assert.ok(shown.includes(label), label);
 });

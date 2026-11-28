@@ -266,7 +266,7 @@ test("updating measures the pages again with the block's own settings, and a sta
   assert.deepEqual(pageNumbers(h), fakePages(h) && h.host.__EASYOFFICE_DOC_PAGES__.headingPages().map((x) => String(x.page)));
 });
 
-test("the dialog has 쪽 번호 넣기 (on) and 채울 모양 (점선, off while the numbers are off) and passes them to the command", async () => {
+test("the dialog has 페이지 번호 표시 (on) and 채울 모양 (점선, off while the numbers are off) and passes them to the command", async () => {
   const h = await createWorkspaceHarness();
   switchModule(h.document, "DOC");
   await flushAsyncTurns(10);
@@ -280,7 +280,7 @@ test("the dialog has 쪽 번호 넣기 (on) and 채울 모양 (점선, off while
   assert.equal(byId(h, "doc-toc-pages").checked, true);
   assert.equal(byId(h, "doc-toc-fill").value, "dot");
   assert.deepEqual(Array.from(byId(h, "doc-toc-fill").querySelectorAll("option"), (o) => o.textContent), ["점선", "없음"]);
-  assert.deepEqual(Array.from(dialog.querySelectorAll(".dialog-label, .dialog-checkbox"), (el) => el.textContent.trim()), ["포함할 개요", "쪽 번호 넣기", "채울 모양"]);
+  assert.deepEqual(Array.from(dialog.querySelectorAll(".dialog-label, .dialog-checkbox"), (el) => el.textContent.trim()), ["포함할 개요", "페이지 번호 표시", "채울 모양"]);
   byId(h, "doc-toc-pages").checked = false;
   byId(h, "doc-toc-pages").dispatchEvent({ type: "change", target: byId(h, "doc-toc-pages") });
   assert.equal(byId(h, "doc-toc-fill").disabled, true);

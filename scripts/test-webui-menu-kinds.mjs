@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { readText } from "./test-support/read-text.mjs";
 import { itemTable } from "./test-support/rust-menu-table.mjs";
+import { WORD_WEB_ONLY } from "./test-support/word-web-only.mjs";
 
 const byName = (a, b) => a.localeCompare(b);
 
@@ -246,7 +247,8 @@ test("the native bar of a document, pages, sheet, slide, PDF, BASE, BOARD, START
   for (const kind of ["DOC", "PAGES", "SHEET", "SLIDE", "PDF", "BASE", "BOARD", "START", "CONV"]) {
     const { document } = await open(kind);
     await flushAsyncTurns(10);
-    const page = new Set([...shownCommands(document)].map((cmd) => PAGE_OWN[cmd] ?? `studio-cmd:${cmd}`).filter((a) => !EDIT_GROUP.has(a)));
+    const shown = [...shownCommands(document)].filter((cmd) => kind !== "DOC" || !WORD_WEB_ONLY.has(cmd));
+    const page = new Set(shown.map((cmd) => PAGE_OWN[cmd] ?? `studio-cmd:${cmd}`).filter((a) => !EDIT_GROUP.has(a)));
     assert.deepEqual([...page].sort(byName), [...nativeActions(kind, items)].sort(byName), kind);
   }
 });

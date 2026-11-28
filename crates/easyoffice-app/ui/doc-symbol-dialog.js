@@ -310,6 +310,19 @@
       $("btn-symbol-insert")?.focus?.();
     }
 
+    // The rows of the Word program's 단어 개수 dialog, in its order.
+    function wordCountRows(includeNotes) {
+      const stats = host.__EASYOFFICE_DOC_WORD_COUNT__.count(document.getElementById("doc-editor"), { includeNotes });
+      return [
+        ["페이지", String(Math.max(1, getDocPages?.()?.pageCount?.() ?? 1))],
+        ["단어", String(stats.words)],
+        ["문자(공백 제외)", String(stats.charsWithoutSpaces)],
+        ["문자(공백 포함)", String(stats.charsWithSpaces)],
+        ["단락", String(stats.paragraphs)],
+        ["줄", String(stats.lines)],
+      ];
+    }
+
     function countDocStatsMetrics(smartRes) {
       const text = String(extractEditableDocumentText() || "");
       const charsWithSpaces = Array.from(text).length;
@@ -341,8 +354,6 @@
         ["단어 수", String(words)],
         [unitLabel, String(unitValue)],
       ];
-      // The word-count dialog of the Word program lists only counts, so DOC leaves out the sentence count and the reading time.
-      if (isWordDoc(mod)) return [...counts.slice(0, 3), ["단락 수", String(unitValue)], ["페이지 수", String(pageValue)]];
       const sentences = Number(smartRes?.sentenceCount ?? (trimmed ? trimmed.split(/[.!?。\n]+/).filter((s) => s.trim()).length : 0));
       const readSeconds = words > 0 ? Math.max(1, Math.ceil((words / 220) * 60)) : 0;
       return [
@@ -355,10 +366,15 @@
 
     const isWordDoc = (mod) => mod === "DOC" && document.getElementById("doc-editor")?.dataset?.eoDocFlavor !== "pages";
 
-    function openStatsDialog(smartRes) {
+    let statsBound = false;
+
+    function renderStats(smartRes) {
       const grid = $("doc-stats-grid");
-      if (!grid) return;
-      const rows = countDocStatsMetrics(smartRes);
+      if (!grid) return false;
+      const word = isWordDoc(getActiveModule());
+      const notesRow = $("doc-stats-notes-row");
+      if (notesRow) notesRow.hidden = !word;
+      const rows = word ? wordCountRows($("doc-stats-notes")?.checked !== false) : countDocStatsMetrics(smartRes);
       const children = [];
       for (const [k, v] of rows) {
         const dt = document.createElement("dt");
@@ -369,10 +385,21 @@
       }
       grid.replaceChildren(...children);
       const title = $("doc-stats-title");
-      if (title) title.textContent = isWordDoc(getActiveModule()) ? "단어 개수" : "문서 통계";
+      if (title) title.textContent = word ? "단어 개수" : "문서 통계";
       const statusEl = $("doc-stats-status");
       if (statusEl) {
-        statusEl.textContent = "공백 포함 " + rows[0][1] + "자 · 공백 제외 " + rows[1][1] + "자 · 단어 " + rows[2][1] + "개";
+        statusEl.textContent = word ? "" : "공백 포함 " + rows[0][1] + "자 · 공백 제외 " + rows[1][1] + "자 · 단어 " + rows[2][1] + "개";
+      }
+      return true;
+    }
+
+    function openStatsDialog(smartRes) {
+      if (!renderStats(smartRes)) return;
+      const notes = $("doc-stats-notes");
+      if (!statsBound && notes) {
+        statsBound = true;
+        notes.checked = true;
+        notes.addEventListener("change", () => renderStats(smartRes));
       }
       openToolDialog("doc-stats-dialog");
       $("btn-doc-stats-close")?.focus?.();

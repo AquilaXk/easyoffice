@@ -489,7 +489,15 @@ impl RibbonCommandRouter {
                         ("review-track", "변경 내용 추적", "Shift+Cmd+E"),
                         ("review-comment", "새 메모", "Alt+Cmd+C"),
                         ("review-verify", "문서 보안 검사", "Ctrl+Cmd+V"),
-                        ("review-stats", "문서 통계·글자 수", "Shift+Cmd+I"),
+                        (
+                            "review-stats",
+                            if module == OfficeModuleKind::Document {
+                                "단어 개수"
+                            } else {
+                                "문서 통계·글자 수"
+                            },
+                            "Shift+Cmd+I",
+                        ),
                     ],
                     "view" => [
                         ("view-split", "창 나누기", "Ctrl+Cmd+2"),

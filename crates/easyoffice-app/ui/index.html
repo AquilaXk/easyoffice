@@ -167,7 +167,7 @@
             </div>
           </div>
           <div class="menu-item" data-menu="insert" data-kinds="DOC PAGES HWP">
-            <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="insert">입력</button>
+            <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="insert">삽입</button>
             <div class="menu-dropdown" role="menu">
               <div class="md-item" data-studio-menu-cmd="insert-shape" role="menuitem" tabindex="-1"><span class="md-label">도형</span></div>
               <div class="md-item" data-kinds="DOC HWP" data-studio-menu-cmd="insert-image" role="menuitem" tabindex="-1"><span class="md-label">그림</span></div>
@@ -176,7 +176,12 @@
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="mod-footnote" role="menuitem" tabindex="-1"><span class="md-label">각주</span></div>
               <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="mod-endnote" role="menuitem" tabindex="-1"><span class="md-label">미주</span></div>
-              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="mod-symbol" role="menuitem" tabindex="-1"><span class="md-label">기호</span></div>
+              <div class="md-sub" data-kinds="DOC" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">기호</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="기호">
+                  <div class="md-item" data-studio-menu-cmd="mod-symbol" role="menuitem" tabindex="-1"><span class="md-label">기타 기호…</span></div>
+                </div>
+              </div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="mod-symbol" role="menuitem" tabindex="-1"><span class="md-label">문자표</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크</span><span class="md-shortcut">Ctrl+K</span></div>
               <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">링크</span><span class="md-shortcut">Ctrl+K</span></div>
@@ -240,6 +245,7 @@
               <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="home-superscript" role="menuitem" tabindex="-1"><span class="md-label">위 첨자</span><span class="md-shortcut">Ctrl+Shift+=</span></div>
               <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="home-subscript" role="menuitem" tabindex="-1"><span class="md-label">아래 첨자</span><span class="md-shortcut">Ctrl+=</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="font-dialog" role="menuitem" tabindex="-1"><span class="md-label">글꼴…</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="para-dialog" role="menuitem" tabindex="-1"><span class="md-label">단락…</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="home-style" role="menuitem" tabindex="-1"><span class="md-label">스타일 적용</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="para-shape" role="menuitem" tabindex="-1"><span class="md-label">양쪽 맞춤</span></div>
@@ -438,7 +444,7 @@
             </div>
           </div>
           <div class="menu-item" data-menu="page" data-kinds="DOC HWP PDF">
-            <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="layout">쪽</button>
+            <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="layout">레이아웃</button>
             <div class="menu-dropdown" role="menu">
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="layout-paper" role="menuitem" tabindex="-1"><span class="md-label">페이지 설정</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="layout-paper" role="menuitem" tabindex="-1"><span class="md-label">편집 용지</span></div>
@@ -1543,7 +1549,8 @@
       <footer id="status-bar" class="statusbar" role="contentinfo">
         <span class="statusbar-left-group">
           <span id="doc-page-zone-indicator" class="eo-style-zone" hidden>1 / 1 쪽 · 구역: 1 / 1 · 삽입</span>
-          <span id="status-studio-pos" class="statusbar-pos-metrics">1/1 쪽 &nbsp; 1단 &nbsp; 1줄 &nbsp; 1칸 | 구역: 1 / 1 |</span>
+          <span id="status-studio-pos" class="statusbar-pos-metrics">1/1 페이지</span>
+          <button id="status-word-count" class="statusbar-mode-btn" type="button" title="단어 개수" hidden>단어 0개</button>
           <button id="status-insert-mode" class="statusbar-mode-btn" type="button" title="입력 모드 전환 (Insert)">삽입</button>
           <span class="eo-style-sep stb-divider" aria-hidden="true"></span>
           <span id="status-doc-filename" class="statusbar-doc-path">제목 없음 — 1쪽</span>
@@ -1872,7 +1879,7 @@
             </select>
           </div>
           <div class="dialog-row">
-            <label class="dialog-checkbox"><input id="doc-toc-pages" type="checkbox" checked />쪽 번호 넣기</label>
+            <label class="dialog-checkbox"><input id="doc-toc-pages" type="checkbox" checked />페이지 번호 표시</label>
           </div>
           <div class="dialog-row">
             <label class="dialog-label" for="doc-toc-fill">채울 모양</label>
@@ -3021,6 +3028,7 @@
         <div class="dialog-title"><span id="doc-stats-title">문서 통계</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
         <div class="dialog-body">
           <dl id="doc-stats-grid" class="board-analysis-grid"></dl>
+          <label id="doc-stats-notes-row" class="dialog-checkbox" hidden><input id="doc-stats-notes" type="checkbox" checked />텍스트 상자, 각주 및 미주 포함</label>
           <p id="doc-stats-status" class="dialog-pdf-note" role="status"></p>
         </div>
         <div class="dialog-footer">
@@ -3519,6 +3527,9 @@
     <script src="./slide-context-menu.js"></script>
     <script src="./slide-dialogs.js"></script>
     <script src="./doc-symbol-dialog.js"></script>
+    <script src="./doc-status-text.js"></script>
+    <script src="./doc-word-count.js"></script>
+    <script src="./doc-word-commands.js"></script>
     <script src="./doc-dialogs-ext.js"></script>
     <script src="./workspace-tools.js"></script>
     <script src="./workspace-panels.js"></script>

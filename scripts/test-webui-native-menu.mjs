@@ -5,6 +5,7 @@ import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { readText } from "./test-support/read-text.mjs";
 import { itemTable } from "./test-support/rust-menu-table.mjs";
+import { WORD_WEB_ONLY } from "./test-support/word-web-only.mjs";
 
 // The native menu bar (PD-102, macOS only since PD-121): the Rust table and the page's list name the same ids and
 // actions, the page runs them through the shortcut handlers, and the shell grants the page nothing for it. The page's
@@ -249,7 +250,7 @@ function pageMenuItemActions() {
 test("every item of the page's menu bar is in the native menu (nothing is lost on macOS)", () => {
   const native = new Set(rustItems().map((r) => r.action));
   // The edit items macOS draws as system items still keep their table entry (the page menu has them).
-  const missing = pageMenuItemActions().filter((action) => !native.has(action));
+  const missing = pageMenuItemActions().filter((action) => !native.has(action) && !WORD_WEB_ONLY.has(action.replace(/^studio-cmd:/, "")));
   assert.deepEqual([...new Set(missing)], []);
   assert.ok(pageMenuItemActions().length >= 60, "the page menu was parsed");
 });

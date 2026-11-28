@@ -154,16 +154,21 @@
     };
   }
 
+  // The 단락 dialog on the paragraph the selection starts in (the 줄 간격 옵션… choice and the 서식 > 단락… item).
+  function openParagraphDialog(document, runs) {
+    const root = document.getElementById("doc-editor");
+    const range = runs.currentRange?.();
+    const block = root && range ? host.__EASYOFFICE_DOC_RUNS__.blocksInRange(root, range)[0] : null;
+    const current = runs.lineSpecOf(block);
+    runs.showLineSpacing(current.kind === "multiple" ? current.value : 0, current.kind === "multiple" ? undefined : { kind: current.kind, twips: current.value });
+    paragraphDialog(document, runs).open(current);
+  }
+
   // A choice in the line spacing list of the style bar: a multiple, a length kind (`kind:twips`), or 줄 간격 옵션….
   function chooseFromSelect(select, runs, document) {
     const choice = select.value;
     if (choice === OPTIONS_VALUE) {
-      const root = document.getElementById("doc-editor");
-      const range = runs.currentRange?.();
-      const block = root && range ? host.__EASYOFFICE_DOC_RUNS__.blocksInRange(root, range)[0] : null;
-      const current = runs.lineSpecOf(block);
-      runs.showLineSpacing(current.kind === "multiple" ? current.value : 0, current.kind === "multiple" ? undefined : { kind: current.kind, twips: current.value });
-      paragraphDialog(document, runs).open(current);
+      openParagraphDialog(document, runs);
       return;
     }
     const [kind, twips] = choice.split(":");
@@ -172,6 +177,6 @@
   }
 
   host.__EASYOFFICE_DOC_LINE_SPACING__ = {
-    KIND_LABELS, LENGTH_KINDS, MAX_TWIPS, OPTIONS_VALUE, cssOf, specialOf, writeSpecial, clearSpecial, jsonFields, fromJson, applyToSpec, amountOf, valueOf, showInSelect, chooseFromSelect,
+    KIND_LABELS, LENGTH_KINDS, MAX_TWIPS, OPTIONS_VALUE, cssOf, specialOf, writeSpecial, clearSpecial, jsonFields, fromJson, applyToSpec, amountOf, valueOf, showInSelect, chooseFromSelect, openParagraphDialog,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

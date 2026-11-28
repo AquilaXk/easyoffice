@@ -131,7 +131,8 @@ test("DOC and HWP module-specific ribbon tools build real DOM structures and dir
   await flushAsyncTurns(6);
   const statsDlg = document.getElementById("doc-stats-dialog");
   assert.equal(statsDlg.open, true, "review-stats opens document statistics dialog");
-  assert.match(document.getElementById("doc-stats-status").textContent, /공백 포함 \d+자/);
+  assert.equal(document.getElementById("doc-stats-title").textContent, "단어 개수");
+  assert.deepEqual(Array.from(document.querySelectorAll("#doc-stats-grid dt"), (el) => el.textContent), ["페이지", "단어", "문자(공백 제외)", "문자(공백 포함)", "단락", "줄"]);
   pressEsc(statsDlg);
   assert.equal(statsDlg.open, false);
 
@@ -468,7 +469,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   userClick(document.getElementById("btn-stylebar-bold"));
   await flushAsyncTurns();
   assert.equal(document.getElementById("btn-stylebar-bold").getAttribute("aria-pressed"), "true");
-  assert.match(document.getElementById("doc-page-zone-indicator").textContent, /1 \/ \d+ 쪽 · 구역: 1 \/ \d+ · 삽입/);
+  assert.match(document.getElementById("doc-page-zone-indicator").textContent, /1 \/ \d+ 페이지 · 삽입/);
 
   const docEditor = document.getElementById("doc-editor");
   const styleSelect = document.getElementById("doc-style-select");
@@ -571,10 +572,10 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(insertBtn.textContent, "삽입");
   userClick(insertBtn);
   assert.equal(insertBtn.textContent, "수정");
-  assert.match(document.getElementById("doc-page-zone-indicator").textContent, /1 \/ \d+ 쪽 · 구역: 1 \/ \d+ · 수정/);
+  assert.match(document.getElementById("doc-page-zone-indicator").textContent, /1 \/ \d+ 페이지 · 수정/);
   sandbox.dispatchWindowKeydown({ key: "Insert" });
   assert.equal(insertBtn.textContent, "삽입");
-  assert.match(document.getElementById("doc-page-zone-indicator").textContent, /1 \/ \d+ 쪽 · 구역: 1 \/ \d+ · 삽입/);
+  assert.match(document.getElementById("doc-page-zone-indicator").textContent, /1 \/ \d+ 페이지 · 삽입/);
 
   const zoomSlider = document.getElementById("status-zoom-slider");
   zoomSlider.value = "135";
@@ -751,7 +752,9 @@ test("Slice 1: table sort/fn wizard, validation non-audit, rightIndentTwips roun
   sel2.removeAllRanges();
   sel2.addRange(rPos);
   document.dispatchEvent({ type: "selectionchange" });
-  assert.match(document.getElementById("status-studio-pos").textContent, /2줄\s+3칸/);
+  // The word processor window's status bar shows the page and the word count, not the line and column of the caret.
+  assert.match(document.getElementById("status-studio-pos").textContent, /^1\/\d+ 페이지$/);
+  assert.match(document.getElementById("status-word-count").textContent, /^단어 \d+개$/);
 
   userClick(document.getElementById("status-insert-mode"));
   assert.equal(document.getElementById("status-insert-mode").textContent, "수정");
@@ -888,7 +891,7 @@ test("regression guards: single-pass mailmerge before footer, h4 stats, multi-ta
   const dts = Array.from(document.querySelectorAll("#doc-stats-grid dt"));
   const dds = Array.from(document.querySelectorAll("#doc-stats-grid dd"));
   dts.forEach((dt, i) => { statsPairs[dt.textContent] = dds[i]?.textContent; });
-  assert.equal(Number(statsPairs["단락 수"]), 3, "h4 + bodyP + tokenP = 3 (excludes footer and hwp-manuscript-preview)");
+  assert.equal(Number(statsPairs["단락"]), 3, "h4 + bodyP + tokenP = 3 (excludes footer and hwp-manuscript-preview)");
   document.getElementById("doc-stats-dialog")?.close?.();
 
   // 3. Multi-table sort acts on focused table (not #doc-table-body) & keeps error feedback outside tables

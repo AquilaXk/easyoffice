@@ -465,15 +465,7 @@
       const pages = deps.getDocPages?.();
       const total = pages ? pages.pageCount() : 1;
       const current = Math.min(total, pages ? pages.currentPage() : 1);
-      const editor = document.getElementById("doc-editor");
-      const posEl = document.getElementById("status-studio-pos");
-      if (posEl) {
-        const cols = Number.parseInt(editor?.style?.columnCount || "1", 10) || 1;
-        const { line, col } = symbolDialog?.caretLineCol?.(editor) || { line: 1, col: 1 };
-        posEl.textContent = current + "/" + total + " 쪽   " + cols + "단   " + line + "줄   " + col + "칸 | 구역: 1 / 1 |";
-      }
-      const zoneEl = document.getElementById("doc-page-zone-indicator");
-      if (zoneEl) zoneEl.textContent = current + " / " + total + " 쪽 · 구역: 1 / 1 · " + insertModeLabel;
+      host.__EASYOFFICE_DOC_STATUS_TEXT__.render({ document, module: getActiveModule(), current, total, caretLineCol: symbolDialog?.caretLineCol, insertMode: insertModeLabel });
       const fileEl = document.getElementById("status-doc-filename");
       if (fileEl) {
         const activeTabTitle = getWindowBridge?.()?.getDocumentName(getActiveModule());
@@ -760,6 +752,7 @@
       const textTarget = blk?.querySelector?.(".eo-h-title") || blk;
       if (execStudioClipboardCmd(cmd)) return;
       if (execStudioParaCmd(cmd, fb, isDocMod, curMod, editor)) return;
+      if (host.__EASYOFFICE_DOC_WORD_COMMANDS__?.run(cmd, { editor, document, runs: getDocRuns(), module: curMod })) return;
       if (execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd, curMod, isDocMod)) return;
       if (cmd === "font-dialog") return void (curMod === "DOC" && host.__EASYOFFICE_DOC_FONT_DIALOG__?.open(getDocRuns(), document));
       const runProp = { "home-strike": "strike", "home-superscript": "superscript", "home-subscript": "subscript" }[cmd];
@@ -950,6 +943,7 @@
       host.addEventListener("keydown", (ev) => {
         if (ev.key === "Insert" && !document.querySelector("dialog[open]")) toggleStudioInsertMode(insertBtn);
       });
+      document.getElementById("status-word-count")?.addEventListener("click", () => symbolDialog?.openStatsDialog?.());
       document.getElementById("status-studio-pos")?.addEventListener("click", () => {
         document.getElementById("btn-doc-outline")?.click?.();
         openToolDialog("outline-dialog");

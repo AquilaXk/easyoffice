@@ -135,6 +135,9 @@
     "view-zoom": "실제 크기",
   };
 
+  // The word processor window names the word count as the Word program does.
+  const DOC_CATALOG_TITLES = { "review-stats": "단어 개수" };
+
   function buildRibbonCatalog() {
     const prefixes = {
       DOC: "document",
@@ -150,7 +153,7 @@
       Object.keys(COMMON_CATEGORY_SPECS).forEach((catKey) => {
         catalog[modKey][catKey] = COMMON_CATEGORY_SPECS[catKey].map((item) => ({
           id: prefix + "-" + item.suffix,
-          title: (modKey === "HWP" && HWP_CATALOG_TITLES[item.suffix]) || item.title,
+          title: (modKey === "HWP" && HWP_CATALOG_TITLES[item.suffix]) || (modKey === "DOC" && DOC_CATALOG_TITLES[item.suffix]) || item.title,
           shortcut: item.shortcut,
         }));
       });
