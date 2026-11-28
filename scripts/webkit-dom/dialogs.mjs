@@ -175,7 +175,19 @@ const slideDialog = (opener, element) => (page) => page.evaluate(([name, spec]) 
 }, [opener, element]);
 const PNG_1X1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
+/** A slide menu act (`slide-format.js`, `slide-page.js`, `slide-anim.js`), after an optional text box was added and selected. */
+const slideAct = (act, { withElement = false, before = [] } = {}) => (page) => page.evaluate(([name, add, first]) => {
+  if (add) window.__EASYOFFICE_SLIDE_CANVAS__.addElement({ kind: "textbox", x: 100, y: 100, w: 300, h: 80, text: "글상자" });
+  for (const prior of first) window.__EASYOFFICE_SLIDE_RUN_ACT__(prior);
+  window.__EASYOFFICE_SLIDE_RUN_ACT__(name);
+}, [act, withElement, before]);
+
 const SLIDE_DIALOGS = [
+  ["도형 서식", "slide-fmt-dialog", [slideAct("format-shape", { withElement: true })]],
+  ["단락", "slide-para-dialog", [slideAct("format-para", { withElement: true })]],
+  ["배경 서식", "slide-bg-dialog", [slideAct("format-background")]],
+  ["머리글 및 바닥글", "slide-footer-dialog", [slideAct("header-footer")]],
+  ["애니메이션 창", "slide-anim-dialog", [slideAct("anim-pane", { withElement: true, before: ["anim:entrance:fade"] })]],
   ["마스터 레이아웃", "slide-layout-dialog", [click('[data-studio-menu-cmd="slide-mod-master"]')]],
   ["도형", "slide-shape-dialog", [slideDialog("openShapeDialog")]],
   ["표", "slide-table-dialog", [slideDialog("openTableDialog")]],

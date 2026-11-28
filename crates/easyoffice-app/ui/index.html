@@ -312,7 +312,26 @@
                   <button type="button" class="md-item" data-slide-act="distribute-v" role="menuitem" tabindex="-1"><span class="md-label">세로 간격을 동일하게</span></button>
                 </div>
               </div>
+              <div class="md-sub" data-kinds="SLIDE" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">그룹화</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="그룹화">
+                  <button type="button" class="md-item" data-slide-act="group" role="menuitem" tabindex="-1"><span class="md-label">그룹</span></button>
+                  <button type="button" class="md-item" data-slide-act="ungroup" role="menuitem" tabindex="-1"><span class="md-label">그룹 해제</span></button>
+                </div>
+              </div>
+              <div class="md-sub" data-kinds="SLIDE" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">회전</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="회전">
+                  <button type="button" class="md-item" data-slide-act="rotate-right" role="menuitem" tabindex="-1"><span class="md-label">오른쪽으로 90° 회전</span></button>
+                  <button type="button" class="md-item" data-slide-act="rotate-left" role="menuitem" tabindex="-1"><span class="md-label">왼쪽으로 90° 회전</span></button>
+                  <button type="button" class="md-item" data-slide-act="flip-h" role="menuitem" tabindex="-1"><span class="md-label">좌우 대칭</span></button>
+                  <button type="button" class="md-item" data-slide-act="flip-v" role="menuitem" tabindex="-1"><span class="md-label">상하 대칭</span></button>
+                </div>
+              </div>
               <div class="md-item" data-kinds="SLIDE" data-slide-act="delete-element" role="menuitem" tabindex="-1"><span class="md-label">개체 삭제</span></div>
+              <div class="md-sep" data-kinds="SLIDE"></div>
+              <div class="md-item" data-kinds="SLIDE" data-slide-act="format-shape" role="menuitem" tabindex="-1"><span class="md-label">도형 서식…</span></div>
+              <div class="md-item" data-kinds="SLIDE" data-slide-act="format-para" role="menuitem" tabindex="-1"><span class="md-label">단락…</span></div>
               <div class="md-sub" data-kinds="SHEET" role="menuitem" aria-haspopup="menu" tabindex="-1">
                 <span class="md-label">표시 형식</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
                 <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="표시 형식">
@@ -511,12 +530,47 @@
               <div class="md-item" data-studio-menu-cmd="slide-mod-master" role="menuitem" tabindex="-1"><span class="md-label">슬라이드 마스터</span></div>
               <div class="md-item" data-studio-menu-cmd="slide-mod-snap" role="menuitem" tabindex="-1"><span class="md-label">스마트 가이드</span></div>
               <div class="md-sep"></div>
+              <div class="md-item" data-kinds="SLIDE" data-slide-act="format-background" role="menuitem" tabindex="-1"><span class="md-label">배경 서식…</span></div>
+              <div class="md-item" data-kinds="SLIDE" data-slide-act="header-footer" role="menuitem" tabindex="-1"><span class="md-label">머리글 및 바닥글…</span></div>
+              <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="layout-orientation" role="menuitem" tabindex="-1"><span class="md-label">용지 방향</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="slideshow" data-kinds="SLIDE">
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="view">슬라이드 쇼</button>
             <div class="menu-dropdown" role="menu">
+              <div class="md-item" data-slide-act="hide-slide" role="menuitem" tabindex="-1"><span class="md-label">슬라이드 숨기기</span></div>
+              <div class="md-sep"></div>
+              <div class="md-sub" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">나타내기</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="나타내기">
+                  <button type="button" class="md-item" data-slide-act="anim:entrance:appear" role="menuitem" tabindex="-1"><span class="md-label">나타내기</span></button>
+                  <button type="button" class="md-item" data-slide-act="anim:entrance:fade" role="menuitem" tabindex="-1"><span class="md-label">페이드</span></button>
+                  <button type="button" class="md-item" data-slide-act="anim:entrance:fly" role="menuitem" tabindex="-1"><span class="md-label">날아오기</span></button>
+                  <button type="button" class="md-item" data-slide-act="anim:entrance:wipe" role="menuitem" tabindex="-1"><span class="md-label">닦아내기</span></button>
+                  <button type="button" class="md-item" data-slide-act="anim:entrance:zoom" role="menuitem" tabindex="-1"><span class="md-label">확대</span></button>
+                </div>
+              </div>
+              <div class="md-sub" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">강조</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="강조">
+                  <button type="button" class="md-item" data-slide-act="anim:emphasis:spin" role="menuitem" tabindex="-1"><span class="md-label">회전</span></button>
+                  <button type="button" class="md-item" data-slide-act="anim:emphasis:growShrink" role="menuitem" tabindex="-1"><span class="md-label">확대/축소</span></button>
+                </div>
+              </div>
+              <div class="md-sub" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">끝내기</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="끝내기">
+                  <button type="button" class="md-item" data-slide-act="anim:exit:appear" role="menuitem" tabindex="-1"><span class="md-label">사라지기</span></button>
+                  <button type="button" class="md-item" data-slide-act="anim:exit:fade" role="menuitem" tabindex="-1"><span class="md-label">페이드</span></button>
+                  <button type="button" class="md-item" data-slide-act="anim:exit:fly" role="menuitem" tabindex="-1"><span class="md-label">날아가기</span></button>
+                  <button type="button" class="md-item" data-slide-act="anim:exit:wipe" role="menuitem" tabindex="-1"><span class="md-label">닦아내기</span></button>
+                  <button type="button" class="md-item" data-slide-act="anim:exit:zoom" role="menuitem" tabindex="-1"><span class="md-label">축소</span></button>
+                </div>
+              </div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-slide-act="anim-pane" role="menuitem" tabindex="-1"><span class="md-label">애니메이션 창…</span></div>
+              <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="slide-mod-transition" role="menuitem" tabindex="-1"><span class="md-label">전환 효과</span></div>
               <div class="md-item" data-studio-menu-cmd="slide-mod-presenter" role="menuitem" tabindex="-1"><span class="md-label">발표자 보기</span></div>
             </div>
@@ -3458,6 +3512,115 @@
       </div>
     </dialog>
 
+    <dialog id="slide-fmt-dialog" class="tool-dialog" aria-labelledby="slide-fmt-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="slide-fmt-dialog-title">도형 서식</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-section" id="slide-fmt-fill-section">
+            <div class="dialog-section-title">채우기</div>
+            <div class="dialog-row"><label class="dialog-label" for="slide-fmt-fill-mode">채우기</label><select id="slide-fmt-fill-mode" class="sb-combo dialog-select"><option value="none">채우기 없음</option><option value="solid" selected>단색 채우기</option></select><span class="dialog-label">색</span><div id="slide-fmt-fill-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="채우기 색" aria-label="채우기 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span class="eo-chevron" aria-hidden="true"></span></button><input id="slide-fmt-fill" type="color" value="#2563eb" aria-label="채우기 색" /><div id="slide-fmt-fill-palette" class="sb-hl-palette" hidden></div></div></div>
+          </div>
+          <div class="dialog-section" id="slide-fmt-line-section">
+            <div class="dialog-section-title">선</div>
+            <div class="dialog-row"><label class="dialog-label" for="slide-fmt-line-mode">선</label><select id="slide-fmt-line-mode" class="sb-combo dialog-select"><option value="none">선 없음</option><option value="solid" selected>실선</option><option value="dash">파선</option><option value="dot">점선</option></select><span class="dialog-label">색</span><div id="slide-fmt-line-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="선 색" aria-label="선 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span class="eo-chevron" aria-hidden="true"></span></button><input id="slide-fmt-line" type="color" value="#1d4ed8" aria-label="선 색" /><div id="slide-fmt-line-palette" class="sb-hl-palette" hidden></div></div></div>
+            <div class="dialog-row"><label class="dialog-label" for="slide-fmt-line-w">너비</label><input id="slide-fmt-line-w" type="number" min="0" max="24" step="0.25" value="2" class="dialog-input" /><span class="dialog-unit">pt</span></div>
+          </div>
+          <div class="dialog-section" id="slide-fmt-shadow-section">
+            <div class="dialog-section-title">그림자</div>
+            <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="slide-fmt-shadow" type="checkbox" /> 그림자</label><span class="dialog-label">색</span><div id="slide-fmt-shadow-color-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="그림자 색" aria-label="그림자 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span class="eo-chevron" aria-hidden="true"></span></button><input id="slide-fmt-shadow-color" type="color" value="#000000" aria-label="그림자 색" /><div id="slide-fmt-shadow-color-palette" class="sb-hl-palette" hidden></div></div></div>
+            <div class="dialog-row"><label class="dialog-label" for="slide-fmt-shadow-alpha">투명도</label><input id="slide-fmt-shadow-alpha" type="number" min="0" max="100" step="1" value="40" class="dialog-input" /><span class="dialog-unit">%</span><label class="dialog-label" for="slide-fmt-shadow-blur">흐리게</label><input id="slide-fmt-shadow-blur" type="number" min="0" max="100" step="0.5" value="4" class="dialog-input" /><span class="dialog-unit">pt</span></div>
+            <div class="dialog-row"><label class="dialog-label" for="slide-fmt-shadow-angle">각도</label><input id="slide-fmt-shadow-angle" type="number" min="0" max="359" step="1" value="45" class="dialog-input" /><span class="dialog-unit">°</span><label class="dialog-label" for="slide-fmt-shadow-dist">거리</label><input id="slide-fmt-shadow-dist" type="number" min="0" max="100" step="0.5" value="3" class="dialog-input" /><span class="dialog-unit">pt</span></div>
+          </div>
+          <div class="dialog-section" id="slide-fmt-rot-section">
+            <div class="dialog-section-title">회전</div>
+            <div class="dialog-row"><label class="dialog-label" for="slide-fmt-rot">회전</label><input id="slide-fmt-rot" type="number" min="0" max="359" step="1" value="0" class="dialog-input" /><span class="dialog-unit">°</span><label class="dialog-checkbox"><input id="slide-fmt-flip-h" type="checkbox" /> 좌우 대칭</label><label class="dialog-checkbox"><input id="slide-fmt-flip-v" type="checkbox" /> 상하 대칭</label></div>
+          </div>
+          <p id="slide-fmt-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-slide-fmt-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="slide-para-dialog" class="tool-dialog" aria-labelledby="slide-para-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="slide-para-dialog-title">단락</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="slide-para-align">정렬</label><select id="slide-para-align" class="sb-combo dialog-select"><option value="left">왼쪽 맞춤</option><option value="center">가운데 맞춤</option><option value="right">오른쪽 맞춤</option><option value="justify">양쪽 맞춤</option></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="slide-para-bullet">글머리 기호</label><select id="slide-para-bullet" class="sb-combo dialog-select"><option value="">없음</option><option value="•">• 둥근 글머리 기호</option><option value="–">– 대시 글머리 기호</option><option value="■">■ 네모 글머리 기호</option><option value="○">○ 속이 빈 원형 글머리 기호</option><option value="✓">✓ 확인 표시 글머리 기호</option></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="slide-para-number">번호 매기기</label><select id="slide-para-number" class="sb-combo dialog-select"><option value="">없음</option><option value="arabicPeriod">1. 2. 3.</option><option value="arabicParenR">1) 2) 3)</option><option value="alphaUcPeriod">A. B. C.</option><option value="alphaLcPeriod">a. b. c.</option><option value="romanUcPeriod">I. II. III.</option></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="slide-para-line">줄 간격</label><input id="slide-para-line" type="number" min="0.5" max="5" step="0.1" value="1" class="dialog-input" /><span class="dialog-unit">배</span></div>
+          <div class="dialog-row"><label class="dialog-label" for="slide-para-before">단락 앞</label><input id="slide-para-before" type="number" min="0" max="200" step="1" value="0" class="dialog-input" /><span class="dialog-unit">pt</span><label class="dialog-label" for="slide-para-after">단락 뒤</label><input id="slide-para-after" type="number" min="0" max="200" step="1" value="0" class="dialog-input" /><span class="dialog-unit">pt</span></div>
+          <p id="slide-para-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-slide-para-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="slide-bg-dialog" class="tool-dialog" aria-labelledby="slide-bg-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="slide-bg-dialog-title">배경 서식</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="slide-bg-mode">채우기</label><select id="slide-bg-mode" class="sb-combo dialog-select"><option value="none">기본 배경</option><option value="solid">단색 채우기</option><option value="gradient">그라데이션 채우기</option><option value="picture">그림 채우기</option></select></div>
+          <div class="dialog-row" id="slide-bg-solid-row"><span class="dialog-label">색</span><div id="slide-bg-color-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="배경 색" aria-label="배경 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span class="eo-chevron" aria-hidden="true"></span></button><input id="slide-bg-color" type="color" value="#ffffff" aria-label="배경 색" /><div id="slide-bg-color-palette" class="sb-hl-palette" hidden></div></div></div>
+          <div class="dialog-row" id="slide-bg-gradient-row"><span class="dialog-label">시작 색</span><div id="slide-bg-from-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="시작 색" aria-label="시작 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span class="eo-chevron" aria-hidden="true"></span></button><input id="slide-bg-from" type="color" value="#ffffff" aria-label="시작 색" /><div id="slide-bg-from-palette" class="sb-hl-palette" hidden></div></div><span class="dialog-label">끝 색</span><div id="slide-bg-to-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="끝 색" aria-label="끝 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span class="eo-chevron" aria-hidden="true"></span></button><input id="slide-bg-to" type="color" value="#cccccc" aria-label="끝 색" /><div id="slide-bg-to-palette" class="sb-hl-palette" hidden></div></div></div>
+          <div class="dialog-row" id="slide-bg-angle-row"><label class="dialog-label" for="slide-bg-angle">각도</label><input id="slide-bg-angle" type="number" min="0" max="359" step="1" value="90" class="dialog-input" /><span class="dialog-unit">°</span></div>
+          <div class="dialog-row" id="slide-bg-picture-row"><span class="dialog-label">그림</span><button id="btn-slide-bg-file" type="button" class="dialog-btn">파일</button><span id="slide-bg-file-name" class="dialog-unit"></span></div>
+          <p id="slide-bg-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-slide-bg-all" type="button" class="dialog-btn">모두 적용</button>
+          <button id="btn-slide-bg-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+    <input id="slide-bg-file-input" type="file" hidden accept=".png,.jpg,.jpeg,image/png,image/jpeg" aria-label="배경 그림" />
+
+    <dialog id="slide-footer-dialog" class="tool-dialog" aria-labelledby="slide-footer-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="slide-footer-dialog-title">머리글 및 바닥글</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="slide-footer-date" type="checkbox" /> 날짜 및 시간</label><select id="slide-footer-date-kind" class="sb-combo dialog-select" aria-label="날짜 종류"><option value="auto">자동 업데이트</option><option value="fixed">고정</option></select></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><input id="slide-footer-date-text" type="text" class="dialog-text-input" maxlength="128" autocomplete="off" aria-label="고정 날짜" /></div>
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="slide-footer-number" type="checkbox" /> 슬라이드 번호</label></div>
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="slide-footer-text-on" type="checkbox" /> 바닥글</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><input id="slide-footer-text" type="text" class="dialog-text-input" maxlength="256" autocomplete="off" aria-label="바닥글" /></div>
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="slide-footer-skip-title" type="checkbox" /> 제목 슬라이드에는 표시 안 함</label></div>
+          <p id="slide-footer-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-slide-footer-all" type="button" class="dialog-btn">모두 적용</button>
+          <button id="btn-slide-footer-ok" type="button" class="dialog-btn dialog-btn-primary">적용</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="slide-anim-dialog" class="tool-dialog" aria-labelledby="slide-anim-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="slide-anim-dialog-title">애니메이션 창</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <ul id="slide-anim-list" class="dialog-list" role="listbox" aria-label="애니메이션 목록"></ul>
+          <div class="dialog-row"><button id="btn-slide-anim-up" type="button" class="dialog-btn">위로</button><button id="btn-slide-anim-down" type="button" class="dialog-btn">아래로</button><button id="btn-slide-anim-remove" type="button" class="dialog-btn">제거</button></div>
+          <div class="dialog-row"><label class="dialog-label" for="slide-anim-effect">효과</label><select id="slide-anim-effect" class="sb-combo dialog-select"><optgroup label="나타내기"><option value="entrance:appear">나타내기</option><option value="entrance:fade">페이드</option><option value="entrance:fly">날아오기</option><option value="entrance:wipe">닦아내기</option><option value="entrance:zoom">확대</option></optgroup><optgroup label="강조"><option value="emphasis:spin">회전</option><option value="emphasis:growShrink">확대/축소</option></optgroup><optgroup label="끝내기"><option value="exit:appear">사라지기</option><option value="exit:fade">페이드</option><option value="exit:fly">날아가기</option><option value="exit:wipe">닦아내기</option><option value="exit:zoom">축소</option></optgroup></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="slide-anim-start">시작</label><select id="slide-anim-start" class="sb-combo dialog-select"><option value="onClick">클릭할 때</option><option value="withPrevious">이전 효과와 함께</option><option value="afterPrevious">이전 효과 다음에</option></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="slide-anim-direction">방향</label><select id="slide-anim-direction" class="sb-combo dialog-select"><option value="left">왼쪽에서</option><option value="right">오른쪽에서</option><option value="top">위에서</option><option value="bottom">아래에서</option></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="slide-anim-duration">재생 시간</label><input id="slide-anim-duration" type="number" min="0" max="60" step="0.25" value="0.5" class="dialog-input" /><span class="dialog-unit">초</span><label class="dialog-label" for="slide-anim-delay">지연</label><input id="slide-anim-delay" type="number" min="0" max="60" step="0.25" value="0" class="dialog-input" /><span class="dialog-unit">초</span></div>
+          <p id="slide-anim-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-slide-anim-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="export-dialog" class="tool-dialog" aria-labelledby="export-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="export-dialog-title">다른 형식으로 내보내기</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -3622,6 +3785,7 @@
         <button type="button" role="menuitem" data-slide-action="delete">슬라이드 삭제</button>
         <button type="button" role="menuitem" data-slide-action="up">위로 이동</button>
         <button type="button" role="menuitem" data-slide-action="down">아래로 이동</button>
+        <button type="button" role="menuitem" data-slide-action="hide">슬라이드 숨기기</button>
       </div>
       <div id="slide-ctx-canvas-group" hidden>
         <div class="md-item" data-slide-canvas-act="cut" role="menuitem" tabindex="-1"><span class="md-label">잘라내기</span></div>
@@ -3710,10 +3874,19 @@
     <script src="./module-search.js"></script>
     <script src="./find-replace.js"></script>
     <script src="./zoom-range.js"></script>
+    <script src="./slide-svg.js"></script>
+    <script src="./slide-snap.js"></script>
+    <script src="./slide-fx.js"></script>
+    <script src="./slide-ext.js"></script>
+    <script src="./slide-group.js"></script>
     <script src="./slide-canvas.js"></script>
     <script src="./slide-clipboard.js"></script>
     <script src="./slide-context-menu.js"></script>
     <script src="./slide-dialogs.js"></script>
+    <script src="./slide-format.js"></script>
+    <script src="./slide-page.js"></script>
+    <script src="./slide-anim.js"></script>
+    <script src="./slide-show-anim.js"></script>
     <script src="./doc-symbol-dialog.js"></script>
     <script src="./doc-status-text.js"></script>
     <script src="./doc-word-count.js"></script>

@@ -18,6 +18,7 @@
     delete: "remove",
     up: "moveUp",
     down: "moveDown",
+    hide: "toggleHidden",
   };
 
   function slideLabel(slide) {
@@ -43,13 +44,14 @@
   function fillThumb(btn, slide, idx, isActive) {
     const label = slideLabel(slide);
     const snippet = slideSnippet(slide);
-    const key = idx + (isActive ? "\u0001" : "\u0000") + label + "\u0000" + snippet;
+    const hidden = Boolean(slide?.hidden);
+    const key = idx + (isActive ? "\u0001" : "\u0000") + (hidden ? "\u0001" : "\u0000") + label + "\u0000" + snippet;
     if (btn.thumbKey === key) return;
     btn.thumbKey = key;
-    btn.className = "slide-thumb" + (isActive ? " active" : "");
+    btn.className = "slide-thumb" + (isActive ? " active" : "") + (hidden ? " is-hidden-slide" : "");
     btn.dataset.slideIdx = String(idx);
-    btn.setAttribute("title", idx + 1 + ". " + label);
-    btn.setAttribute("aria-label", idx + 1 + "번 슬라이드: " + label);
+    btn.setAttribute("title", idx + 1 + ". " + label + (hidden ? " (숨김)" : ""));
+    btn.setAttribute("aria-label", idx + 1 + "번 슬라이드" + (hidden ? "(숨김)" : "") + ": " + label);
     if (isActive) btn.setAttribute("aria-current", "true");
     else btn.removeAttribute("aria-current");
     const titleEl = btn.querySelector(".slide-thumb-title");
@@ -80,6 +82,7 @@
     let menuIdx = -1;
     let showIdx = 0;
     let showStartIdx = 0;
+    let arrivedBack = false;
     let showing = false;
     let fullscreenEntered = false;
     let elapsedSeconds = 0;
@@ -90,10 +93,16 @@
       startShow: (fromCur, opts) => startShow(fromCur, opts),
       onLeave: () => {
         slideDialogs?.closeAll?.();
+        [slideFormat, slidePage, slideAnim].forEach((m) => m?.closeAll?.());
         endShow();
       },
     });
     const slideDialogs = slideCanvas ? host.__EASYOFFICE_CREATE_SLIDE_DIALOGS__?.(deps, slideCanvas) : null;
+    const slideFormat = slideCanvas ? host.__EASYOFFICE_CREATE_SLIDE_FORMAT__?.(deps, slideCanvas) : null;
+    const slidePage = slideCanvas ? host.__EASYOFFICE_CREATE_SLIDE_PAGE__?.(deps, slideCanvas) : null;
+    const slideAnim = slideCanvas ? host.__EASYOFFICE_CREATE_SLIDE_ANIM__?.(deps, slideCanvas) : null;
+    const showAnim = host.__EASYOFFICE_CREATE_SHOW_ANIM__?.();
+    host.__EASYOFFICE_SLIDE_RUN_ACT__ = (act) => [slideFormat, slidePage, slideAnim].some((m) => m?.run?.(act) === true);
     if (slideCanvas) {
       slideCanvas.dialogs = slideDialogs;
       host.__EASYOFFICE_SLIDE_CANVAS__ = slideCanvas;
@@ -188,7 +197,8 @@
 
     const moveUp = (idx = getActiveSlideIndex()) => moveSlide(idx, idx - 1);
     const moveDown = (idx = getActiveSlideIndex()) => moveSlide(idx, idx + 1);
-    const operations = { add: addSlide, duplicate: duplicateSlide, remove: removeSlide, moveUp, moveDown };
+    const toggleHidden = (idx = getActiveSlideIndex()) => slidePage?.toggleHidden?.(idx);
+    const operations = { add: addSlide, duplicate: duplicateSlide, remove: removeSlide, moveUp, moveDown, toggleHidden };
 
     function setDeckAspect(value, options = {}) {
       if (!ASPECTS.has(value) || value === deckAspect()) return;
@@ -324,6 +334,8 @@
       if (select) select.value = aspect;
       const layoutSel = byId("slide-layout-select");
       if (layoutSel) layoutSel.value = layout;
+      if (stage) host.__EASYOFFICE_SLIDE_EXT__?.paintStage(document, stage, deck[activeIdx], activeIdx, slideCanvas?.stageSize?.() || { w: 960, h: 540 });
+      slidePage?.refresh?.(activeIdx);
       slideCanvas?.render?.();
     }
 
@@ -532,7 +544,10 @@
         const layer = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__?.renderStaticElementsLayer?.(document, slide, deckAspect(), { orientation: deckOrientation() });
         if (layer) frame.appendChild(layer);
       }
+      host.__EASYOFFICE_SLIDE_EXT__?.paintStage(document, frame, slide, showIdx, host.__EASYOFFICE_SLIDE_CANVAS_CODEC__.stageSizeOf(deckAspect(), deckOrientation()));
       viewport.replaceChildren(frame);
+      showAnim?.start(frame, slide, { complete: arrivedBack });
+      arrivedBack = false;
       paintShowChrome();
     }
 
@@ -575,7 +590,7 @@
       if (showing || getActiveModule() !== "SLIDE" || deck.length === 0) return;
       getPanels().syncActiveSlideDomStylesToDeck();
       closeMenu();
-      showIdx = fromCurrent ? Math.min(getActiveSlideIndex(), deck.length - 1) : 0;
+      showIdx = fromCurrent ? Math.min(getActiveSlideIndex(), deck.length - 1) : Math.min(nextShown(0), deck.length - 1);
       showStartIdx = showIdx;
       showing = true;
       elapsedSeconds = 0;
@@ -614,6 +629,34 @@
       paintShowSlide();
     }
 
+    // Hidden slides are skipped when moving through the show.
+    const nextShown = (from) => {
+      let i = from;
+      while (i < deck.length && deck[i].hidden) i += 1;
+      return i;
+    };
+
+    const prevShown = (from) => {
+      let i = from;
+      while (i >= 0 && deck[i].hidden) i -= 1;
+      return i;
+    };
+
+    // The next click of the slide's animations, or the next slide once they have all played.
+    function advance() {
+      if (showAnim?.next()) return;
+      goTo(nextShown(showIdx + 1));
+    }
+
+    // The last played click taken back, or the previous slide shown as it ends.
+    function retreat() {
+      if (showAnim?.back()) return;
+      const prev = prevShown(showIdx - 1);
+      if (prev < 0) return;
+      arrivedBack = true;
+      goTo(prev);
+    }
+
     function toggleScreen(color) {
       const overlay = byId("slide-show-overlay");
       if (overlay.dataset.screen === color) delete overlay.dataset.screen;
@@ -626,10 +669,10 @@
       const lower = k.length === 1 ? k.toLowerCase() : k;
       e.preventDefault();
       if (k === "Escape") endShow();
-      else if (NEXT_KEYS.has(k)) goTo(showIdx + 1);
-      else if (PREV_KEYS.has(k)) goTo(showIdx - 1);
-      else if (k === "Home") goTo(0);
-      else if (k === "End") goTo(deck.length - 1);
+      else if (NEXT_KEYS.has(k)) advance();
+      else if (PREV_KEYS.has(k)) retreat();
+      else if (k === "Home") goTo(Math.min(nextShown(0), deck.length - 1));
+      else if (k === "End") goTo(Math.max(prevShown(deck.length - 1), 0));
       else if (lower === "b") toggleScreen("black");
       else if (lower === "w") toggleScreen("white");
       else if (lower === "p") {
@@ -661,7 +704,7 @@
     }
 
     function bindShow() {
-      byId("slide-show-viewport")?.addEventListener("click", () => goTo(showIdx + 1));
+      byId("slide-show-viewport")?.addEventListener("click", () => advance());
       byId("slide-show-exit")?.addEventListener("click", () => endShow());
       document.addEventListener("fullscreenchange", () => {
         if (showing && fullscreenEntered && !document.fullscreenElement) endShow();
@@ -690,6 +733,9 @@
       bindEditing();
       slideCanvas?.bind?.();
       slideDialogs?.bind?.();
+      slideFormat?.bind?.();
+      slidePage?.bind?.();
+      slideAnim?.bind?.();
       slideContextMenu?.bind?.();
     }
 
@@ -708,8 +754,7 @@
       cycleDeckAspect,
       toggleDeckOrientation,
       appendLink,
-      appendNote,
-      isShowing: () => showing,
+      appendNote,      isShowing: () => showing,
     };
   }
 

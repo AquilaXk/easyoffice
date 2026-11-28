@@ -461,7 +461,7 @@ test("Official Korean terminology separation holds across DOC, PAGES, SHEET, SLI
   assert.equal(doc.querySelector('label[for="slide-transition-select"]').textContent, "전환");
   assert.equal(shownLabel("slide-mod-transition"), "전환 효과");
   assert.equal(shownLabel("slide-mod-presenter"), "발표자 보기");
-  assert.deepEqual([...doc.querySelectorAll('#menu-bar [data-menu="format"] > .menu-dropdown > .md-sub')].filter((el) => !el.hidden).map((el) => el.querySelector(".md-label").textContent), ["맞춤"]);
+  assert.deepEqual([...doc.querySelectorAll('#menu-bar [data-menu="format"] > .menu-dropdown > .md-sub')].filter((el) => !el.hidden).map((el) => el.querySelector(".md-label").textContent), ["맞춤", "그룹화", "회전"]);
   assert.deepEqual([...doc.querySelectorAll("#slide-layout-select option")].map((o) => o.textContent), ["제목 슬라이드", "제목 및 내용", "구역 머리글", "콘텐츠 2개", "빈 화면"]);
   switchModule(doc, "DOC");
   await flushAsyncTurns(6);

@@ -358,6 +358,8 @@
         canvas.deleteElement();
       } else if (act.startsWith("align-") || act.startsWith("distribute-")) {
         host.__EASYOFFICE_SLIDE_CONTEXT_MENU__?.alignElements?.(act);
+      } else {
+        host.__EASYOFFICE_SLIDE_RUN_ACT__?.(act);
       }
     }
 

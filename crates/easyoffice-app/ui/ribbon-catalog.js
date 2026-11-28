@@ -408,8 +408,7 @@
     { keys: "Shift+F5", action: "slide-show-current", module: "SLIDE", bareKey: true },
     { keys: "Alt+ArrowUp", action: "slide-move-up", module: "SLIDE", scope: "#slide-thumb-list" },
     { keys: "Alt+ArrowDown", action: "slide-move-down", module: "SLIDE", scope: "#slide-thumb-list" },
-    { keys: "Delete", action: "slide-delete", module: "SLIDE", bareKey: true, scope: "#slide-thumb-list" },
-  ]);
+    { keys: "Delete", action: "slide-delete", module: "SLIDE", bareKey: true, scope: "#slide-thumb-list" },  ]);
 
   // ---- menu bar -> ribbon command (PD-098) ----------------------------------------------------
   // Menu items carry `data-studio-menu-cmd`: either the suffix of a ribbon command id (`home-bold`,

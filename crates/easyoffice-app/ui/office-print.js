@@ -358,7 +358,7 @@
 
     // ---- slides -----------------------------------------------------------------------------
 
-    function slidePage(slide, aspect, deckOrientation, paperClass) {
+    function slidePage(slide, aspect, deckOrientation, paperClass, number) {
       const page = document.createElement("div");
       const orientation = slide.orientation === "portrait" ? "portrait" : deckOrientation;
       page.className = PAGE_CLASS + " " + paperClass;
@@ -387,6 +387,8 @@
         const layer = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__?.renderStaticElementsLayer?.(document, slide, aspect, { forPrint: true, orientation });
         if (layer) stage.appendChild(layer);
       }
+      const codec = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__;
+      host.__EASYOFFICE_SLIDE_EXT__?.paintStage(document, stage, slide, number, codec?.stageSizeOf?.(aspect, orientation) || { w: 960, h: 540 });
       page.appendChild(stage);
       return page;
     }
@@ -398,7 +400,11 @@
       const [baseW, baseH] = SLIDE_PAPER_MM[aspect];
       const [widthMm, heightMm] = deckOrientation === "portrait" ? [baseH, baseW] : [baseW, baseH];
       const paperClass = rules.classFor(widthMm, heightMm);
-      return slideDeckState.map((slide) => slidePage(slide, aspect, deckOrientation, paperClass));
+      // Hidden slides are not printed; a deck of nothing but hidden slides prints all of them. The slide
+      // numbers still count the hidden ones.
+      const numbered = slideDeckState.map((slide, i) => [slide, i]);
+      const shown = numbered.filter(([slide]) => !slide.hidden);
+      return (shown.length > 0 ? shown : numbered).map(([slide, i]) => slidePage(slide, aspect, deckOrientation, paperClass, i));
     }
 
     function buildPdf(rules) {

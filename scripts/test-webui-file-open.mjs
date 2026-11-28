@@ -124,8 +124,8 @@ test("the hidden input accepts exactly the supported extensions", async () => {
   const { sandbox } = await createOpenHarness();
   const { SUPPORTED_EXTENSIONS: exts, PACKAGE_EXTENSIONS } = sandbox.__EASYOFFICE_FILE_OPEN_UTILS__;
   const allInputs = [...INDEX_HTML.matchAll(/<input\b[^>]*\bid="([^"]+)"[^>]*\baccept="([^"]+)"/g)];
-  assert.deepEqual(allInputs.map((m) => m[1]), ["file-open-input", "doc-image-input", "sheet-image-file-input", "slide-image-file-input", "conv-source-file"]);
-  const imageIds = new Set(["doc-image-input", "sheet-image-file-input", "slide-image-file-input"]);
+  assert.deepEqual(allInputs.map((m) => m[1]), ["file-open-input", "doc-image-input", "sheet-image-file-input", "slide-image-file-input", "conv-source-file", "slide-bg-file-input"]);
+  const imageIds = new Set(["doc-image-input", "sheet-image-file-input", "slide-image-file-input", "slide-bg-file-input"]);
   const imageInputs = allInputs.filter((m) => imageIds.has(m[1]));
   for (const [, , accept] of imageInputs) assert.equal(accept, ".png,.jpg,.jpeg,image/png,image/jpeg");
   const inputs = allInputs.filter((m) => !imageIds.has(m[1])).map((m) => m[2]);

@@ -706,6 +706,16 @@
 .slide-el-handle[data-dir="s"] { left: calc(50% - 4px); bottom: -4px; cursor: ns-resize; }
 .slide-el-handle[data-dir="sw"] { left: -4px; bottom: -4px; cursor: nesw-resize; }
 .slide-el-handle[data-dir="w"] { left: -4px; top: calc(50% - 4px); cursor: ew-resize; }
+.slide-el-rotate { position: absolute; left: calc(50% - 5px); top: -22px; width: 10px; height: 10px; box-sizing: border-box; border: 1px solid var(--doc-paper); border-radius: 50%; background: var(--resize-handle); display: none; z-index: 2; cursor: grab; }
+.slide-el.is-selected .slide-el-rotate { display: block; }
+.slide-el-outline { position: absolute; inset: 0; box-sizing: border-box; pointer-events: none; }
+.slide-para.has-bullet { padding-inline-start: 1.4em; text-indent: -1.4em; }
+.slide-bullet { display: inline-block; width: 1.4em; text-indent: 0; }
+.slide-footer-layer { position: absolute; inset: 0; z-index: 3; overflow: hidden; pointer-events: none; }
+.slide-footer-item { position: absolute; display: flex; align-items: center; box-sizing: border-box; padding: 0 0.5cqw; overflow: hidden; white-space: nowrap; }
+.slide-thumb.is-hidden-slide { opacity: 0.55; }
+.slide-thumb.is-hidden-slide .slide-thumb-num { text-decoration: line-through; }
+.tool-dialog #slide-anim-list:empty::before { content: "애니메이션 없음"; }
 .slide-snap-line { position: absolute; background: var(--accent-strong); pointer-events: none; }
 .slide-snap-line-v { top: 0; bottom: 0; width: 1px; }
 .slide-snap-line-h { left: 0; right: 0; height: 1px; }

@@ -4,7 +4,9 @@
 (function (host) {
   "use strict";
 
-  const SVG_NS = "http://www.w3.org/2000/svg";
+  const fx = host.__EASYOFFICE_SLIDE_FX__;
+  const slideExt = host.__EASYOFFICE_SLIDE_EXT__;
+  const groups = host.__EASYOFFICE_SLIDE_GROUP__;
   const STAGE_SIZES = Object.freeze({
     "16:9": Object.freeze({ w: 960, h: 540 }),
     "4:3": Object.freeze({ w: 720, h: 540 }),
@@ -135,7 +137,9 @@
     return { categories, series };
   }
 
-  function normalizeSlideElement(raw, aspect = "16:9", fallbackId = "el-1", orientation = "landscape") {
+  const normalizeSlideElement = (raw, aspect, fallbackId, orientation) => fx.withFx(normalizeBase(raw, aspect, fallbackId, orientation), raw);
+
+  function normalizeBase(raw, aspect = "16:9", fallbackId = "el-1", orientation = "landscape") {
     if (!raw || typeof raw !== "object") return null;
     const rawKind = String(raw.kind || "").trim();
     const kind = rawKind === "textBox" ? "textbox" : rawKind;
@@ -166,7 +170,8 @@
         id, kind, x, y, w, h,
         shapeType: Object.hasOwn(SHAPE_LABELS, raw.shapeType) ? raw.shapeType : "rect",
         text: String(raw.text ?? "").slice(0, MAX_TEXT_CHARS),
-        fill: normalizeHex6(raw.fill, "2563EB"), stroke: normalizeHex6(raw.stroke, "1D4ED8"),
+        fill: raw.fill === "" || raw.fill === null ? "" : normalizeHex6(raw.fill, "2563EB"),
+        stroke: raw.stroke === "" || raw.stroke === null ? "" : normalizeHex6(raw.stroke, "1D4ED8"),
         strokeWidthPt: clamp(Number(raw.strokeWidthPt) >= 0 ? Number(raw.strokeWidthPt) : 2, 0, 24),
         color: normalizeHex6(raw.color, "FFFFFF"), fontSizePt: clamp(Number(raw.fontSizePt) || 16, 8, 96),
         bold: raw.bold !== undefined ? Boolean(raw.bold) : true,
@@ -217,7 +222,12 @@
     };
   }
 
-  function serializeElementForWire(el) {
+  const serializeElementForWire = (el) => {
+    const wire = serializeBase(el);
+    return wire && Object.assign(wire, fx.normalize(el, el.kind));
+  };
+
+  function serializeBase(el) {
     if (!el || !ELEMENT_KINDS.has(el.kind)) return null;
     const base = { id: el.id, kind: el.kind, x: round2(el.x), y: round2(el.y), w: round2(el.w), h: round2(el.h) };
     if (el.kind === "textbox") {
@@ -231,8 +241,8 @@
     if (el.kind === "shape") {
       return {
         ...base, shapeType: Object.hasOwn(SHAPE_LABELS, el.shapeType) ? el.shapeType : "rect",
-        text: String(el.text ?? ""), fill: normalizeHex6(el.fill, "2563EB"),
-        stroke: normalizeHex6(el.stroke, "1D4ED8"), strokeWidthPt: Number(el.strokeWidthPt ?? 2),
+        text: String(el.text ?? ""), fill: el.fill ? normalizeHex6(el.fill, "") : "",
+        stroke: el.stroke ? normalizeHex6(el.stroke, "") : "", strokeWidthPt: Number(el.strokeWidthPt ?? 2),
         color: normalizeHex6(el.color, "FFFFFF"), fontSizePt: el.fontSizePt || 16,
         bold: Boolean(el.bold), italic: Boolean(el.italic), underline: Boolean(el.underline), align: el.align || "center",
       };
@@ -272,6 +282,7 @@
       return {
         title: (s.title || "").trim(), bullets, notes: (s.notes || "").trim(),
         layout: normalizeLayout(s.layout), transition: normalizeTransition(s.transition), elements,
+        ...slideExt.wire(s, elements),
       };
     });
     return { aspect, orientation, slides };
@@ -295,58 +306,12 @@
         title: String(s?.title || ""), lower: Array.isArray(s?.bullets) ? s.bullets.join("\n") : String(s?.lower || ""),
         notes: String(s?.notes || ""), transition: normalizeTransition(s?.transition),
         ...createEmptySlideStyleFields(), aspect, orientation, layout: normalizeLayout(s?.layout), elements,
+        ...slideExt.hydrate(s, elements),
       };
     });
   }
 
-  function buildShapeSvg(document, el) {
-    const vw = Math.max(24, Math.round(el.w || 200)), vh = Math.max(20, Math.round(el.h || 100));
-    const sw = clamp(Number(el.strokeWidthPt ?? 2), 0, 24), pad = Math.max(1, sw / 2);
-    const svg = document.createElementNS(SVG_NS, "svg");
-    svg.setAttribute("class", "slide-el-shape-svg");
-    svg.setAttribute("viewBox", "0 0 " + vw + " " + vh);
-    svg.setAttribute("preserveAspectRatio", "none");
-    svg.setAttribute("aria-hidden", "true");
-
-    let geom;
-    const st = el.shapeType || "rect";
-    if (st === "ellipse") {
-      geom = document.createElementNS(SVG_NS, "ellipse");
-      geom.setAttribute("cx", String(round2(vw / 2)));
-      geom.setAttribute("cy", String(round2(vh / 2)));
-      geom.setAttribute("rx", String(round2(Math.max(2, vw / 2 - pad))));
-      geom.setAttribute("ry", String(round2(Math.max(2, vh / 2 - pad))));
-    } else if (st === "diamond" || st === "rightArrow" || st === "callout") {
-      geom = document.createElementNS(SVG_NS, "polygon");
-      let pts;
-      if (st === "diamond") {
-        pts = [round2(vw / 2) + "," + round2(pad), round2(vw - pad) + "," + round2(vh / 2), round2(vw / 2) + "," + round2(vh - pad), round2(pad) + "," + round2(vh / 2)];
-      } else if (st === "rightArrow") {
-        const headX = round2(Math.max(pad + 6, vw * 0.66)), yTop = round2(vh * 0.26), yBot = round2(vh * 0.74);
-        pts = [round2(pad) + "," + yTop, headX + "," + yTop, headX + "," + round2(pad), round2(vw - pad) + "," + round2(vh / 2), headX + "," + round2(vh - pad), headX + "," + yBot, round2(pad) + "," + yBot];
-      } else {
-        const bodyBot = round2(Math.max(pad + 8, vh * 0.78));
-        pts = [round2(pad) + "," + round2(pad), round2(vw - pad) + "," + round2(pad), round2(vw - pad) + "," + bodyBot, round2(vw * 0.36) + "," + bodyBot, round2(vw * 0.16) + "," + round2(vh - pad), round2(vw * 0.22) + "," + bodyBot, round2(pad) + "," + bodyBot];
-      }
-      geom.setAttribute("points", pts.join(" "));
-    } else {
-      geom = document.createElementNS(SVG_NS, "rect");
-      geom.setAttribute("x", String(round2(pad)));
-      geom.setAttribute("y", String(round2(pad)));
-      geom.setAttribute("width", String(round2(Math.max(2, vw - pad * 2))));
-      geom.setAttribute("height", String(round2(Math.max(2, vh - pad * 2))));
-      if (st === "roundRect") {
-        const r = String(round2(Math.min(18, Math.min(vw, vh) * 0.2)));
-        geom.setAttribute("rx", r);
-        geom.setAttribute("ry", r);
-      }
-    }
-    geom.setAttribute("fill", "#" + normalizeHex6(el.fill, "2563EB"));
-    geom.setAttribute("stroke", sw > 0 ? "#" + normalizeHex6(el.stroke, "1D4ED8") : "none");
-    geom.setAttribute("stroke-width", String(sw));
-    svg.appendChild(geom);
-    return svg;
-  }
+  const { buildShapeSvg } = host.__EASYOFFICE_CREATE_SLIDE_SVG__({ clamp, round2, normalizeHex6 });
 
   function buildSlideChartSvg(document, el, forPrint) {
     const svgApi = host.__EASYOFFICE_SHEET_CHART_SVG__, utils = host.__EASYOFFICE_SHEET_UTILS__;
@@ -407,8 +372,8 @@
     if (el.kind === "textbox") {
       const box = document.createElement("div");
       box.className = "slide-el-textbox";
-      box.textContent = el.text || "";
       applyTextStyles(box, el);
+      fx.paintText(document, box, el);
       if (el.fill) card.style.backgroundColor = "#" + normalizeHex6(el.fill, "F3F4F6");
       card.appendChild(box);
     } else if (el.kind === "shape") {
@@ -416,8 +381,8 @@
       card.appendChild(buildShapeSvg(document, el));
       const label = document.createElement("div");
       label.className = "slide-el-shape-text";
-      label.textContent = el.text || "";
       applyTextStyles(label, { ...el, align: el.align || "center", color: el.color || "FFFFFF" });
+      fx.paintText(document, label, el);
       card.appendChild(label);
     } else if (el.kind === "image") {
       const utils = host.__EASYOFFICE_SHEET_UTILS__;
@@ -480,6 +445,7 @@
         card.appendChild(handle);
       }
     }
+    fx.applyDom(document, card, el, stage, interactive);
     return card;
   }
 
@@ -496,63 +462,7 @@
     return layer;
   }
 
-  function computeSmartSnap(box, siblings, stage, snapEnabled, mode, dir) {
-    if (!snapEnabled) return { x: box.x, y: box.y, w: box.w, h: box.h, vLine: null, hLine: null };
-    let { x, y, w, h } = box;
-    let bestDx = SNAP_TOLERANCE_PT + 0.001, bestDy = SNAP_TOLERANCE_PT + 0.001;
-    let vLine = null, hLine = null;
-    const vTargets = [stage.w / 2], hTargets = [stage.h / 2];
-    for (let i = 0; i < siblings.length; i += 1) {
-      const s = siblings[i];
-      vTargets.push(s.x, s.x + s.w / 2, s.x + s.w);
-      hTargets.push(s.y, s.y + s.h / 2, s.y + s.h);
-    }
-    if (mode === "move") {
-      const myX = [0, w / 2, w], myY = [0, h / 2, h];
-      for (let t = 0; t < vTargets.length; t += 1) {
-        for (let m = 0; m < 3; m += 1) {
-          const ad = Math.abs(vTargets[t] - (x + myX[m]));
-          if (ad <= SNAP_TOLERANCE_PT && ad < bestDx) { bestDx = ad; vLine = vTargets[t]; x = round2(vTargets[t] - myX[m]); }
-        }
-      }
-      for (let t = 0; t < hTargets.length; t += 1) {
-        for (let m = 0; m < 3; m += 1) {
-          const ad = Math.abs(hTargets[t] - (y + myY[m]));
-          if (ad <= SNAP_TOLERANCE_PT && ad < bestDy) { bestDy = ad; hLine = hTargets[t]; y = round2(hTargets[t] - myY[m]); }
-        }
-      }
-      x = clamp(x, 0, Math.max(0, stage.w - w));
-      y = clamp(y, 0, Math.max(0, stage.h - h));
-    } else {
-      if (dir.includes("e")) {
-        const right = x + w;
-        for (let t = 0; t < vTargets.length; t += 1) {
-          const ad = Math.abs(vTargets[t] - right);
-          if (ad <= SNAP_TOLERANCE_PT && ad < bestDx) { bestDx = ad; vLine = vTargets[t]; w = Math.max(MIN_EL_W, round2(vTargets[t] - x)); }
-        }
-      } else if (dir.includes("w")) {
-        const right = x + w;
-        for (let t = 0; t < vTargets.length; t += 1) {
-          const ad = Math.abs(vTargets[t] - x);
-          if (ad <= SNAP_TOLERANCE_PT && ad < bestDx && right - vTargets[t] >= MIN_EL_W) { bestDx = ad; vLine = vTargets[t]; x = round2(vTargets[t]); w = round2(right - x); }
-        }
-      }
-      if (dir.includes("s")) {
-        const bottom = y + h;
-        for (let t = 0; t < hTargets.length; t += 1) {
-          const ad = Math.abs(hTargets[t] - bottom);
-          if (ad <= SNAP_TOLERANCE_PT && ad < bestDy) { bestDy = ad; hLine = hTargets[t]; h = Math.max(MIN_EL_H, round2(hTargets[t] - y)); }
-        }
-      } else if (dir.includes("n")) {
-        const bottom = y + h;
-        for (let t = 0; t < hTargets.length; t += 1) {
-          const ad = Math.abs(hTargets[t] - y);
-          if (ad <= SNAP_TOLERANCE_PT && ad < bestDy && bottom - hTargets[t] >= MIN_EL_H) { bestDy = ad; hLine = hTargets[t]; y = round2(hTargets[t]); h = round2(bottom - y); }
-        }
-      }
-    }
-    return { x: round2(x), y: round2(y), w: round2(w), h: round2(h), vLine, hLine };
-  }
+  const { computeSmartSnap } = host.__EASYOFFICE_CREATE_SLIDE_SNAP__({ clamp, round2, SNAP_TOLERANCE_PT, MIN_EL_W, MIN_EL_H });
 
   function createSlideCanvas(deps, hooks = {}) {
     const {
@@ -637,6 +547,12 @@
           startPointerDrag("resize", handle.dataset.dir || "se", ev, el, card);
           return;
         }
+        if (ev.target?.closest?.(".slide-el-rotate")) {
+          ev.preventDefault?.();
+          ev.stopPropagation?.();
+          startRotate(ev, el, card);
+          return;
+        }
         if (ev.target?.isContentEditable || ev.target?.getAttribute?.("contenteditable") === "plaintext-only") {
           selectElement(el.id);
           return;
@@ -652,7 +568,10 @@
         selectElement(el.id);
         if (el.kind === "textbox") {
           const box = card.querySelector(".slide-el-textbox");
-          if (box) bindEditableNode(box, "tb:" + el.id, (txt) => { el.text = txt.slice(0, MAX_TEXT_CHARS); });
+          if (box) {
+            fx.beginTextEdit(box, el, render);
+            bindEditableNode(box, "tb:" + el.id, (txt) => { el.text = txt.slice(0, MAX_TEXT_CHARS); });
+          }
           return;
         }
         if (el.kind === "table") {
@@ -699,7 +618,7 @@
         selectedId = selectedIds.has(id) ? id : (Array.from(selectedIds).at(-1) || null);
       } else {
         selectedId = exists ? id : null;
-        selectedIds = selectedId ? new Set([selectedId]) : new Set();
+        selectedIds = selectedId ? new Set(groups.expand(currentSlide(), selectedId)) : new Set();
       }
       syncSelectedClasses();
       return selectedId;
@@ -722,15 +641,58 @@
       const rect = stageBox.getBoundingClientRect(), stage = stageSizeOf(currentAspect(), currentOrientation());
       const preSnap = captureWorkspaceSnapshot(false);
       preSnap.slides = structuredClone(deck);
+      const layer = $("slide-canvas-layer");
+      // The rest of the selection (the other members of a group) travels with a moved element.
+      const others = mode !== "move" ? [] : ensureElements().filter((e) => e.id !== el.id && selectedIds.has(e.id)).map((e) => ({
+        el: e, x: e.x, y: e.y, card: layer?.querySelector(`[data-element-id="${e.id}"]`),
+      }));
       activeDrag = {
-        mode, dir, el, card, stage,
+        mode, dir, el, card, stage, others,
         scaleX: stage.w / Math.max(1, rect.width || 640),
         scaleY: stage.h / Math.max(1, rect.height || 360),
         startClientX: ev.clientX || 0, startClientY: ev.clientY || 0,
         orig: { x: el.x, y: el.y, w: el.w, h: el.h },
-        siblings: ensureElements().filter((item) => item.id !== el.id),
+        siblings: ensureElements().filter((item) => item.id !== el.id && !others.some((o) => o.el === item)),
         preSnap, moved: false,
       };
+    }
+
+    // Turns the selection about its center while the pointer circles it; the start state is kept so each
+    // move is computed from it. Shift snaps to 15 degrees.
+    function startRotate(ev, el, card) {
+      const members = ensureElements().filter((e) => selectedIds.has(e.id));
+      if (members.length === 0) return;
+      const gesture = beginGesture();
+      let moved = false;
+      const snaps = groups.snapshot(members), center = groups.centerOf(members);
+      const stageRect = $("slide-stage-box").getBoundingClientRect(), stage = stageSizeOf(currentAspect(), currentOrientation());
+      const origin = { x: stageRect.left + (center.x / stage.w) * stageRect.width, y: stageRect.top + (center.y / stage.h) * stageRect.height };
+      const angleAt = (e) => (Math.atan2((e.clientY || 0) - origin.y, (e.clientX || 0) - origin.x) * 180) / Math.PI;
+      const start = angleAt(ev);
+      const onMove = (e) => {
+        let delta = angleAt(e) - start;
+        if (e.shiftKey) delta = Math.round(delta / 15) * 15;
+        moved = moved || delta !== 0;
+        groups.transformAbout(snaps, center, { angle: delta });
+        members.forEach((m) => {
+          const c = $("slide-canvas-layer")?.querySelector(`[data-element-id="${m.id}"]`);
+          if (c) { positionElementDom(c, m, stage); c.style.transform = m.rot ? `rotate(${m.rot}deg)` : ""; }
+        });
+      };
+      const onUp = () => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        if (moved) gesture.commit();
+        render();
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    }
+
+    function beginGesture() {
+      const pre = captureWorkspaceSnapshot(false);
+      pre.slides = structuredClone(deck);
+      return { commit: () => { pushRawUndoSnapshot(pre); noteActivity?.(); } };
     }
 
     function onDocMouseMove(ev) {
@@ -752,6 +714,11 @@
       d.el.x = snapped.x; d.el.y = snapped.y; d.el.w = snapped.w; d.el.h = snapped.h;
       d.moved = d.moved || snapped.x !== d.orig.x || snapped.y !== d.orig.y || snapped.w !== d.orig.w || snapped.h !== d.orig.h;
       positionElementDom(d.card, d.el, d.stage);
+      for (const o of d.others) {
+        o.el.x = round2(o.x + snapped.x - d.orig.x);
+        o.el.y = round2(o.y + snapped.y - d.orig.y);
+        if (o.card) positionElementDom(o.card, o.el, d.stage);
+      }
       renderSnapGuides(snapped.vLine, snapped.hLine, d.stage);
     }
 
@@ -794,6 +761,7 @@
       const merged = normalizeSlideElement({ ...els[idx], ...patch, id: els[idx].id, kind: els[idx].kind }, currentAspect(), els[idx].id, currentOrientation());
       if (!merged) return null;
       if (options.recordUndo !== false) pushUndoSnapshot(false);
+      fx.clear(els[idx]);
       Object.assign(els[idx], merged);
       selectedId = merged.id;
       render();
@@ -802,6 +770,12 @@
     }
 
     function deleteElement(id, options = {}) {
+      const result = removeElements(id, options);
+      if (result) slideExt.prune(currentSlide());
+      return result;
+    }
+
+    function removeElements(id, options) {
       const els = ensureElements(), targets = id != null ? new Set([id]) : (selectedIds.size > 0 ? new Set(selectedIds) : (selectedId ? new Set([selectedId]) : new Set()));
       if (targets.size === 0 || !els.some((e) => targets.has(e.id))) return false;
       if (options.recordUndo !== false) pushUndoSnapshot(false);
@@ -971,7 +945,7 @@
 
     return {
       bind, render, getElements: () => ensureElements(), getSelectedElement, getSelectedIds, setSelectedIds, selectElement, clearSelection,
-      addElement, updateElement, deleteElement, mutateWithUndo,
+      addElement, updateElement, deleteElement, mutateWithUndo, currentSlide, beginGesture,
       bringToFront: (id = selectedId) => moveOrder(id, (_i, len) => len - 1, "맨 앞으로 가져오기"),
       sendToBack: (id = selectedId) => moveOrder(id, () => 0, "맨 뒤로 보내기"),
       bringForward: (id = selectedId) => moveOrder(id, (i) => i + 1, "앞으로 가져오기"),
@@ -988,7 +962,7 @@
     STAGE_SIZES, LAYOUT_LABELS, SHAPE_LABELS, CHART_LABELS,
     stageSizeOf, normalizeLayout, normalizeTransition, normalizeHex6,
     normalizeSlideElement, serializeDeckPayload, hydrateDecodedDeck, renderStaticElementsLayer,
-    buildElementDom, positionElementDom,
+    buildElementDom, positionElementDom, parseImageHeader: parseImageHeaderFallback,
   };
   host.__EASYOFFICE_CREATE_SLIDE_CANVAS__ = createSlideCanvas;
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
