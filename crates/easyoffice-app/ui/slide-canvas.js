@@ -269,6 +269,7 @@
     const rawAspect = slideDeckState[0]?.aspect;
     const aspect = Object.hasOwn(STAGE_SIZES, rawAspect) ? rawAspect : "16:9";
     const orientation = slideDeckState[0]?.orientation === "portrait" ? "portrait" : "landscape";
+    const pictures = slideExt.pictureTable();
     const slides = slideDeckState.map((s) => {
       let extraText = "";
       if (Array.isArray(s.insertedNodes) && s.insertedNodes.length > 0 && utils?.restoreDomChildren) {
@@ -278,15 +279,24 @@
         extraText = typeof extractEditableDocumentText === "function" ? extractEditableDocumentText(extraDiv) : (extraDiv.textContent || "");
       }
       const bullets = [s.lower || "", extraText].join("\n").split(/\n+/).map((t) => t.trim()).filter(Boolean);
-      const elements = (Array.isArray(s.elements) ? s.elements : []).map(serializeElementForWire).filter(Boolean);
+      const elements = (Array.isArray(s.elements) ? s.elements : []).map((el) => {
+        const wire = serializeElementForWire(el);
+        if (wire?.kind === "image" && el.imageId) {
+          wire.imageRef = pictures.ref(el.imageId, wire.mime, wire.data);
+          delete wire.mime;
+          delete wire.data;
+        }
+        return wire;
+      }).filter(Boolean);
       return {
         title: (s.title || "").trim(), bullets, notes: (s.notes || "").trim(),
         layout: normalizeLayout(s.layout), transition: normalizeTransition(s.transition), elements,
-        ...slideExt.wire(s, elements),
+        ...slideExt.wire(s, elements, pictures.ref),
       };
     });
-    return { aspect, orientation, slides };
+    return { aspect, orientation, images: pictures.list(), slides };
   }
+
 
   function hydrateDecodedDeck(res, createEmptySlideStyleFields) {
     const aspect = Object.hasOwn(STAGE_SIZES, res?.aspect) ? res.aspect : "16:9";
@@ -294,12 +304,14 @@
     const srcSlides = Array.isArray(res?.slides) && res.slides.length > 0
       ? res.slides.slice(0, MAX_SLIDES)
       : [{ title: "", bullets: [], notes: "" }];
-    return srcSlides.map((s) => {
+    const pictures = slideExt.registerPictures(res?.images, parseImageHeaderFallback, MAX_SINGLE_IMAGE_BYTES);
+    return srcSlides.map((slide) => {
+      const s = slideExt.resolveBackgroundRef(slide, pictures);
       const orientation = s?.orientation === "portrait" ? "portrait" : deckOrientation;
       const rawEls = Array.isArray(s?.elements) ? s.elements.slice(0, MAX_ELEMENTS_PER_SLIDE) : [];
       const elements = [];
       for (let i = 0; i < rawEls.length; i += 1) {
-        const norm = normalizeSlideElement(rawEls[i], aspect, "el-" + (i + 1), orientation);
+        const norm = normalizeSlideElement(slideExt.resolvePictureRef(rawEls[i], pictures), aspect, "el-" + (i + 1), orientation);
         if (norm) elements.push(norm);
       }
       return {

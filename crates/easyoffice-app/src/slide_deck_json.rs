@@ -13,6 +13,7 @@ use easyoffice_formats::{
 
 use crate::convert_structured::{as_array, as_object, field, invalid, opt_str, Budget, JsonObject};
 use crate::slide_ext_json::{parse_element_fx, parse_slide_ext, write_element_fx, write_slide_ext};
+use crate::slide_image_table::{image_by_ref, parse_image_table, ImageRefs, ImageTable};
 
 fn push_f64(out: &mut String, v: f64) {
     if v.is_finite() {
@@ -89,6 +90,7 @@ fn parse_element(
     idx: usize,
     budget: &mut Budget,
     total_img_bytes: &mut usize,
+    images: &ImageRefs,
 ) -> Result<SlideElement, EasyOfficeError> {
     budget.take(1)?;
     let obj = as_object(item, "elements")?;
@@ -156,24 +158,29 @@ fn parse_element(
             })
         }
         "image" => {
-            let b64 = match opt_str(obj, "dataBase64")? {
-                Some(s) if !s.is_empty() => s,
-                _ => opt_str(obj, "data")?
-                    .filter(|s| !s.is_empty())
-                    .ok_or_else(|| {
-                        invalid("슬라이드 이미지 개체에 'dataBase64' 또는 'data'가 필요합니다.")
-                    })?,
-            };
-            let bytes = base64_codec::decode(b64)
-                .ok_or_else(|| invalid("슬라이드 이미지 Base64 디코딩에 실패했습니다."))?;
-            *total_img_bytes = total_img_bytes.saturating_add(bytes.len());
-            if *total_img_bytes > MAX_SLIDE_TOTAL_IMAGE_BYTES {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "슬라이드 전체 이미지 크기가 상한(128 MiB)을 초과했습니다.".to_string(),
-                ));
-            }
             let alt = opt_str(obj, "alt")?.unwrap_or("").to_string();
-            let image = RichImage::new(bytes, &alt)?;
+            let image = match image_by_ref(obj, images)? {
+                Some(shared) => shared,
+                None => {
+                    let b64 = match opt_str(obj, "dataBase64")? {
+                        Some(s) if !s.is_empty() => s,
+                        _ => opt_str(obj, "data")?
+                            .filter(|s| !s.is_empty())
+                            .ok_or_else(|| {
+                                invalid("슬라이드 이미지 개체에 'imageRef', 'dataBase64' 또는 'data'가 필요합니다.")
+                            })?,
+                    };
+                    let bytes = base64_codec::decode(b64)
+                        .ok_or_else(|| invalid("슬라이드 이미지 Base64 디코딩에 실패했습니다."))?;
+                    *total_img_bytes = total_img_bytes.saturating_add(bytes.len());
+                    if *total_img_bytes > MAX_SLIDE_TOTAL_IMAGE_BYTES {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(
+                            "슬라이드 전체 이미지 크기가 상한(128 MiB)을 초과했습니다.".to_string(),
+                        ));
+                    }
+                    RichImage::new(bytes, &alt)?
+                }
+            };
             Ok(SlideElement::Image {
                 id,
                 rect,
@@ -298,6 +305,7 @@ pub(crate) fn parse_slide_deck(
     let mut slides = Vec::with_capacity(items.len());
     let (mut total_elements, mut total_img_bytes) = (0usize, 0usize);
     let mut bg_cache = crate::slide_ext_json::BackgroundCache::new();
+    let images = parse_image_table(entries, budget, &mut total_img_bytes)?;
 
     for item in items {
         budget.take(1)?;
@@ -340,14 +348,21 @@ pub(crate) fn parse_slide_deck(
                         "덱 전체 개체 수가 상한({MAX_ELEMENTS_PER_DECK})을 초과했습니다."
                     )));
                 }
-                let el = parse_element(e_item, ei, budget, &mut total_img_bytes)?;
+                let el = parse_element(e_item, ei, budget, &mut total_img_bytes, &images)?;
                 if !matches!(el, SlideElement::Table { .. } | SlideElement::Chart { .. }) {
                     fxs.extend(parse_element_fx(as_object(e_item, "elements")?, el.id())?);
                 }
                 elements.push(el);
             }
         }
-        let ext = parse_slide_ext(obj, fxs, budget, &mut total_img_bytes, &mut bg_cache)?;
+        let ext = parse_slide_ext(
+            obj,
+            fxs,
+            budget,
+            &mut total_img_bytes,
+            &mut bg_cache,
+            &images,
+        )?;
         slides.push(RichSlide {
             title: opt_str(obj, "title")?.unwrap_or("").to_string(),
             bullets,
@@ -387,6 +402,7 @@ fn write_element_json(
     out: &mut String,
     el: &SlideElement,
     fx: Option<&ElementFx>,
+    table: &ImageTable,
     push_str: fn(&mut String, &str),
 ) {
     let r = el.rect();
@@ -488,12 +504,8 @@ fn write_element_json(
             push_f64(out, r.w);
             out.push_str(",\"h\":");
             push_f64(out, r.h);
-            let _ = write!(
-                out,
-                ",\"mime\":\"{}\",\"dataBase64\":",
-                image.format().mime()
-            );
-            push_str(out, &base64_codec::encode(image.bytes()));
+            out.push_str(",\"imageRef\":");
+            push_str(out, &table.id_of(image));
             out.push_str(",\"alt\":");
             push_str(out, alt);
         }
@@ -588,6 +600,8 @@ pub(crate) fn write_slide_deck_decode_fields(
     deck: &RichSlideDeck,
     push_str: fn(&mut String, &str),
 ) {
+    let table = ImageTable::from_deck(deck);
+    table.write(out);
     let _ = write!(
         out,
         "\"aspect\":\"{}\",\"orientation\":\"{}\",\"slides\":[",
@@ -621,11 +635,11 @@ pub(crate) fn write_slide_deck_decode_fields(
                 if ei > 0 {
                     out.push(',');
                 }
-                write_element_json(out, el, s.ext.fx_of(el.id()), push_str);
+                write_element_json(out, el, s.ext.fx_of(el.id()), &table, push_str);
             }
             out.push(']');
         }
-        write_slide_ext(out, &s.ext, push_str);
+        write_slide_ext(out, &s.ext, &table, push_str);
         out.push('}');
     }
 }

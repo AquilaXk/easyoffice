@@ -13,6 +13,7 @@ use easyoffice_formats::{
 };
 
 use crate::convert_structured::{as_array, as_object, field, invalid, opt_str, Budget, JsonObject};
+use crate::slide_image_table::{image_by_ref, ImageRefs, ImageTable};
 
 fn num(obj: &JsonObject, key: &str) -> Result<Option<f64>, EasyOfficeError> {
     let Some(v) = field(obj, key) else {
@@ -132,6 +133,7 @@ fn parse_background(
     v: &StrictJsonValue,
     total_img_bytes: &mut usize,
     cache: &mut BackgroundCache,
+    images: &ImageRefs,
 ) -> Result<SlideBackground, EasyOfficeError> {
     let o = as_object(v, "background")?;
     match opt_str(o, "kind")? {
@@ -149,6 +151,9 @@ fn parse_background(
             })
         }
         Some("picture") => {
+            if let Some(shared) = image_by_ref(o, images)? {
+                return Ok(SlideBackground::Picture(shared));
+            }
             let b64 = opt_str(o, "dataBase64")?
                 .filter(|s| !s.is_empty())
                 .or(opt_str(o, "data")?.filter(|s| !s.is_empty()))
@@ -285,11 +290,12 @@ pub(crate) fn parse_slide_ext(
     budget: &mut Budget,
     total_img_bytes: &mut usize,
     cache: &mut BackgroundCache,
+    images: &ImageRefs,
 ) -> Result<SlideExt, EasyOfficeError> {
     Ok(SlideExt {
         hidden: flag(obj, "hidden")?,
         background: field(obj, "background")
-            .map(|b| parse_background(b, total_img_bytes, cache))
+            .map(|b| parse_background(b, total_img_bytes, cache, images))
             .transpose()?,
         footer: field(obj, "footer")
             .map(parse_footer)
@@ -388,7 +394,12 @@ fn write_para(out: &mut String, p: &SlideParaFmt, push_str: fn(&mut String, &str
 }
 
 /// Fields appended to a slide object: hidden flag, background, footer, groups and animations.
-pub(crate) fn write_slide_ext(out: &mut String, ext: &SlideExt, push_str: fn(&mut String, &str)) {
+pub(crate) fn write_slide_ext(
+    out: &mut String,
+    ext: &SlideExt,
+    table: &ImageTable,
+    push_str: fn(&mut String, &str),
+) {
     if ext.hidden {
         out.push_str(",\"hidden\":true");
     }
@@ -408,12 +419,8 @@ pub(crate) fn write_slide_ext(out: &mut String, ext: &SlideExt, push_str: fn(&mu
             let _ = write!(out, ",\"background\":{{\"kind\":\"gradient\",\"from\":\"{from}\",\"to\":\"{to}\",\"angleDeg\":{angle_deg}}}");
         }
         Some(SlideBackground::Picture(img)) => {
-            let _ = write!(
-                out,
-                ",\"background\":{{\"kind\":\"picture\",\"mime\":\"{}\",\"dataBase64\":",
-                img.format().mime()
-            );
-            push_str(out, &base64_codec::encode(img.bytes()));
+            out.push_str(",\"background\":{\"kind\":\"picture\",\"imageRef\":");
+            push_str(out, &table.id_of(img));
             out.push('}');
         }
     }

@@ -90,6 +90,7 @@ mod sheet_table_json;
 mod sheet_view_json;
 mod slide_deck_json;
 mod slide_ext_json;
+mod slide_image_table;
 pub mod smart_tools;
 mod table_style_json;
 mod webui_assets;

@@ -159,14 +159,69 @@
   const hydrate = (raw, elements) => ({ hidden: false, background: null, footer: null, groups: [], anims: [], ...normalize(raw, idsOf(elements)) });
 
   // Slide-level fields of a slide for the save payload.
-  function wire(slide, wireElements) {
+  // `refOf(imageId, mime, base64)` names the picture in the deck's shared picture table; without it the
+  // picture is inline (`data`), as a clipboard or Copilot payload carries it.
+  function wire(slide, wireElements, refOf) {
     const out = normalize(slide, idsOf(wireElements));
     if (out.background?.kind === "picture") {
-      const data = host.__EASYOFFICE_SHEET_UTILS__?.getDocImage?.(out.background.imageId)?.base64;
-      if (data) out.background = { kind: "picture", mime: out.background.mime, data };
-      else delete out.background;
+      const { imageId, mime } = out.background;
+      const data = host.__EASYOFFICE_SHEET_UTILS__?.getDocImage?.(imageId)?.base64;
+      if (!data) delete out.background;
+      else out.background = refOf ? { kind: "picture", imageRef: refOf(imageId, mime, data) } : { kind: "picture", mime, data };
     }
     return out;
+  }
+
+  // The `images` table of an open result registered once per picture: `{ imageId, mime, naturalWidthPx,
+  // naturalHeightPx }` by table id. Slides and elements then share that one buffer and its blob: URL. A picture the
+  // engine would not take (empty, over `maxBytes` or the pixel limit) is left out and what points at it is dropped.
+  function registerPictures(entries, parseHeader, maxBytes) {
+    const utils = host.__EASYOFFICE_SHEET_UTILS__;
+    const byId = new Map();
+    for (const e of Array.isArray(entries) ? entries : []) {
+      if (!utils || typeof e?.id !== "string" || typeof e.dataBase64 !== "string") continue;
+      let bytes = null;
+      try { bytes = utils.base64ToBytes(e.dataBase64); } catch { bytes = null; }
+      if (!bytes || bytes.length === 0 || bytes.length > maxBytes) continue;
+      const header = parseHeader(bytes);
+      if (!header || utils.imageAreaProblem(header)) continue;
+      byId.set(e.id, {
+        imageId: utils.registerDocImage(e.dataBase64, header.format), mime: header.format === "jpg" ? "image/jpeg" : "image/png",
+        naturalWidthPx: header.widthPx, naturalHeightPx: header.heightPx,
+      });
+    }
+    return byId;
+  }
+
+  // `raw` (element or background) with its `imageRef` swapped for the registered picture; null when the table lacks it.
+  function resolvePictureRef(raw, table) {
+    if (typeof raw?.imageRef !== "string") return raw;
+    const pic = table.get(raw.imageRef);
+    return pic ? { ...raw, ...pic } : null;
+  }
+
+  // `slide` with a picture background that names the table resolved (or dropped when the table lacks it).
+  function resolveBackgroundRef(slide, table) {
+    const bg = slide?.background;
+    if (bg?.kind !== "picture" || typeof bg.imageRef !== "string") return slide;
+    return { ...slide, background: resolvePictureRef(bg, table) };
+  }
+
+  // The pictures of one deck payload, each once: `ref` gives the id a slide or element points at (the same
+  // registered picture is the same id, so its base64 string is shared, not copied) and `list` is the table.
+  function pictureTable() {
+    const byImage = new Map();
+    return {
+      ref(imageId, mime, dataBase64) {
+        let entry = byImage.get(imageId);
+        if (!entry) {
+          entry = { id: "img-" + (byImage.size + 1), mime, dataBase64 };
+          byImage.set(imageId, entry);
+        }
+        return entry.id;
+      },
+      list: () => [...byImage.values()],
+    };
   }
 
   // Drops references to elements the slide no longer has; called after elements are removed.
@@ -230,6 +285,6 @@
   }
 
   host.__EASYOFFICE_SLIDE_EXT__ = {
-    CLASS_EFFECTS, clipBytes, normalize, hydrate, wire, prune, pruneRefs, paintStage, footerParts, backgroundCss, todayText,
+    CLASS_EFFECTS, clipBytes, normalize, hydrate, wire, pictureTable, registerPictures, resolvePictureRef, resolveBackgroundRef, prune, pruneRefs, paintStage, footerParts, backgroundCss, todayText,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

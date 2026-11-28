@@ -237,3 +237,46 @@ test("hiding a slide dims its thumbnail and the show skips it", async () => {
   assert.equal(counter(), "1 / 3");
   sandbox.dispatchWindowKeydown({ key: "Escape" });
 });
+
+// A 1x1 PNG header is enough for the picture reader (only the size is read from it).
+const PNG_B64 = (() => {
+  const u8 = new Uint8Array(33);
+  u8.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]);
+  return Buffer.from(u8).toString("base64");
+})();
+
+test("the deck payload carries each picture once and the open result's table is shared by every slide and element", async () => {
+  const { host, document } = await openSlide();
+  const utils = host.__EASYOFFICE_SHEET_UTILS__;
+  const codec = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__;
+  const imageId = utils.registerDocImage(PNG_B64, "png");
+  const slide = (i) => ({
+    title: "쪽 " + i, lower: "", notes: "", aspect: "16:9", orientation: "landscape", layout: "blank", transition: "none",
+    background: { kind: "picture", imageId, mime: "image/png" },
+    elements: [{ id: "im" + i, kind: "image", x: 10, y: 10, w: 100, h: 60, imageId, mime: "image/png", alt: "" }],
+  });
+  const deck = Array.from({ length: 50 }, (_, i) => slide(i));
+  const payload = codec.serializeDeckPayload(deck, document, null);
+  assert.equal(payload.images.length, 1, "one table entry for the shared picture");
+  assert.deepEqual(payload.images[0], { id: "img-1", mime: "image/png", dataBase64: PNG_B64 });
+  assert.ok(payload.slides.every((s) => s.background.imageRef === "img-1" && s.elements[0].imageRef === "img-1"));
+  assert.ok(payload.slides.every((s) => s.background.data === undefined && s.elements[0].data === undefined));
+  assert.equal(JSON.stringify(payload).split(PNG_B64).length - 1, 1, "the picture text appears once in the request");
+
+  const hydrated = codec.hydrateDecodedDeck(JSON.parse(JSON.stringify(payload)), () => ({}));
+  assert.equal(hydrated.length, 50);
+  const ids = new Set(hydrated.flatMap((s) => [s.background.imageId, s.elements[0].imageId]));
+  assert.equal(ids.size, 1, "every slide and element shares one registered picture");
+  assert.equal(utils.getDocImage([...ids][0]).base64, PNG_B64);
+
+  const dangling = codec.hydrateDecodedDeck({ images: [], slides: [{ title: "", bullets: [], notes: "", background: { kind: "picture", imageRef: "img-9" }, elements: [{ id: "x", kind: "image", x: 0, y: 0, w: 10, h: 10, imageRef: "img-9" }] }] }, () => ({}));
+  assert.equal(dangling[0].background, null, "a reference outside the table drops the background");
+  assert.equal(dangling[0].elements.length, 0, "and the picture element");
+});
+
+test("a pasted picture still travels inline (clipboard and Copilot payloads)", async () => {
+  const { host } = await openSlide();
+  const codec = host.__EASYOFFICE_SLIDE_CANVAS_CODEC__;
+  const norm = codec.normalizeSlideElement({ id: "p", kind: "image", x: 0, y: 0, w: 40, h: 40, mime: "image/png", data: PNG_B64 }, "16:9", "el-1", "landscape");
+  assert.ok(norm?.imageId, "inline data is registered as before");
+});
