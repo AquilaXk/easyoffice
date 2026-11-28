@@ -8,6 +8,7 @@ import { copilotRealBaseSteps, copilotRealBoardSteps, copilotRealDocSteps, copil
 import { baseDialogSteps, docDialogSteps, pdfDialogSteps, sheetDialogSteps, slideDialogSteps } from "./dialogs.mjs";
 import { docSteps } from "./doc.mjs";
 import { hwpInsertBelowSteps, hwpPointerSteps } from "./hwp.mjs";
+import { hwpMenuSteps } from "./hwp-menu.mjs";
 import { sheetSteps } from "./sheet.mjs";
 import { findEngine, loadPlaywright, runSteps, startEngine, tempCaptureDir } from "./support.mjs";
 
@@ -27,7 +28,7 @@ try {
     groups: [
       { module: "SHEET", steps: [...sheetSteps, ...sheetDialogSteps, ...copilotSheetPointerSteps, ...copilotRealSheetSteps] },
       { module: "DOC", steps: [...docSteps, ...copilotDocSteps, ...copilotRealDocSteps, ...docDialogSteps] },
-      { module: "HWP", steps: [...hwpInsertBelowSteps, ...hwpPointerSteps] },
+      { module: "HWP", steps: [...hwpMenuSteps, ...hwpInsertBelowSteps, ...hwpPointerSteps] },
       { module: "SLIDE", steps: [...copilotSlideSteps, ...copilotRealSlideSteps, ...slideDialogSteps] },
       { module: "BASE", steps: [...baseSteps, ...copilotBasePointerSteps, ...copilotRealBaseSteps, ...baseDialogSteps] },
       { module: "BOARD", steps: [...copilotBoardPointerSteps, ...copilotRealBoardSteps] },

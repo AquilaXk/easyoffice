@@ -1,6 +1,7 @@
 use super::*;
 
 mod contracts;
+mod hwp;
 
 const MODIFIERS: &[&str] = &["CmdOrCtrl", "Ctrl", "Alt", "Shift"];
 /// The keys that are the Control key itself on macOS, because the Command key of the same letter is a system key
@@ -260,7 +261,9 @@ fn each_kind_has_the_menus_of_its_window_in_order() {
     assert_eq!(
         titles_of(MenuKind::Hwp),
         bar(
-            &["파일", "편집", "보기", "입력", "서식", "쪽", "표", "도구"],
+            &[
+                "파일", "편집", "보기", "입력", "서식", "쪽", "보안", "검토", "도구", "표"
+            ],
             &tail
         )
     );
@@ -344,7 +347,6 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
     ];
     let doc_only = [
         "insert:mailmerge",
-        "page:break",
         "table:doc-formula",
         "page:doc-header",
         "page:doc-footer",
@@ -384,6 +386,10 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
         MenuKind::Conv,
     ] {
         not_in(kind, &doc_only);
+        // 쪽 나누기 is in the document's bar and in the Hangul editor's (where it is the editor's own command).
+        if kind != MenuKind::Hwp {
+            not_in(kind, &["page:break"]);
+        }
     }
     for kind in [
         MenuKind::Hwp,
@@ -695,43 +701,6 @@ fn the_page_kind_names_are_the_rust_kinds() {
 }
 
 #[test]
-fn the_hangul_window_keeps_the_full_bar_with_the_reference_cell_items_in_order() {
-    let table = lines_of(MenuKind::Hwp, "표");
-    let at = |id: &str| table.iter().position(|line| *line == id).unwrap();
-    assert!(
-        at("table:cell-select") < at("table:merge") && at("table:merge") < at("table:cell-split"),
-        "select, merge, split"
-    );
-    let editor_only: Vec<&str> = ITEMS
-        .iter()
-        .filter(|spec| spec.action == "hwp-editor")
-        .map(|spec| spec.id)
-        .collect();
-    assert_eq!(
-        editor_only,
-        [
-            "view:zoom-dialog",
-            "view:form-mode",
-            "format:hwp-char-shape",
-            "format:hwp-para-shape",
-            "table:cell-select",
-            "table:cell-split",
-            "table:hwp-split",
-        ]
-    );
-    assert_eq!(spec("view:toolbar-labels").action, "view-toolbar-labels");
-    let hwp_ids = layout::table_ids(MenuKind::Hwp);
-    for id in &editor_only {
-        assert!(hwp_ids.contains(id), "{id}");
-    }
-    assert_eq!(
-        spec("table:cell-select").accelerator,
-        Some("CmdOrCtrl+Alt+T")
-    );
-    assert_eq!(spec("view:zoom-100").accelerator, Some("CmdOrCtrl+0"));
-}
-
-#[test]
 fn paste_and_close_are_system_items_that_stay_in_the_table_for_the_page_menu() {
     let ids: Vec<&str> = installed_ids().collect();
     assert_eq!(MACOS_SYSTEM_IDS, ["edit:paste", "file:close"]);
@@ -814,37 +783,6 @@ fn quit_runs_in_rust_with_the_reference_id_and_accelerator_and_is_not_a_table_it
         .iter()
         .all(|(_, keys)| *keys != QUIT_ACCELERATOR));
     assert_eq!(QUIT_LABEL, "EasyOffice 끝내기");
-}
-
-/// The reference app's file menu ends in a separator, `Export PDF...` (⌘E) and `Print...` (⌘P)
-/// (`menu.rs` 27-32, 88-89). Both are shell commands of the Hangul editor window: the page
-/// actions are the ones its keyboard shortcuts and its own 파일 menu already run. Only that
-/// window's bar has the export; the other windows' bars have no item that is grayed out there.
-#[test]
-fn the_hangul_file_menu_ends_with_pdf_export_and_print_with_the_reference_keys() {
-    let export = spec("file:export-pdf");
-    assert_eq!(
-        (export.label, export.accelerator, export.action),
-        ("PDF로 내보내기…", Some("CmdOrCtrl+E"), "hwp-export-pdf")
-    );
-    let print = spec("file:print");
-    assert_eq!(
-        (print.label, print.accelerator, print.action),
-        ("인쇄…", Some("CmdOrCtrl+P"), "print")
-    );
-    let file = lines_of(MenuKind::Hwp, "파일");
-    assert_eq!(
-        file[file.len() - 6..],
-        [
-            "file:save-as",
-            "file:save-as-hwpx",
-            "-",
-            "file:page-setup",
-            "file:export-pdf",
-            "file:print",
-        ],
-        "save as, save as hwpx, a separator, page setup, export, print"
-    );
 }
 
 /// The reference app's file menu is new documents, a separator, open, recent, save, save as, a

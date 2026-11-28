@@ -44,6 +44,10 @@ fn submenu<R: Runtime>(
 ) -> tauri::Result<Submenu<R>> {
     let mut builder = SubmenuBuilder::new(app, menu.title);
     for line in menu.lines {
+        if let Some(sub) = layout::hwp_submenu(line) {
+            builder = builder.item(&nested(app, kind, sub.title, sub.lines)?);
+            continue;
+        }
         builder = match *line {
             SEPARATOR => builder.separator(),
             NEW_DOCS => builder.item(&nested(app, kind, "새 문서", &NEW_DOC_IDS)?),

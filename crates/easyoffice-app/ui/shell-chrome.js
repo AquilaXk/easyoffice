@@ -17,7 +17,10 @@
   // entry of the shortcut action table (so a menu item and its keyboard shortcut run the same handler)
   // or of `pageMenuActions` (the page's own menu item), optionally `name:argument`. A test keeps this
   // list equal to the Rust table and every item of the page's menu bar inside it.
+  // The commands of the Hangul editor (`hwp-editor`) and their editor command ids are in `native-menu-hwp.js` (PD-396).
+  const hwpMenu = host.__EASYOFFICE_NATIVE_MENU_HWP__;
   const NATIVE_MENU_ACTIONS = Object.freeze({
+    ...hwpMenu.ACTIONS,
     "app:about": "about",
     "file:new": "file-new",
     "file:new-doc": "window-new:doc",
@@ -70,7 +73,6 @@
     "view:zoom-out": "studio-cmd:zoom-out",
     "view:zoom-fit-page": "studio-cmd:zoom-fit-page",
     "view:zoom-fit-width": "studio-cmd:zoom-fit-width",
-    "view:zoom-dialog": "hwp-editor",
     "view:zoom-100": "studio-cmd:view-zoom",
     "view:split": "studio-cmd:view-split",
     "view:outline": "studio-cmd:view-outline",
@@ -80,7 +82,6 @@
     "view:theme-dark": "theme:dark",
     "view:theme-toggle": "studio-cmd:view-theme",
     "view:toolbar-labels": "view-toolbar-labels",
-    "view:form-mode": "hwp-editor",
     "view:ctrl-marks": "studio-cmd:ctrl-marks",
     "view:para-marks": "studio-cmd:para-marks",
     "view:doc-grid": "studio-cmd:doc-grid",
@@ -250,15 +251,10 @@
     "table:row-delete": "studio-cmd:table-row-delete",
     "table:col-delete": "studio-cmd:table-col-delete",
     "table:split": "studio-cmd:table-split",
-    "table:cell-select": "hwp-editor",
     "table:merge": "studio-cmd:table-merge",
     "table:col-equal": "studio-cmd:table-col-equal",
     "table:border-bg": "studio-cmd:table-border-bg",
     "table:cell-props": "studio-cmd:table-cell-props",
-    "table:cell-split": "hwp-editor",
-    "table:hwp-split": "hwp-editor",
-    "format:hwp-char-shape": "hwp-editor",
-    "format:hwp-para-shape": "hwp-editor",
     "table:sum": "studio-cmd:table-sum",
     "table:doc-formula": "studio-cmd:doc-mod-tableformula",
     "table:hwp-border": "studio-cmd:hwp-mod-border",
@@ -356,30 +352,7 @@
   const PARSED_NATIVE_MENU_LIST = Object.freeze(Object.values(PARSED_NATIVE_MENU_ACTIONS));
 
   // Menu id -> Hangul editor command id (`automation.execute`).
-  const EMBED_EDITOR_COMMANDS = Object.freeze({
-    "file:page-setup": "page:setup",
-    "view:zoom-in": "view:zoom-in", "view:zoom-out": "view:zoom-out", "view:zoom-100": "view:zoom-100",
-    "view:zoom-fit-page": "view:zoom-fit-page", "view:zoom-fit-width": "view:zoom-fit-width", "view:zoom-dialog": "view:zoom-dialog",
-    "view:toolbar-labels": "view:toolbar-labels", "view:form-mode": "view:form-mode",
-    "view:ctrl-marks": "view:ctrl-mark", "view:para-marks": "view:para-mark", "view:doc-grid": "view:toggle-grid",
-    "page:paper": "page:setup", "page:header": "page:header-create", "page:footer": "page:footer-create", "page:columns": "page:col-settings",
-    "insert:shape": "insert:shape", "insert:image": "insert:image", "insert:footnote": "insert:footnote",
-    "insert:endnote": "insert:endnote", "insert:symbol": "insert:symbols", "insert:link": "insert:hyperlink", "insert:field": "insert:field",
-    "format:bold": "format:bold", "format:italic": "format:italic", "format:underline": "format:underline",
-    "format:strike": "format:strikethrough", "format:superscript": "format:superscript", "format:subscript": "format:subscript",
-    "format:style": "format:style-dialog", "format:justify": "format:align-justify",
-    "format:para-numbering": "format:toggle-numbering", "format:para-bullet": "format:toggle-bullet",
-    "format:indent-in": "format:level-increase", "format:indent-out": "format:level-decrease",
-    "table:insert": "table:create", "table:row-above": "table:insert-row-above", "table:add-row": "table:insert-row-below",
-    "table:col-left": "table:insert-col-left", "table:col-right": "table:insert-col-right",
-    "table:row-delete": "table:delete-row", "table:col-delete": "table:delete-col",
-    "table:cell-select": "table:cell-selection-enter", "table:merge": "table:cell-merge", "table:cell-split": "table:cell-split",
-    "table:hwp-split": "table:split", "format:hwp-char-shape": "format:char-shape", "format:hwp-para-shape": "format:para-shape",
-    "table:col-equal": "table:cell-width-equal", "table:border-bg": "table:border-each",
-    "table:cell-props": "table:cell-props", "table:sum": "table:block-formula", "table:hwp-border": "table:border-each",
-    "edit:undo": "edit:undo", "edit:redo": "edit:redo", "edit:cut": "edit:cut", "edit:copy": "edit:copy",
-    "edit:find": "edit:find", "edit:replace": "edit:find-replace",
-  });
+  const EMBED_EDITOR_COMMANDS = hwpMenu.EDITOR_COMMANDS;
 
   // Same items when a plain text field has focus.
   const TEXT_FIELD_EDIT_COMMANDS = Object.freeze({ "edit:undo": "undo", "edit:redo": "redo", "edit:cut": "cut", "edit:copy": "copy" });

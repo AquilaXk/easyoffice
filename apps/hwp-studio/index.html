@@ -39,7 +39,7 @@
           <div class="md-item" data-shell-cmd="save"><span class="md-icon icon-save"></span><span class="md-label">저장</span><span class="md-shortcut">Ctrl+S</span></div>
           <div class="md-item" data-shell-cmd="save-as" data-shell-format="hwp"><span class="md-icon"></span><span class="md-label">다른 이름으로 저장 (HWP)…</span><span class="md-shortcut">Ctrl+Shift+S</span></div>
           <div class="md-item" data-shell-cmd="save-as" data-shell-format="hwpx"><span class="md-icon"></span><span class="md-label">다른 이름으로 저장 (HWPX)…</span></div>
-          <div class="md-item" data-shell-cmd="export-pdf" hidden><span class="md-icon"></span><span class="md-label">PDF로 내보내기…</span><span class="md-shortcut">Ctrl+E</span></div>
+          <div class="md-item" data-shell-cmd="export-pdf" hidden><span class="md-icon"></span><span class="md-label">PDF로 저장하기</span><span class="md-shortcut">Ctrl+E</span></div>
           <div class="md-item disabled" data-cmd="file:page-setup"><span class="md-icon icon-page-setup"></span><span class="md-label" data-i18n="command.file.pageSetup.label">편집 용지</span><span class="md-shortcut">F7</span></div>
           <div class="md-item" data-shell-cmd="print"><span class="md-icon"></span><span class="md-label">인쇄…</span><span class="md-shortcut">Ctrl+P</span></div>
           <div class="md-sep"></div>
@@ -63,8 +63,6 @@
           <div class="md-item disabled" data-cmd="edit:select-all"><span class="md-icon icon-select-all"></span><span class="md-label" data-i18n="command.edit.selectAll.label">모두 선택</span><span class="md-shortcut">Ctrl+A</span></div>
           <div class="md-sep"></div>
           <div class="md-item" data-cmd="edit:find"><span class="md-icon icon-find"></span><span class="md-label" data-i18n="command.edit.find.label">찾기(F)</span><span class="md-shortcut">Ctrl+F</span></div>
-          <div class="md-item" data-cmd="edit:compare-documents"><span class="md-icon"></span><span class="md-label" data-i18n="command.edit.compareDocuments.label">문서 비교</span><span class="md-shortcut">Alt+Shift+V</span></div>
-          <div class="md-item" data-cmd="edit:document-history"><span class="md-icon"></span><span class="md-label" data-i18n="command.edit.documentHistory.label">문서 이력 관리</span><span class="md-shortcut">Ctrl+Shift+H</span></div>
           <div class="md-item" data-cmd="edit:find-replace"><span class="md-icon icon-find-replace"></span><span class="md-label" data-i18n="command.edit.findReplace.label">찾아 바꾸기(E)</span><span class="md-shortcut">Ctrl+F2</span></div>
           <div class="md-item" data-cmd="edit:find-again"><span class="md-icon"></span><span class="md-label" data-i18n="command.edit.findAgain.label">다시 찾기(X)</span><span class="md-shortcut">Ctrl+L</span></div>
           <div class="md-item" data-cmd="edit:goto"><span class="md-icon"></span><span class="md-label" data-i18n="command.edit.goto.label">찾아가기(G)</span><span class="md-shortcut">Alt+G</span></div>
@@ -76,7 +74,7 @@
         <div class="menu-dropdown">
           <div class="md-item" data-cmd="view:zoom-in"><span class="md-icon icon-zoom-menu-in"></span><span class="md-label" data-i18n="command.view.zoomIn.label">확대</span><span class="md-shortcut">Ctrl++</span></div>
           <div class="md-item" data-cmd="view:zoom-out"><span class="md-icon icon-zoom-menu-out"></span><span class="md-label" data-i18n="command.view.zoomOut.label">축소</span><span class="md-shortcut">Ctrl+-</span></div>
-          <div class="md-item" data-cmd="view:zoom-dialog"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.zoomDialog.label">화면 확대/축소…</span></div>
+          <div class="md-item" data-cmd="view:zoom-dialog"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.zoomDialog.label">화면 확대/축소</span></div>
           <div class="md-sep"></div>
           <div class="md-sub">
             <span class="md-label" data-i18n="menu.view.label.x3310ef">배율</span><span class="md-arrow">▶</span>
@@ -92,19 +90,6 @@
               <div class="md-item" data-cmd="view:zoom-200"><span class="md-icon"></span><span class="md-label">200%</span></div>
               <div class="md-item" data-cmd="view:zoom-300"><span class="md-icon"></span><span class="md-label">300%</span></div>
               <div class="md-item" data-cmd="view:zoom-500"><span class="md-icon"></span><span class="md-label">500%</span></div>
-            </div>
-          </div>
-          <div class="md-sep"></div>
-          <div class="md-sub">
-            <span class="md-label" data-i18n="menu.view.label.xe7ded2">테마</span><span class="md-arrow">▶</span>
-            <div class="md-sub-panel">
-              <div class="md-item" role="menuitemradio" data-shell-cmd="theme-system" data-theme-mode-choice="system"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.themeSystem.themeModeChoiceSystem.label">시스템 설정</span></div>
-              <div class="md-item" role="menuitemradio" data-shell-cmd="theme-light" data-theme-mode-choice="light"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.themeLight.themeModeChoiceLight.label">밝게</span></div>
-              <div class="md-item" role="menuitemradio" data-shell-cmd="theme-dark" data-theme-mode-choice="dark"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.themeDark.themeModeChoiceDark.label">어둡게</span></div>
-              <div class="md-sep"></div>
-              <div class="md-item" role="menuitemradio" data-cmd="view:skin-oldschool" data-theme-skin-choice="oldschool"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.skinOldschool.themeSkinChoiceOldschool.label">올드스쿨</span></div>
-              <div class="md-item" role="menuitemradio" data-cmd="view:skin-default" data-theme-skin-choice="default"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.skinDefault.themeSkinChoiceDefault.label">클래식</span></div>
-              <div class="md-item" role="menuitemradio" data-cmd="view:skin-flat" data-theme-skin-choice="flat"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.skinFlat.themeSkinChoiceFlat.label">모던</span></div>
             </div>
           </div>
           <div class="md-sep"></div>
@@ -135,7 +120,7 @@
           <div class="md-item" data-cmd="insert:textbox"><span class="md-icon icon-textbox"></span><span class="md-label" data-i18n="command.insert.textbox.label">글상자</span></div>
           <div class="md-item" data-cmd="insert:equation"><span class="md-icon"></span><span class="md-label" data-i18n="command.insert.equation.label">수식</span><span class="md-shortcut">Ctrl+N,M</span></div>
           <div class="md-sep"></div>
-          <div class="md-item disabled" data-cmd="insert:field"><span class="md-icon"></span><span class="md-label" data-i18n="command.insert.field.label">필드 입력</span><span class="md-shortcut">Ctrl+K+E</span></div>
+          <div class="md-item disabled" data-cmd="insert:field"><span class="md-icon"></span><span class="md-label" data-i18n="command.insert.field.label">필드 입력</span><span class="md-shortcut">Ctrl+K,E</span></div>
           <div class="md-sep"></div>
           <div class="md-sub disabled">
             <span class="md-label" data-i18n="menu.insert.label.xe8cab5">캡션 넣기</span><span class="md-arrow">▶</span>
@@ -158,9 +143,9 @@
           <div class="md-item" data-cmd="insert:endnote"><span class="md-icon icon-endnote"></span><span class="md-label" data-i18n="command.insert.endnote.label">미주</span></div>
           <div class="md-item" data-cmd="insert:endnote-shape"><span class="md-icon icon-endnote"></span><span class="md-label" data-i18n="command.insert.endnoteShape.label">미주 모양</span></div>
           <div class="md-sep"></div>
-          <div class="md-item" data-cmd="insert:symbols"><span class="md-icon icon-symbols"></span><span class="md-label" data-i18n="command.insert.symbols.label">문자표</span><span class="md-shortcut">Alt+F10</span></div>
+          <div class="md-item" data-cmd="insert:symbols"><span class="md-icon icon-symbols"></span><span class="md-label" data-i18n="command.insert.symbols.label">문자표</span><span class="md-shortcut">Ctrl+F10</span></div>
           <div class="md-sep"></div>
-          <div class="md-item" data-cmd="insert:hyperlink"><span class="md-icon icon-hyperlink"></span><span class="md-label" data-i18n="command.insert.hyperlink.label">하이퍼링크</span><span class="md-shortcut">Ctrl+K+H</span></div>
+          <div class="md-item" data-cmd="insert:hyperlink"><span class="md-icon icon-hyperlink"></span><span class="md-label" data-i18n="command.insert.hyperlink.label">하이퍼링크</span><span class="md-shortcut">Ctrl+K,H</span></div>
           <div class="md-item" data-cmd="insert:bookmark"><span class="md-icon"></span><span class="md-label" data-i18n="command.insert.bookmark.label">책갈피</span><span class="md-shortcut">Ctrl+K,B</span></div>
           <div class="md-sep"></div>
           <div class="md-sub">
@@ -219,6 +204,10 @@
           <div class="md-item disabled" data-cmd="page:setup"><span class="md-icon icon-page-setup"></span><span class="md-label" data-i18n="command.page.setup.label">편집 용지</span><span class="md-shortcut">F7</span></div>
           <div class="md-item disabled" data-cmd="page:page-border"><span class="md-icon"></span><span class="md-label" data-i18n="command.page.pageBorder.label">쪽 테두리/배경</span></div>
           <div class="md-sep"></div>
+          <!-- ── 머리말/꼬리말: 공식 메뉴의 한 항목, 안에 머리말과 꼬리말 ── -->
+          <div class="md-sub disabled">
+            <span class="md-icon icon-header"></span><span class="md-label">머리말/꼬리말</span><span class="md-arrow">▶</span>
+            <div class="md-sub-panel">
           <!-- ── 머리말 (부모 서브메뉴) ── -->
           <div class="md-sub disabled">
             <span class="md-icon icon-header"></span><span class="md-label" data-i18n="menu.page.label.xa76ec3">머리말</span><span class="md-arrow">▶</span>
@@ -349,6 +338,8 @@
               <div class="md-item" data-cmd="page:footer-create"><span class="md-icon"></span><span class="md-label" data-i18n="command.page.footerCreate.label">꼬리말 편집…</span></div>
             </div>
           </div>
+            </div>
+          </div>
           <div class="md-item disabled" data-cmd="page:new-page-num"><span class="md-icon"></span><span class="md-label" data-i18n="command.page.newPageNum.label">새 번호로 시작</span></div>
           <div class="md-item disabled" data-cmd="page:hide-current"><span class="md-icon"></span><span class="md-label" data-i18n="command.page.hideCurrent.label">현재 쪽만 감추기</span></div>
           <div class="md-sep"></div>
@@ -386,17 +377,8 @@
             </div>
           </div>
           <div class="md-sep"></div>
-          <div class="md-item disabled" data-cmd="table:insert-row-above"><span class="md-icon"></span><span class="md-label">위쪽에 줄 추가하기</span></div>
-          <div class="md-item disabled" data-cmd="table:insert-row-below"><span class="md-icon"></span><span class="md-label">아래쪽에 줄 추가하기</span></div>
-          <div class="md-sep"></div>
-          <div class="md-item disabled" data-cmd="table:insert-col-left"><span class="md-icon"></span><span class="md-label">왼쪽에 칸 추가하기</span><span class="md-shortcut">Alt+Insert</span></div>
-          <div class="md-item disabled" data-cmd="table:insert-col-right"><span class="md-icon"></span><span class="md-label">오른쪽에 칸 추가하기</span></div>
-          <div class="md-sep"></div>
-          <div class="md-item disabled" data-cmd="table:delete-row"><span class="md-icon"></span><span class="md-label">줄 지우기</span></div>
-          <div class="md-item disabled" data-cmd="table:delete-col"><span class="md-icon"></span><span class="md-label">칸 지우기</span></div>
-          <div class="md-sep"></div>
-          <div class="md-item disabled" data-cmd="table:insert-row-col"><span class="md-icon"></span><span class="md-label" data-i18n="command.table.insertRowCol.label">줄/칸 추가하기(I)…</span><span class="md-shortcut">Alt+Enter</span></div>
-          <div class="md-item disabled" data-cmd="table:delete-row-col"><span class="md-icon"></span><span class="md-label" data-i18n="command.table.deleteRowCol.label">줄/칸 지우기(E)…</span><span class="md-shortcut">Alt+Delete</span></div>
+          <div class="md-item disabled" data-cmd="table:insert-row-col"><span class="md-icon"></span><span class="md-label" data-i18n="command.table.insertRowCol.label">줄/칸 추가하기</span><span class="md-shortcut">Alt+Insert</span></div>
+          <div class="md-item disabled" data-cmd="table:delete-row-col"><span class="md-icon"></span><span class="md-label" data-i18n="command.table.deleteRowCol.label">줄/칸 지우기</span><span class="md-shortcut">Alt+Delete</span></div>
           <div class="md-sep"></div>
           <div class="md-item disabled" data-cmd="table:cell-split"><span class="md-icon"></span><span class="md-label" data-i18n="command.table.cellSplit.label">셀 나누기</span><span class="md-shortcut">S</span></div>
           <div class="md-item disabled" data-cmd="table:cell-merge"><span class="md-icon"></span><span class="md-label" data-i18n="command.table.cellMerge.label">셀 합치기</span><span class="md-shortcut">M</span></div>
@@ -414,6 +396,14 @@
           <div class="md-item disabled" data-cmd="table:decimal-remove"><span class="md-icon"></span><span class="md-label" data-i18n="command.table.decimalRemove.label">자릿점 빼기</span></div>
         </div>
       </div>
+      <!-- ── 검토 ── -->
+      <div class="menu-item" data-menu="review">
+        <span class="menu-title">검토</span>
+        <div class="menu-dropdown">
+          <div class="md-item" data-cmd="edit:document-history"><span class="md-icon"></span><span class="md-label" data-i18n="command.edit.documentHistory.label">문서 이력 관리</span><span class="md-shortcut">Ctrl+Shift+H</span></div>
+          <div class="md-item" data-cmd="edit:compare-documents"><span class="md-icon"></span><span class="md-label" data-i18n="command.edit.compareDocuments.label">문서 비교</span><span class="md-shortcut">Alt+Shift+V</span></div>
+        </div>
+      </div>
       <!-- ── 도구 ── -->
       <div class="menu-item" data-menu="tool">
         <span class="menu-title" data-i18n="menu.tool">도구</span>
@@ -421,6 +411,18 @@
           <div class="md-item" data-cmd="tool:copilot"><span class="md-icon"></span><span class="md-label">코파일럿</span><span class="md-shortcut">Ctrl+Shift+K</span></div>
           <div class="md-sep"></div>
           <div class="md-item" data-cmd="tool:options"><span class="md-icon"></span><span class="md-label" data-i18n="command.tool.options.label">환경 설정</span></div>
+          <div class="md-sub">
+            <span class="md-label" data-i18n="menu.view.label.xe7ded2">테마</span><span class="md-arrow">▶</span>
+            <div class="md-sub-panel">
+              <div class="md-item" role="menuitemradio" data-shell-cmd="theme-system" data-theme-mode-choice="system"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.themeSystem.themeModeChoiceSystem.label">시스템 설정</span></div>
+              <div class="md-item" role="menuitemradio" data-shell-cmd="theme-light" data-theme-mode-choice="light"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.themeLight.themeModeChoiceLight.label">밝게</span></div>
+              <div class="md-item" role="menuitemradio" data-shell-cmd="theme-dark" data-theme-mode-choice="dark"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.themeDark.themeModeChoiceDark.label">어둡게</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" role="menuitemradio" data-cmd="view:skin-oldschool" data-theme-skin-choice="oldschool"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.skinOldschool.themeSkinChoiceOldschool.label">올드스쿨</span></div>
+              <div class="md-item" role="menuitemradio" data-cmd="view:skin-default" data-theme-skin-choice="default"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.skinDefault.themeSkinChoiceDefault.label">클래식</span></div>
+              <div class="md-item" role="menuitemradio" data-cmd="view:skin-flat" data-theme-skin-choice="flat"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.skinFlat.themeSkinChoiceFlat.label">모던</span></div>
+            </div>
+          </div>
         </div>
       </div>
       <!-- ── 도움말 ── -->
@@ -476,7 +478,7 @@
       <span class="tb-sep"></span>
       <div class="tb-group">
         <button class="tb-btn" title="개체 속성 (P)" data-cmd="format:object-properties" data-i18n-title="command.format.objectProperties.tooltip"><span class="tb-sprite icon-obj-props"></span><span class="tb-label" data-i18n-lines="command.format.objectProperties.toolbarLabel">개체<br/>속성</span></button>
-        <button class="tb-btn" title="문자표 (Alt+F10)" data-cmd="insert:symbols" data-i18n-title="command.insert.symbols.tooltip"><span class="tb-sprite icon-symbols"></span><span class="tb-label" data-i18n="command.insert.symbols.toolbarLabel">문자표</span></button>
+        <button class="tb-btn" title="문자표 (Ctrl+F10)" data-cmd="insert:symbols" data-i18n-title="command.insert.symbols.tooltip"><span class="tb-sprite icon-symbols"></span><span class="tb-label" data-i18n="command.insert.symbols.toolbarLabel">문자표</span></button>
         <button class="tb-btn" data-cmd="insert:hyperlink" title="하이퍼링크" data-i18n-title="command.insert.hyperlink.tooltip"><span class="tb-sprite icon-hyperlink"></span><span class="tb-label" data-i18n-lines="command.insert.hyperlink.toolbarLabel">하이퍼<br/>링크</span></button>
       </div>
       <span class="tb-sep"></span>

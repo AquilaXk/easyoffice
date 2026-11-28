@@ -19,6 +19,7 @@ import type { ChromeVisibility } from '@/automation/types';
 import { CommandDispatcher } from '@/command/dispatcher';
 import type { EditorContext, CommandServices, EditorEditMode } from '@/command/types';
 import { defaultShortcuts } from '@/command/shortcut-map';
+import { applyOfficialShortcuts } from './command/official-shortcuts.ts';
 import { fileCommands } from '@/command/commands/file';
 import { editCommands } from '@/command/commands/edit';
 import { syncToolboxMenu, viewCommands } from '@/command/commands/view';
@@ -61,6 +62,7 @@ import {
   createShellCommandRelay,
   installShellMenu,
   parseShellTheme,
+  parseShellNativeMenu,
   parseShellToolbarLabels,
   renderShellRecents,
   SHELL_TOOLBAR_LABELS_REASON,
@@ -275,14 +277,15 @@ registry.register(toolbarLabelsCommand);
 initToolbarLabels();
 const initialToolbarLabels = parseShellToolbarLabels(window.location.search);
 if (initialToolbarLabels !== null) setToolbarLabels(initialToolbarLabels);
+if (parseShellNativeMenu(window.location.search)) document.documentElement.dataset.nativeMenu = 'true';
 registry.registerAll(formatCommands);
 registry.registerAll(insertCommands);
 registry.registerAll(tableCommands);
 registry.register(cellSelectionEnterCommand);
-// 참조 앱 표 메뉴의 Alt+Insert(왼쪽에 칸 추가하기). Alt+Delete는 표 안에서 줄/칸 지우기 대화상자를 연다.
-defaultShortcuts.push([{ key: 'insert', alt: true }, 'table:insert-col-left']);
 registry.registerAll(pageCommands);
 registry.registerAll(toolCommands);
+// 공식 메뉴의 키: 문자표 Ctrl+F10, 줄/칸 추가하기 Alt+Insert(줄/칸 지우기는 Alt+Delete), chord 표기는 Ctrl+K,H 꼴.
+applyOfficialShortcuts(defaultShortcuts, registry);
 const copilotToggleRelay = createCopilotToggleRelay();
 registry.register({
   id: 'tool:copilot',

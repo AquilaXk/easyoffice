@@ -239,6 +239,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/hwp-print.js",
   "../crates/easyoffice-app/ui/office-print.js",
   "../crates/easyoffice-app/ui/hwp-session.js",
+  "../crates/easyoffice-app/ui/native-menu-hwp.js",
   "../crates/easyoffice-app/ui/shell-chrome.js",
   "../crates/easyoffice-app/ui/copilot-catalog.js",
   "../crates/easyoffice-app/ui/copilot-text.js",

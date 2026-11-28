@@ -1,8 +1,9 @@
-//! Static custom menu item table (`ITEMS`) for the macOS native menu bar (`PD-102`, `PD-121`, `PD-250`).
+//! Static custom menu item table (`BASE_ITEMS`, joined with the Hangul editor's `HWP_ITEMS` into `ITEMS`) for the macOS
+//! native menu bar (`PD-102`, `PD-121`, `PD-250`).
 
 use super::MenuItemSpec;
 
-const fn item(
+pub(super) const fn item(
     id: &'static str,
     label: &'static str,
     accelerator: Option<&'static str>,
@@ -49,7 +50,7 @@ macro_rules! cf {
 }
 
 /// Every custom item of the menu bar, in menu order.
-pub const ITEMS: &[MenuItemSpec] = &[
+pub const BASE_ITEMS: &[MenuItemSpec] = &[
     item("app:about", "EasyOffice 정보", None, "about"),
     item("file:new", "새로 만들기", Some("CmdOrCtrl+N"), "file-new"),
     item("file:new-doc", "문서 (DOCX)", None, "window-new:doc"),
@@ -109,7 +110,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     item(
         "file:export-pdf",
-        "PDF로 내보내기…",
+        "PDF로 저장하기",
         Some("CmdOrCtrl+E"),
         "hwp-export-pdf",
     ),
@@ -732,12 +733,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
         None,
         "studio-cmd:table-col-delete",
     ),
-    item(
-        "table:cell-select",
-        "셀 선택",
-        Some("CmdOrCtrl+Alt+T"),
-        "hwp-editor",
-    ),
+    item("table:cell-select", "셀 선택", None, "hwp-editor"),
     item("table:merge", "셀 합치기", None, "studio-cmd:table-merge"),
     item(
         "table:col-equal",

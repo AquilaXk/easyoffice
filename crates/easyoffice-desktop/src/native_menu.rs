@@ -42,11 +42,36 @@ use tauri::{AppHandle, Manager, Runtime, Wry};
 
 mod build;
 mod items;
+mod items_hwp;
 mod layout;
-pub use items::ITEMS;
 pub use layout::MenuKind;
 
+/// The whole table: the items of every window kind, then the ones only the Hangul editor runs.
+pub const ITEMS: &[MenuItemSpec] = &join::<ITEM_COUNT>(items::BASE_ITEMS, items_hwp::HWP_ITEMS);
+const ITEM_COUNT: usize = items::BASE_ITEMS.len() + items_hwp::HWP_ITEMS.len();
+
+/// The two tables one after the other (a constant, so the table stays a static slice).
+const fn join<const N: usize>(
+    first: &[MenuItemSpec],
+    second: &[MenuItemSpec],
+) -> [MenuItemSpec; N] {
+    assert!(first.len() + second.len() == N);
+    let mut out = [first[0]; N];
+    let mut at = 0;
+    while at < first.len() {
+        out[at] = first[at];
+        at += 1;
+    }
+    let mut next = 0;
+    while next < second.len() {
+        out[first.len() + next] = second[next];
+        next += 1;
+    }
+    out
+}
+
 /// One custom menu item.
+#[derive(Clone, Copy)]
 pub struct MenuItemSpec {
     pub id: &'static str,
     pub label: &'static str,
@@ -85,7 +110,7 @@ fn accelerator_of(spec: &MenuItemSpec) -> Option<&'static str> {
 /// The key an item gets for a specific window kind (HWP leaves CmdOrCtrl+K for two-key chords and the
 /// replace key to the editor's own Ctrl+F2; SHEET adds standard spreadsheet workbook/formula/table accelerators).
 fn accelerator_for(kind: MenuKind, spec: &MenuItemSpec) -> Option<&'static str> {
-    if kind == MenuKind::Hwp && matches!(spec.id, "insert:link" | "edit:replace") {
+    if kind == MenuKind::Hwp && matches!(spec.id, "insert:link" | "edit:replace" | "edit:goto") {
         return None;
     }
     if kind == MenuKind::Sheet {
@@ -175,21 +200,8 @@ pub fn dispatch_script(id: &str) -> Option<String> {
 /// windows use standard Office Korean terminology, `PD-354`).
 pub fn label_for(kind: MenuKind, spec: &MenuItemSpec) -> &'static str {
     if kind == MenuKind::Hwp {
-        match spec.id {
-            "edit:undo" => return "되돌리기",
-            "edit:cut" => return "오려 두기",
-            "edit:copy" => return "복사하기",
-            "edit:paste" => return "붙이기",
-            "edit:replace" => return "찾아 바꾸기",
-            "view:ctrl-marks" => return "조판 부호",
-            "view:para-marks" => return "문단 부호",
-            "view:doc-grid" => return "격자 설정",
-            "format:bold" => return "진하게",
-            "format:italic" => return "기울임",
-            "format:indent-in" => return "한 수준 증가",
-            "format:indent-out" => return "한 수준 감소",
-            "view:zoom-100" => return "실제 크기",
-            _ => {}
+        if let Some(label) = items_hwp::label(spec.id) {
+            return label;
         }
     } else if kind == MenuKind::Pages {
         match spec.id {

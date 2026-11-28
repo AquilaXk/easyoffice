@@ -73,6 +73,14 @@ export function parseShellToolbarLabels(search: string): boolean | null {
   return null;
 }
 
+/**
+ * Whether the shell draws the menu bar natively (macOS desktop app) and the frame URL says `nativeMenu=1`.
+ * The official menu is one bar, so the editor hides its own then; everywhere else it is the window's menu.
+ */
+export function parseShellNativeMenu(search: string): boolean {
+  return new URLSearchParams(search).get('nativeMenu') === '1';
+}
+
 /** Validates what the shell pushed; anything malformed is dropped rather than applied. */
 export function sanitizeShellContext(raw: unknown): ShellContext {
   const params = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};

@@ -1,11 +1,12 @@
 //! Per-kind menu bar specifications and lookups for macOS (`PD-190`, `PD-334`).
 
+use super::hwp::HWP;
 #[cfg(test)]
 use super::{
-    cf_submenu, sheet_submenu, ALIGN_LINES, BORDER_LINES, CALC_OPTIONS_LINES, CF_LINES,
-    EXPORT_BASE_LINES, EXPORT_BOARD_LINES, EXPORT_DOC_LINES, EXPORT_PDF_LINES, EXPORT_SHEET_LINES,
-    EXPORT_SLIDE_LINES, NEW_DOC_IDS, NUMFMT_LINES, QUIT_ID, SEPARATOR, SLIDE_ALIGN_LINES,
-    THEME_IDS, USE_IN_FORMULA_LINES,
+    cf_submenu, hwp_submenu, sheet_submenu, ALIGN_LINES, BORDER_LINES, CALC_OPTIONS_LINES,
+    CF_LINES, EXPORT_BASE_LINES, EXPORT_BOARD_LINES, EXPORT_DOC_LINES, EXPORT_PDF_LINES,
+    EXPORT_SHEET_LINES, EXPORT_SLIDE_LINES, NEW_DOC_IDS, NUMFMT_LINES, QUIT_ID, SEPARATOR,
+    SLIDE_ALIGN_LINES, THEME_IDS, USE_IN_FORMULA_LINES,
 };
 use super::{
     menu, MenuKind, MenuSpec, ALIGN, APP, BORDER, CALC_OPTIONS, CF, EXPORT_BASE, EXPORT_BOARD,
@@ -14,23 +15,6 @@ use super::{
     WINDOW,
 };
 
-const FILE_HWP: MenuSpec = menu(
-    "파일",
-    &[
-        "file:new",
-        NEW_DOCS,
-        S,
-        "file:open",
-        "file:open-recent",
-        "file:save",
-        "file:save-as",
-        "file:save-as-hwpx",
-        S,
-        "file:page-setup",
-        "file:export-pdf",
-        "file:print",
-    ],
-);
 const FILE_PAGES: MenuSpec = menu(
     "파일",
     &[
@@ -231,27 +215,6 @@ const EDIT_FIND_ONLY: MenuSpec = menu(
     ],
 );
 
-const VIEW_HWP: MenuSpec = menu(
-    "보기",
-    &[
-        "view:zoom-in",
-        "view:zoom-out",
-        "view:zoom-100",
-        S,
-        "view:zoom-fit-page",
-        "view:zoom-fit-width",
-        "view:zoom-dialog",
-        S,
-        THEME,
-        "view:theme-toggle",
-        S,
-        "view:toolbar-labels",
-        "view:form-mode",
-        "view:ctrl-marks",
-        "view:para-marks",
-        "view:doc-grid",
-    ],
-);
 const VIEW_PAGES: MenuSpec = menu(
     "보기",
     &[
@@ -352,20 +315,6 @@ const VIEW_WORKSPACE: MenuSpec = menu(
     ],
 );
 
-const INSERT_HWP: MenuSpec = menu(
-    "입력",
-    &[
-        "insert:shape",
-        "insert:image",
-        S,
-        "insert:footnote",
-        "insert:endnote",
-        "insert:symbol",
-        "insert:link",
-        S,
-        "insert:field",
-    ],
-);
 const INSERT_DOC: MenuSpec = menu(
     "삽입",
     &[
@@ -479,28 +428,6 @@ const FORMAT_PAGES: MenuSpec = menu(
         "format:indent-out",
     ],
 );
-const FORMAT_HWP: MenuSpec = menu(
-    "서식",
-    &[
-        "format:bold",
-        "format:italic",
-        "format:underline",
-        "format:strike",
-        "format:superscript",
-        "format:subscript",
-        S,
-        "format:hwp-char-shape",
-        "format:hwp-para-shape",
-        S,
-        "format:style",
-        "format:justify",
-        S,
-        "format:para-numbering",
-        "format:para-bullet",
-        "format:indent-in",
-        "format:indent-out",
-    ],
-);
 const FORMAT_SLIDE: MenuSpec = menu(
     "서식",
     &[
@@ -544,19 +471,6 @@ const FORMAT_SHEET: MenuSpec = menu(
     ],
 );
 
-const PAGE_HWP: MenuSpec = menu(
-    "쪽",
-    &[
-        "page:paper",
-        S,
-        "page:header",
-        "page:footer",
-        "page:columns",
-        S,
-        "page:hwp-header",
-        "page:manuscript",
-    ],
-);
 const PAGE_DOC: MenuSpec = menu(
     "레이아웃",
     &[
@@ -609,30 +523,6 @@ const TABLE_PAGES: MenuSpec = menu(
     ],
 );
 
-const TABLE_HWP: MenuSpec = menu(
-    "표",
-    &[
-        "table:insert",
-        "table:row-above",
-        "table:add-row",
-        "table:col-left",
-        "table:col-right",
-        "table:row-delete",
-        "table:col-delete",
-        S,
-        "table:cell-select",
-        "table:merge",
-        "table:cell-split",
-        "table:hwp-split",
-        "table:col-equal",
-        S,
-        "table:border-bg",
-        "table:cell-props",
-        S,
-        "table:sum",
-        "table:hwp-border",
-    ],
-);
 const TABLE_DOC: MenuSpec = menu(
     "표",
     &[
@@ -695,22 +585,6 @@ const DATA_SHEET: MenuSpec = menu(
     ],
 );
 
-const TOOL_HWP: MenuSpec = menu(
-    "도구",
-    &[
-        "tool:copilot",
-        "tool:diagnose",
-        "tool:scrub-pii",
-        "tool:review-verify",
-        "tool:bench-run",
-        S,
-        "tool:review-track",
-        "tool:review-comment",
-        "tool:review-stats",
-        S,
-        "tool:palette",
-    ],
-);
 const TOOL_DOC: MenuSpec = menu(
     "도구",
     &[
@@ -807,19 +681,6 @@ const PAGES: [&MenuSpec; 10] = [
     &FORMAT_PAGES,
     &TABLE_PAGES,
     &TOOL_DOC,
-    &WINDOW,
-    &HELP,
-];
-const HWP: [&MenuSpec; 11] = [
-    &APP,
-    &FILE_HWP,
-    &EDIT_FULL,
-    &VIEW_HWP,
-    &INSERT_HWP,
-    &FORMAT_HWP,
-    &PAGE_HWP,
-    &TABLE_HWP,
-    &TOOL_HWP,
     &WINDOW,
     &HELP,
 ];
@@ -934,6 +795,10 @@ pub fn table_ids(kind: MenuKind) -> Vec<&'static str> {
     let mut ids = Vec::new();
     for spec in layout(kind) {
         for line in spec.lines {
+            if let Some(sub) = hwp_submenu(line) {
+                ids.extend(sub.lines.iter().filter(|id| **id != SEPARATOR));
+                continue;
+            }
             match *line {
                 NEW_DOCS => ids.extend(NEW_DOC_IDS),
                 EXPORT_DOC => {

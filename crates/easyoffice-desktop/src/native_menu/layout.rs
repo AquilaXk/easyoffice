@@ -2,17 +2,19 @@
 //!
 //! The page draws one menu row that follows the window's kind (`menu-kinds.js`); the native bar
 //! follows it too: a document, spreadsheet, presentation or PDF window shows only the menus and
-//! items that mean something there, and the Hangul editor window keeps the full bar it always had
-//! (the editor's own commands are in it). Every line is an id of the item table
+//! items that mean something there, and the Hangul editor window has the official 한글 menus with
+//! the editor's own commands (`hwp.rs`, PD-396). Every line is an id of the item table
 //! ([`super::ITEMS`]), a separator or a token of a system item or submenu the builder knows.
 //! The menu bar is data only: `build.rs` turns it into Tauri menus, and the tests read it as it is.
 
 use super::QUIT_ID;
 
 mod bars;
+mod hwp;
 pub use bars::layout;
 #[cfg(test)]
 pub use bars::table_ids;
+pub use hwp::hwp_submenu;
 
 /// The kind of a window as far as its menu bar goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

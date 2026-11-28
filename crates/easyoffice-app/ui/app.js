@@ -202,6 +202,8 @@
     shellShortcuts: workspaceSession.forwardedKeys(),
     onStateChange: () => workspaceSession.applyModuleContext(activeModule),
     canExportPdf: desktopBridge.isAvailable(),
+    // The macOS desktop app draws the one menu bar natively, so the editor hides its own row (PD-396).
+    hasNativeMenu: () => desktopBridge.isAvailable() && activeShortcutModifier === "⌘",
     systemFonts: desktopBridge.isAvailable() ? desktopBridge.systemFonts : null,
   });
 

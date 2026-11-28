@@ -28,6 +28,9 @@ const TITLES = {
   START: ["파일", "편집", "보기", "도구", "도움말"],
   CONV: ["파일", "편집", "보기", "도구", "도움말"],
 };
+// The Hangul window's native bar follows the official menu pages (PD-396): 보안 and 검토 before 도구, 표 last. Its page menu row
+// is hidden behind the editor's own, and the editor's row is the one the native bar stands in for on macOS.
+const NATIVE_TITLES = { HWP: ["파일", "편집", "보기", "입력", "서식", "쪽", "보안", "검토", "도구", "표", "도움말"] };
 
 const shown = (el) => !el.closest("[hidden]");
 const open = async (mod) => {
@@ -176,13 +179,15 @@ test("keyboard navigation between menus skips the menus of other kinds", async (
 
 // ---- the native bar has the same menus per kind ---------------------------------------------------
 
-const TOKENS = { S: "-", NEW_DOCS: "@new-docs", EXPORT_DOC: "@export-doc", EXPORT_HWP: "@export-hwp", EXPORT_SHEET: "@export-sheet", EXPORT_SLIDE: "@export-slide", EXPORT_BASE: "@export-base", EXPORT_BOARD: "@export-board", EXPORT_PDF: "@export-pdf", THEME: "@theme", NUMFMT: "@numfmt", ALIGN: "@align", SLIDE_ALIGN: "@slide-align", BORDER: "@border", CF: "@cf", USE_IN_FORMULA: "@name-use", CALC_OPTIONS: "@calc-options", SHEET_ROW: "@sheet-row", SHEET_COL: "@sheet-col", SHEET_TAB: "@sheet-tab", SHEET_FREEZE: "@sheet-freeze", PASTE: "@paste", SELECT_ALL: "@select-all", SERVICES: "@services", HIDE: "@hide", HIDE_OTHERS: "@hide-others", SHOW_ALL: "@show-all", MINIMIZE: "@minimize", CLOSE_WINDOW: "@close-window", QUIT_ID: "app:quit" };
+const TOKENS = { S: "-", NEW_DOCS: "@new-docs", EXPORT_DOC: "@export-doc", EXPORT_HWP: "@export-hwp", EXPORT_SHEET: "@export-sheet", EXPORT_SLIDE: "@export-slide", EXPORT_BASE: "@export-base", EXPORT_BOARD: "@export-board", EXPORT_PDF: "@export-pdf", THEME: "@theme", NUMFMT: "@numfmt", ALIGN: "@align", SLIDE_ALIGN: "@slide-align", BORDER: "@border", CF: "@cf", USE_IN_FORMULA: "@name-use", CALC_OPTIONS: "@calc-options", SHEET_ROW: "@sheet-row", SHEET_COL: "@sheet-col", SHEET_TAB: "@sheet-tab", SHEET_FREEZE: "@sheet-freeze", HWP_TOOLBOX: "@hwp-toolbox", HWP_OBJECT: "@hwp-object", HWP_CAPTION: "@hwp-caption", HWP_ROTATE: "@hwp-rotate", HWP_HEADER_FOOTER: "@hwp-header-footer", HWP_CELL_BORDER: "@hwp-cell-border", HWP_MANUSCRIPT: "@hwp-manuscript", PASTE: "@paste", SELECT_ALL: "@select-all", SERVICES: "@services", HIDE: "@hide", HIDE_OTHERS: "@hide-others", SHOW_ALL: "@show-all", MINIMIZE: "@minimize", CLOSE_WINDOW: "@close-window", QUIT_ID: "app:quit" };
 
 function readRustLayoutSources() {
   let src = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
-  try {
-    src += "\n" + read("crates/easyoffice-desktop/src/native_menu/layout/bars.rs");
-  } catch {}
+  for (const part of ["bars.rs", "hwp.rs"]) {
+    try {
+      src += "\n" + read(`crates/easyoffice-desktop/src/native_menu/layout/${part}`);
+    } catch {}
+  }
   return src;
 }
 
@@ -236,7 +241,7 @@ test("the native bars list the same menus as the page for every kind", () => {
   assert.deepEqual(Object.keys(layout).sort(byName), [...KINDS].sort(byName));
   for (const kind of KINDS) {
     const titles = layout[kind].map((menu) => menu.title);
-    assert.deepEqual(titles.filter((t) => t !== "EasyOffice" && t !== "윈도우"), TITLES[kind], kind);
+    assert.deepEqual(titles.filter((t) => t !== "EasyOffice" && t !== "윈도우"), NATIVE_TITLES[kind] ?? TITLES[kind], kind);
     assert.equal(titles[0], "EasyOffice");
     assert.equal(titles.at(-2), "윈도우");
   }
@@ -256,7 +261,12 @@ test("the native bar of a document, pages, sheet, slide, PDF, BASE, BOARD, START
 test("the Hangul window's native bar has every command of its page menus", async () => {
   const { document } = await open("HWP");
   await flushAsyncTurns(10);
-  const page = [...shownCommands(document)].map((cmd) => PAGE_OWN[cmd] ?? `studio-cmd:${cmd}`).filter((a) => !EDIT_GROUP.has(a));
+  // The official menus have the dialogs 줄/칸 추가하기 and 줄/칸 지우기 instead of six row and column items, and the engine
+  // benchmark is only in the command search (PD-396): the page's hidden row keeps them, the native bar does not.
+  const NOT_NATIVE = new Set([
+    "table-row-above", "table-add-row", "table-col-left", "table-col-right", "table-row-delete", "table-col-delete", "bench-run",
+  ].map((cmd) => `studio-cmd:${cmd}`));
+  const page = [...shownCommands(document)].map((cmd) => PAGE_OWN[cmd] ?? `studio-cmd:${cmd}`).filter((a) => !EDIT_GROUP.has(a) && !NOT_NATIVE.has(a));
   const native = nativeActions("HWP", rustItems());
   assert.deepEqual(page.filter((a) => !native.has(a)), []);
 });
@@ -294,7 +304,7 @@ const pageRows = (container) => {
 
 // The submenus a menu names by a token (`TokenSubmenu` of layout.rs: the 조건부 서식 ones and the sheet 행, 열, 시트 and 틀 고정 ones) by that token.
 function cfSubmenus() {
-  const src = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
+  const src = readRustLayoutSources();
   const lines = (text) => text.split(",").map((t) => t.trim()).filter(Boolean).map((t) => (t === "SEPARATOR" ? "-" : t.slice(1, -1)));
   const tokenOf = (t) => (t.startsWith('"') ? t.slice(1, -1) : TOKENS[t] ?? assert.fail(`unknown token ${t}`));
   return new Map([...src.matchAll(/TokenSubmenu \{\s*token: ("[^"]+"|\w+),\s*title: "([^"]+)",\s*lines: &\[([\s\S]*?)\],\s*\}/g)].map((m) => [tokenOf(m[1]), { title: m[2], lines: lines(m[3]) }]));

@@ -361,10 +361,14 @@ fn official_korean_labels_separate_doc_and_hwp_and_match_menu_terms() {
     assert!(!doc_page.contains(&"page:paper"));
     assert!(!doc_page.contains(&"page:header"));
     assert!(!doc_page.contains(&"page:footer"));
+    // 머리말 and 꼬리말 are the two lines of the one 머리말/꼬리말 submenu (the official menu has one item).
     let hwp_page = lines_of(MenuKind::Hwp, "쪽");
+    let header_footer =
+        layout::hwp_submenu("@hwp-header-footer").expect("the 머리말/꼬리말 submenu");
     assert!(hwp_page.contains(&"page:paper"));
-    assert!(hwp_page.contains(&"page:header"));
-    assert!(hwp_page.contains(&"page:footer"));
+    assert!(hwp_page.contains(&"@hwp-header-footer"));
+    assert_eq!(header_footer.lines, ["page:header", "page:footer"]);
+    assert!(!hwp_page.contains(&"page:header") && !hwp_page.contains(&"page:footer"));
     assert!(!hwp_page.contains(&"page:doc-paper"));
     assert!(!hwp_page.contains(&"page:doc-header"));
     assert!(!hwp_page.contains(&"page:doc-footer"));
@@ -690,7 +694,7 @@ fn label_for_separates_hwp_and_office_terms_and_all_menus_stay_synced() {
         label_for(MenuKind::Hwp, spec("view:para-marks")),
         "문단 부호"
     );
-    assert_eq!(label_for(MenuKind::Hwp, spec("view:doc-grid")), "격자 설정");
+    assert_eq!(label_for(MenuKind::Hwp, spec("view:doc-grid")), "격자 보기");
     assert_eq!(
         label_for(MenuKind::Hwp, spec("format:justify")),
         "양쪽 정렬"

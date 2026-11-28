@@ -728,20 +728,50 @@ test("the toolbar labels item, command, CSS and manifest agree", () => {
   assert.ok(readText(path.join(REPO, "THIRD_PARTY_NOTICES.md")).includes("src/ui/toolbar-labels.ts"));
 });
 
-test("the 표 menu lists the direct row/column commands upstream registers, Alt+Insert is bound, and 저장 as shows Ctrl+Shift+S", () => {
+test("the 표 menu has the two row/column dialogs, not the six direct commands, and 저장 as shows Ctrl+Shift+S (PD-396)", () => {
   const html = readText(path.join(REPO, "apps/hwp-studio/index.html"));
-  const upstreamTable = path.join(REPO, "third_party/rhwp/rhwp-studio/src/command/commands/table.ts");
-  // The submodule is absent in a plain checkout; the commands are then checked only against the menu.
-  const upstream = fs.existsSync(upstreamTable) ? readText(upstreamTable) : null;
+  // The official menu has 줄/칸 추가하기 (Alt+Insert) and 줄/칸 지우기 (Alt+Delete); the dialogs hold the four and two directions.
   for (const id of ["insert-row-above", "insert-row-below", "insert-col-left", "insert-col-right", "delete-row", "delete-col"]) {
-    if (upstream !== null) assert.ok(upstream.includes(`id: 'table:${id}'`), `upstream registers table:${id}`);
-    assert.ok(html.includes(`data-cmd="table:${id}"`), `the 표 menu lists table:${id}`);
+    assert.ok(!html.includes(`data-cmd="table:${id}"`), `the 표 menu does not list table:${id}`);
   }
-  assert.match(html, /data-cmd="table:insert-col-left">.*?<span class="md-shortcut">Alt\+Insert<\/span>/);
-  assert.ok(html.includes('data-cmd="table:insert-row-col"') && html.includes('data-cmd="table:delete-row-col"'), "the dialog items stay");
+  assert.match(html, /data-cmd="table:insert-row-col">.*?>줄\/칸 추가하기<\/span><span class="md-shortcut">Alt\+Insert<\/span>/);
+  assert.match(html, /data-cmd="table:delete-row-col">.*?>줄\/칸 지우기<\/span><span class="md-shortcut">Alt\+Delete<\/span>/);
   const main = readText(path.join(REPO, "apps/hwp-studio/src/main.ts"));
-  assert.ok(main.includes("defaultShortcuts.push([{ key: 'insert', alt: true }, 'table:insert-col-left']);"));
+  assert.ok(main.includes("applyOfficialShortcuts(defaultShortcuts, registry);"));
   assert.match(html, /data-shell-format="hwp">.*?<span class="md-shortcut">Ctrl\+Shift\+S<\/span>/);
+});
+
+test("official keys: 문자표 is Ctrl+F10, 줄/칸 추가하기 is Alt+Insert, and the chords read Ctrl+K,H and Ctrl+K,E (PD-396)", async () => {
+  const { applyOfficialShortcuts, OFFICIAL_SHORTCUT_LABELS } = await import("../apps/hwp-studio/src/command/official-shortcuts.ts");
+  const shortcuts = [
+    [{ key: "f10", alt: true }, "insert:symbols"],
+    [{ key: "enter", alt: true }, "table:insert-row-col"],
+    [{ key: "delete", alt: true }, "table:delete-row-col"],
+    [{ key: "f10", alt: true }, "view:other"],
+  ];
+  const commands = new Map(Object.keys(OFFICIAL_SHORTCUT_LABELS).map((id) => [id, { id, label: id, shortcutLabel: "old" }]));
+  const registry = { get: (id) => commands.get(id), register: (def) => commands.set(def.id, def) };
+  applyOfficialShortcuts(shortcuts, registry);
+  const keyOf = (id) => shortcuts.filter(([, cmd]) => cmd === id).map(([def]) => def);
+  assert.deepEqual(keyOf("insert:symbols"), [{ key: "f10", ctrl: true }], "Alt+F10 is gone");
+  assert.deepEqual(keyOf("table:insert-row-col"), [{ key: "insert", alt: true }], "Alt+Enter is gone");
+  assert.deepEqual(keyOf("table:delete-row-col"), [{ key: "delete", alt: true }], "Alt+Delete stays");
+  assert.deepEqual(keyOf("view:other"), [{ key: "f10", alt: true }], "another command's key is not touched");
+  assert.deepEqual(
+    Object.fromEntries([...commands].map(([id, def]) => [id, def.shortcutLabel])),
+    { "insert:symbols": "Ctrl+F10", "insert:hyperlink": "Ctrl+K,H", "insert:field": "Ctrl+K,E", "table:insert-row-col": "Alt+Insert" },
+  );
+  // A command the build does not register is skipped, not invented.
+  applyOfficialShortcuts([], { get: () => undefined, register: () => assert.fail("no registration") });
+});
+
+test("the native menu hides the editor's own menu row only when the shell says so (macOS desktop, PD-396)", async () => {
+  const { parseShellNativeMenu } = await import("../apps/hwp-studio/src/embed/shell-menu.ts");
+  assert.equal(parseShellNativeMenu("?nativeMenu=1&theme=dark"), true);
+  for (const search of ["", "?nativeMenu=0", "?nativeMenu=true", "?nativeMenu=", "?theme=dark"]) assert.equal(parseShellNativeMenu(search), false, search);
+  const css = readText(path.join(REPO, "apps/hwp-studio/src/eo-overrides.css"));
+  assert.match(css, /:root\[data-native-menu="true"\] #menu-bar\s*\{\s*display: none;/);
+  assert.ok(readText(path.join(REPO, "apps/hwp-studio/src/main.ts")).includes("dataset.nativeMenu = 'true'"));
 });
 
 test("the 셀 선택 command (table:cell-selection-enter) replays F5 through the editor's keyboard path, only in a table", async () => {

@@ -20,6 +20,12 @@
   --ui-danger-strong: #c42330;
 }
 
+/* The official menu is one bar: when the desktop shell draws the native menu bar (macOS, frame URL `nativeMenu=1`),
+   the editor's own menu row gives way. Windows and Linux have no native bar, so the row stays their menu. */
+:root[data-native-menu="true"] #menu-bar {
+  display: none;
+}
+
 /* "도구 상자 라벨 표시" (보기 menu): adapted from the reference app `styles/toolbar-labels.css` (MIT; see THIRD_PARTY_NOTICES.md).
    The upstream toolbar markup stays as it is; this is only the display preference. */
 :root[data-toolbar-labels="hidden"] #icon-toolbar .tb-label,

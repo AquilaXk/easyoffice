@@ -557,6 +557,7 @@
       if (shellShortcuts.length > 0) query.push("shellKeys=" + encodeURIComponent(shellShortcuts.join(",")));
       if (shellContext.theme !== "system") query.push("theme=" + shellContext.theme);
       if (shellContext.toolbarLabels === false) query.push("toolbarLabels=hidden");
+      if (typeof deps.hasNativeMenu === "function" && deps.hasNativeMenu() === true) query.push("nativeMenu=1");
       el.setAttribute("src", query.length > 0 ? studioSrc + "?" + query.join("&") : studioSrc);
       pane().appendChild(el);
       return el;

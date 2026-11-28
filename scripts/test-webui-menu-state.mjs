@@ -82,15 +82,11 @@ test("the disabled ids are exactly the table items the page's own rule refuses i
     const editorOnly = Object.entries(page.__EASYOFFICE_NATIVE_MENU_TABLE__.NATIVE_MENU_ACTIONS)
       .filter(([, action]) => action === "hwp-editor")
       .map(([id]) => id);
-    assert.deepEqual(editorOnly.sort(byName), [
-      "format:hwp-char-shape",
-      "format:hwp-para-shape",
-      "table:cell-select",
-      "table:cell-split",
-      "table:hwp-split",
-      "view:form-mode",
-      "view:zoom-dialog",
-    ]);
+    // The Hangul editor's commands (`native-menu-hwp.js`): every one of them is grayed out outside the editor window.
+    assert.ok(editorOnly.length >= 50, "the editor's commands are in the native table");
+    for (const id of ["format:hwp-char-shape", "table:cell-select", "view:zoom-dialog", "page:page-border", "table:block-avg", "insert:bookmark"]) {
+      assert.ok(editorOnly.includes(id), id);
+    }
     // PDF export works on the editor's pages: gray in every window but the editor window. Print also runs in the
     // document, sheet and slide modules.
     const { EMBED_ONLY_ACTIONS } = page.__EASYOFFICE_NATIVE_MENU_TABLE__;

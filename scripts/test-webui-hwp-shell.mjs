@@ -13,6 +13,7 @@ const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
 const read = (rel, base = UI_DIR) => readText(fileURLToPath(new URL(rel, base)));
 const HOST_JS = new URL("hwp-host.js", UI_DIR);
 const CHROME_JS = new URL("shell-chrome.js", UI_DIR);
+const HWP_MENU_JS = new URL("native-menu-hwp.js", UI_DIR);
 const ALL_CSS = `${read("styles.css")}\n${read("shell.css")}\n${read("content.css")}\n${read("home.css")}\n${read("menu-bar.css")}\n${read("toolbar.css")}`;
 const OVERLAY = new URL("../apps/hwp-studio/", import.meta.url);
 
@@ -151,6 +152,7 @@ test("forwarded commands run the matching shell action", () => {
   const calls = [];
   const env = { setTimeout, clearTimeout };
   const document = { getElementById: () => null, querySelectorAll: () => [], documentElement: { dataset: {} } };
+  loadUiModule(HWP_MENU_JS, env);
   loadUiModule(CHROME_JS, env);
   let handler = null;
   const chrome = env.__EASYOFFICE_CREATE_SHELL_CHROME__({
@@ -176,10 +178,18 @@ test("overlay 파일·보기·도움말 menus expose shell commands and omit dup
   assert.deepEqual(order, ["new", "open", "save", "save-as", "save-as", "export-pdf", "file:page-setup", "print", "close"]);
   const helpBlock = html.slice(html.indexOf('data-menu="help"'));
   assert.ok(helpBlock.includes('data-shell-cmd="about"'), "help menu holds about");
+  // The official menus have no place for the theme (PD-396): it sits under 환경 설정 in the 도구 menu, not in 보기.
   const viewBlock = html.slice(html.indexOf('data-menu="view"'), html.indexOf('data-menu="insert"'));
+  const toolBlock = html.slice(html.indexOf('data-menu="tool"'), html.indexOf('data-menu="help"'));
   for (const t of ["theme-system", "theme-light", "theme-dark"]) {
-    assert.ok(viewBlock.includes(`data-shell-cmd="${t}"`), `view menu holds ${t}`);
+    assert.ok(!viewBlock.includes(`data-shell-cmd="${t}"`), `view menu has no ${t}`);
+    assert.ok(toolBlock.includes(`data-shell-cmd="${t}"`), `tool menu holds ${t}`);
   }
+  assert.ok(html.indexOf('data-cmd="tool:options"') < html.indexOf('data-shell-cmd="theme-system"'), "the theme follows 환경 설정");
+  // 검토 holds the document history (the official place); the editor's own 편집 menu no longer has it.
+  const reviewBlock = html.slice(html.indexOf('data-menu="review"'), html.indexOf('data-menu="tool"'));
+  assert.ok(reviewBlock.includes('data-cmd="edit:document-history"'));
+  assert.ok(!html.slice(html.indexOf('data-menu="edit"'), html.indexOf('data-menu="view"')).includes("edit:document-history"));
   assert.ok(html.includes('data-shell-cmd="theme-toggle"'), "menubar hosts theme toggle button");
   const ts = read("src/embed/shell-menu.ts", OVERLAY);
   const listed = /SHELL_COMMANDS = \[([^\]]+)\]/.exec(ts)[1].match(/'([^']+)'/g).map((s) => s.slice(1, -1));
@@ -204,6 +214,15 @@ test("the shell theme is passed to the editor at start and follows later changes
   await api.setShellContext({ theme: "<script>" });
   await settle();
   assert.deepEqual(requests.filter((r) => r.method === "setShellContext").slice(1).map((r) => r.params.theme), ["light", "system", "system"]);
+});
+
+test("the frame URL says nativeMenu=1 only when the shell draws the native menu bar, so the editor keeps one menu row (PD-396)", async () => {
+  for (const [hasNativeMenu, expected] of [[() => true, true], [() => false, false], [undefined, false], [() => "yes", false]]) {
+    const { api, frames } = loadHost(undefined, hasNativeMenu === undefined ? {} : { hasNativeMenu });
+    await api.onModuleActivated("HWP");
+    await settle();
+    assert.equal(/[?&]nativeMenu=1(&|$)/.test(frames[0].getAttribute("src")), expected, String(hasNativeMenu));
+  }
 });
 
 test("system theme leaves the frame URL alone, recents travel as id and name only", async () => {

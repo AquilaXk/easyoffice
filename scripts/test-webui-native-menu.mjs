@@ -14,6 +14,7 @@ import { WORD_WEB_ONLY } from "./test-support/word-web-only.mjs";
 const REPO = new URL("../", import.meta.url);
 const read = (rel) => readText(fileURLToPath(new URL(rel, REPO)));
 const CHROME_JS = new URL("crates/easyoffice-app/ui/shell-chrome.js", REPO);
+const HWP_MENU_JS = new URL("crates/easyoffice-app/ui/native-menu-hwp.js", REPO);
 
 function rustItems() {
   const source = read("crates/easyoffice-desktop/src/native_menu/items.rs");
@@ -24,6 +25,7 @@ function rustItems() {
 
 function chromeTable() {
   const env = { setTimeout, clearTimeout };
+  loadUiModule(HWP_MENU_JS, env);
   loadUiModule(CHROME_JS, env);
   return env.__EASYOFFICE_NATIVE_MENU_TABLE__;
 }
@@ -95,12 +97,6 @@ const EXPECTED_EDITOR_COMMANDS = {
   "format:indent-in": "format:level-increase",
   "format:indent-out": "format:level-decrease",
   "table:insert": "table:create",
-  "table:row-above": "table:insert-row-above",
-  "table:add-row": "table:insert-row-below",
-  "table:col-left": "table:insert-col-left",
-  "table:col-right": "table:insert-col-right",
-  "table:row-delete": "table:delete-row",
-  "table:col-delete": "table:delete-col",
   "table:cell-select": "table:cell-selection-enter",
   "table:merge": "table:cell-merge",
   "table:cell-split": "table:cell-split",
@@ -110,7 +106,6 @@ const EXPECTED_EDITOR_COMMANDS = {
   "table:col-equal": "table:cell-width-equal",
   "table:border-bg": "table:border-each",
   "table:cell-props": "table:cell-props",
-  "table:sum": "table:block-formula",
   "table:hwp-border": "table:border-each",
   "edit:undo": "edit:undo",
   "edit:redo": "edit:redo",
@@ -120,23 +115,53 @@ const EXPECTED_EDITOR_COMMANDS = {
   "edit:replace": "edit:find-replace",
 };
 
-test("the native menu ids that reach the Hangul editor map to the reference app's editor command ids", () => {
+// The official 한글 menu pages (PD-396): the commands the native bar adds to those above, each the editor's own command.
+const OFFICIAL_EDITOR_COMMANDS = {
+  "edit:format-copy": "edit:format-copy",
+  "edit:delete": "edit:delete",
+  "edit:find-again": "edit:find-again",
+  "edit:goto": "edit:goto",
+  "view:border-transparent": "view:border-transparent",
+  "view:clip": "view:toggle-clip",
+  "view:grid-settings": "view:grid-settings",
+  "view:toolbox-basic": "view:toolbox-basic",
+  "view:toolbox-format": "view:toolbox-format",
+  "insert:textbox": "insert:textbox",
+  "insert:equation": "insert:equation",
+  "insert:bookmark": "insert:bookmark",
+  "page:break": "page:break",
+  "page:column-break": "page:column-break",
+  "page:page-border": "page:page-border",
+  "page:new-number": "page:new-page-num",
+  "page:section-settings": "page:section-settings",
+  "table:insert-row-col": "table:insert-row-col",
+  "table:delete-row-col": "table:delete-row-col",
+  "table:block-formula": "table:block-formula",
+  "table:sum": "table:block-sum",
+  "table:block-avg": "table:block-avg",
+  "table:block-product": "table:block-product",
+  "tool:options": "tool:options",
+  "tool:review-history": "edit:document-history",
+};
+
+test("the native menu ids that reach the Hangul editor map to the editor's command ids", () => {
   const { EMBED_EDITOR_COMMANDS, NATIVE_MENU_ACTIONS } = chromeTable();
-  assert.deepEqual({ ...EMBED_EDITOR_COMMANDS }, EXPECTED_EDITOR_COMMANDS);
+  for (const [id, command] of Object.entries({ ...EXPECTED_EDITOR_COMMANDS, ...OFFICIAL_EDITOR_COMMANDS })) {
+    assert.equal(EMBED_EDITOR_COMMANDS[id], command, id);
+  }
   const rust = new Map(rustItems().map((r) => [r.id, r]));
-  for (const id of Object.keys(EXPECTED_EDITOR_COMMANDS)) assert.ok(rust.has(id), `${id} is in the Rust table`);
-  // Items that exist only for the editor have no page action of their own: they are the `hwp-editor` ones.
+  for (const id of Object.keys(EMBED_EDITOR_COMMANDS)) assert.ok(rust.has(id), `${id} is in the Rust table`);
+  // Items that exist only for the editor have no page action of their own: they are the `hwp-editor` ones, and each
+  // has its editor command.
   const editorOnly = Object.keys(NATIVE_MENU_ACTIONS).filter((id) => NATIVE_MENU_ACTIONS[id] === "hwp-editor");
-  assert.deepEqual(editorOnly.sort((a, b) => a.localeCompare(b)), [
-    "format:hwp-char-shape",
-    "format:hwp-para-shape",
-    "table:cell-select",
-    "table:cell-split",
-    "table:hwp-split",
-    "view:form-mode",
-    "view:zoom-dialog",
-  ]);
-  assert.equal(rust.get("table:cell-select").accelerator, "CmdOrCtrl+Alt+T");
+  assert.ok(editorOnly.length >= 50, "the editor's commands are in the table");
+  for (const id of editorOnly) assert.ok(Object.hasOwn(EMBED_EDITOR_COMMANDS, id), `${id} has an editor command`);
+  assert.deepEqual(
+    editorOnly.sort((a, b) => a.localeCompare(b)),
+    rustItems().filter((r) => r.action === "hwp-editor").map((r) => r.id).sort((a, b) => a.localeCompare(b)),
+  );
+  // The official Ctrl+Alt+T is 새 탭: 셀 선택 has no key of its own.
+  assert.equal(rust.get("table:cell-select").accelerator, null);
   assert.equal(rust.get("view:zoom-100").accelerator, "CmdOrCtrl+0");
   assert.deepEqual(["table:cell-select", "table:merge", "table:cell-split"].map((id) => rust.get(id).label), ["셀 선택", "셀 합치기", "셀 나누기"]);
 });
@@ -156,7 +181,7 @@ test("the native file menu has PDF export and print with the reference keys, run
   const rust = new Map(rustItems().map((r) => [r.id, r]));
   assert.deepEqual(
     ["file:export-pdf", "file:print"].map((id) => [rust.get(id).label, rust.get(id).accelerator, rust.get(id).action]),
-    [["PDF로 내보내기…", "CmdOrCtrl+E", "hwp-export-pdf"], ["인쇄…", "CmdOrCtrl+P", "print"]],
+    [["PDF로 저장하기", "CmdOrCtrl+E", "hwp-export-pdf"], ["인쇄…", "CmdOrCtrl+P", "print"]],
   );
   const { NATIVE_MENU_ACTIONS, EMBED_ONLY_ACTIONS } = chromeTable();
   assert.equal(NATIVE_MENU_ACTIONS["file:export-pdf"], "hwp-export-pdf");
@@ -377,7 +402,8 @@ test("the native labels of the shared style, paper and justify commands are the 
     assert.ok(native.length > 0, cmd);
     assert.deepEqual([...new Set(pageLabels(cmd))].sort((a, b) => a.localeCompare(b)), [...new Set(native)].sort((a, b) => a.localeCompare(b)), cmd);
   }
-  assert.ok(!rustItems().some((item) => /모양 복사|개체 속성/.test(item.label)));
+  // A name that the page's menu row does not have is only the editor's own command (PD-134, PD-396: 모양 복사, 개체 속성).
+  assert.ok(rustItems().filter((item) => /모양 복사|개체 속성/.test(item.label)).every((item) => item.action === "hwp-editor"));
   // 글자 모양 and 문단 모양 are the Hangul editor's own dialogs (PD-134: a name must do what it says), so they run in the editor only.
   for (const label of ["글자 모양…", "문단 모양…"]) assert.ok(rustItems().some((item) => item.label === label && item.action === "hwp-editor"), label);
 });
