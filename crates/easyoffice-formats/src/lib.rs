@@ -42,6 +42,8 @@ mod odt_rich_writer;
 pub mod office_codecs;
 pub mod ole2_codec;
 mod ooxml_presentation;
+#[cfg(test)]
+mod ooxml_presentation_tests;
 mod ooxml_shared_parts;
 mod open_formula_syntax;
 mod output_compatibility;
@@ -106,8 +108,6 @@ pub mod rich_readers;
 mod rich_rtf_table;
 mod rich_rtf_writer;
 mod rich_run_writers;
-#[cfg(test)]
-mod ooxml_presentation_tests;
 pub mod rich_slide;
 pub mod rich_slide_aspect;
 pub mod rich_slide_ext;
