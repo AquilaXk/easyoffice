@@ -27,7 +27,7 @@ before(async () => {
   const engine = startEngine(APP, port);
   await sleep(800);
   const server = await startUiServer({ enginePort: port, port: port + 1 });
-  const browser = await startBrowser({ chrome: CHROME, debugPort: port + 2, url: `http://127.0.0.1:${port + 1}/?module=SHEET&win=slice4-chrome`, width: 1200, height: 760 });
+  const browser = await startBrowser({ chrome: CHROME, debugPort: port + 2, url: `http://127.0.0.1:${port + 1}/?module=SHEET&win=slice4-chrome`, width: 1300, height: 760 });
   ctx = { engine, server, browser, cdp: browser.cdp };
   await sleep(1000);
 });

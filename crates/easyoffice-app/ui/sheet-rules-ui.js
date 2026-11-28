@@ -870,6 +870,8 @@
       openManager: openConditionalFormatDialog,
     });
     quickUi.bind();
+    // 편집 > 지우기 (`sheet-clear-ui.js`) clears the conditional formats of the selection as 규칙 지우기 > 선택한 셀에서 does.
+    host.__EASYOFFICE_SHEET_CF_RUN__ = (action) => quickUi.run(action);
 
     // The dialogs answer their kind selects from the start, however they get opened.
     bindCfLayout();

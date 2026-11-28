@@ -15,6 +15,7 @@ const INDEX_HTML = UI("index.html");
 // Paragraphs of the tool dialogs that show a result or a status, by id.
 const STATUS_PARAGRAPHS = new Set([
   "smart-stats", "smart-summary-output", "pii-result-text", "security-status-text", "bench-result-box", "pdf-splitmerge-error",
+  "sheet-advfilter-status", "sheet-goalseek-status", "sheet-goalseek-result-text", "sheet-goalseek-result-goal", "sheet-goalseek-result-value", "sheet-cellstyle-status",
   "sheet-cf-status", "sheet-dv-status", "sheet-pivot-status", "sheet-dv-alert-message", "sheet-numfmt-status",
   "sheet-filter-status", "sheet-sort-status", "sheet-tab-delete-message", "sheet-names-status", "sheet-name-edit-status", "sheet-name-paste-status", "sheet-name-delete-message", "sheet-name-create-status",
   "sheet-link-status", "sheet-table-status", "sheet-ts-status", "sheet-dedupe-status", "sheet-slicer-status", "sheet-chart-status",

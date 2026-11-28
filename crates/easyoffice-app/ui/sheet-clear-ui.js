@@ -53,15 +53,15 @@
     };
     const mergesOf = (ranges) => (mergeArea(ranges) ? { clear: mergeArea(ranges), add: [] } : undefined);
 
-    // The conditional formats of the selection go in the step the rules own (the item of 서식 > 조건부 서식 > 규칙 지우기).
-    const clearRules = () => document.querySelector('[data-sheet-cf="clear-selection"]')?.click();
+    // The conditional formats of the selection go in the step the rules own (서식 > 조건부 서식 > 규칙 지우기 > 선택한 셀에서).
+    const clearRules = () => host.__EASYOFFICE_SHEET_CF_RUN__?.("clear-selection");
 
     async function clearFormats() {
       const ranges = selection();
       if (!ranges) return false;
       const edits = entriesIn(ranges, (entry) => Boolean(entry.style)).map(([ref, entry]) => ({ ...keep(ref, entry), style: null }));
       const done = edits.length > 0 || hasMerge(ranges) ? await applyCellEdits(edits, "서식 지우기", undefined, mergesOf(ranges)) : false;
-      clearRules();
+      await clearRules();
       if (!done) say(MESSAGES.nothing);
       return done;
     }
@@ -91,7 +91,7 @@
       const edits = entriesIn(ranges, () => true).map(([ref]) => ({ ref, value: "", formula: "", style: null, link: null }));
       let done = edits.length > 0 || hasMerge(ranges) ? await applyCellEdits(edits, "모두 지우기", undefined, mergesOf(ranges)) : false;
       if ((await getNoteUi()?.deleteNotesIn(ranges)) === true) done = true;
-      clearRules();
+      await clearRules();
       if (!done) say(MESSAGES.nothing);
       return done;
     }

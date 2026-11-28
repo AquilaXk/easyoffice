@@ -65,7 +65,7 @@ const CHARACTER_ICONS = ["icon-ctrl-mark", "icon-para-mark"];
 test("the toolbars are the reference toolbar format: the icon above a label, on the reference sprite", async () => {
   const { document } = await createWorkspaceHarness({ search: "?module=SHEET&win=w-sheet-toolbar" });
   const buttons = [...document.querySelectorAll(TOOLBAR_BUTTONS)];
-  assert.equal(buttons.length, 26 + 11 + 15 + 9 + 3, "document groups (with the 포맷 and 문서 sidebar buttons), the header and footer edit group, sheet groups, slide row (with the 서식 복사 brush, PD-398), PDF row");
+  assert.equal(buttons.length, 26 + 11 + 16 + 9 + 3, "document groups (with the 포맷 and 문서 sidebar buttons), the header and footer edit group, sheet groups (with the 서식 복사 brush, PD-400), slide row (with the 서식 복사 brush, PD-398), PDF row");
   const css = read("toolbar.css");
   for (const button of buttons) {
     const name = button.getAttribute("title");
@@ -83,7 +83,7 @@ test("the toolbars are the reference toolbar format: the icon above a label, on 
     assert.ok(CHARACTER_ICONS.includes(icon) || css.includes(`.${icon} { background-position:`), `${icon} has its cell of the sprite`);
   }
   const shown = buttons.filter((button) => !button.hidden && !button.closest("[hidden]") && button.closest("#icon-toolbar"));
-  assert.equal(shown.length, 24, "the sheet window shows the sheet commands only");
+  assert.equal(shown.length, 25, "the sheet window shows the sheet commands only (with the 서식 복사 brush, PD-400)");
   const rule = rulesFor(css, ["#icon-toolbar .tb-btn"]).map((r) => r.body).join(" ");
   assert.ok(rule.includes("flex-direction: column") && rule.includes("min-width: 44px") && rule.includes("padding: var(--space-1) var(--space-2)"));
   assert.match(css, /\.tb-sprite \{[^}]*width: 18px;[^}]*height: 18px;[^}]*var\(--ui-icon-sprite-url\)/);
