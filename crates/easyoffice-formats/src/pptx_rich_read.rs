@@ -22,7 +22,7 @@ use crate::rich_slide::{
     SlideBox, SlideElement,
 };
 use crate::rich_slide_ext::{charge_background, ElementFx};
-use crate::rich_slide_guides::{read_guides, MAX_VIEW_PROPS_BYTES};
+use crate::rich_slide_guides::read_view_part;
 use crate::rich_slide_table::{scan_spans, DRAWINGML};
 use crate::rtf_xml_helpers::{extract_attr, extract_attr_from_fragment, extract_balanced_elements};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
@@ -820,8 +820,8 @@ pub fn unpack_pptx_rich(bytes: &[u8]) -> Result<RichSlideDeck, EasyOfficeError> 
     )?;
     if let Some(view) = text_of("ppt/viewProps.xml") {
         budget.charge(view.len(), "PPTX 보기 속성")?;
-        (settings.guides, settings.show_guides) = read_guides(view)?;
-        settings.view_props = (view.len() <= MAX_VIEW_PROPS_BYTES).then(|| view.to_string());
+        // A part that is not a well-formed view part gives no guides and is not kept (the deck gets a fresh one).
+        (settings.guides, settings.show_guides, settings.view_props) = read_view_part(view)?;
     }
     let deck = RichSlideDeck {
         title,

@@ -6,12 +6,12 @@ use std::fmt::Write;
 
 use easyoffice_formats::{
     base64_codec, check_guides, check_spans, clean_face, is_valid_src_pad, normalize_hex_color,
-    AnimClass, AnimDir, AnimEffect, AnimStart, ColorScheme, DeckSettings, EasyOfficeError,
-    ElementFx, RichImage, RichImageCrop, SlideAnim, SlideBackground, SlideBullet, SlideDash,
-    SlideDate, SlideExt, SlideFooter, SlideGroup, SlideGuide, SlideNumberStyle, SlideOutline,
-    SlideParaFmt, SlideShadow, StrictJsonValue, TableSpan, XmlSanitizer, COLOR_SCHEME_SLOTS,
+    validate_view_props, AnimClass, AnimDir, AnimEffect, AnimStart, ColorScheme, DeckSettings,
+    EasyOfficeError, ElementFx, RichImage, RichImageCrop, SlideAnim, SlideBackground, SlideBullet,
+    SlideDash, SlideDate, SlideExt, SlideFooter, SlideGroup, SlideGuide, SlideNumberStyle,
+    SlideOutline, SlideParaFmt, SlideShadow, StrictJsonValue, TableSpan, COLOR_SCHEME_SLOTS,
     DEFAULT_ANIM_MS, GUIDE_UNITS_PER_PT, MAX_ADVANCE_MS, MAX_CROP_SIDE, MAX_GUIDE_POS,
-    MAX_SLIDE_ANIMS, MAX_SLIDE_GROUPS, MAX_SLIDE_TOTAL_IMAGE_BYTES, MAX_VIEW_PROPS_BYTES,
+    MAX_SLIDE_ANIMS, MAX_SLIDE_GROUPS, MAX_SLIDE_TOTAL_IMAGE_BYTES,
 };
 
 use crate::convert_structured::{as_array, as_object, field, invalid, opt_str, Budget, JsonObject};
@@ -491,15 +491,11 @@ pub(crate) fn parse_deck_settings(obj: &JsonObject) -> Result<DeckSettings, Easy
         show_guides: flag(obj, "showGuides")?,
         view_props: opt_str(obj, "viewProps")?
             .map(|raw| {
-                // The view part of the opened file, handed back to be written with the guides patched in: it must be
-                // small, safe XML of a view part.
-                if raw.len() > MAX_VIEW_PROPS_BYTES || !raw.contains("<p:viewPr") {
-                    return Err(invalid(
-                        "보기 속성(viewProps)이 올바르지 않거나 너무 큽니다.",
-                    ));
-                }
-                XmlSanitizer::validate_safe_xml(raw)?;
-                Ok(raw.to_string())
+                // The view part of the opened file, handed back to be written with the guides patched in: the check
+                // every door of the part uses (well-formed, one PresentationML `viewPr`, no DOCTYPE, 64 KiB at most).
+                validate_view_props(raw)
+                    .map_err(|e| invalid(format!("보기 속성(viewProps): {e}")))?;
+                Ok::<_, EasyOfficeError>(raw.to_string())
             })
             .transpose()?,
     })

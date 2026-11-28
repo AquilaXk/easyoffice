@@ -75,6 +75,7 @@ mod pptx_shape_read;
 mod pptx_theme_cache;
 mod pptx_theme_color;
 mod pptx_transition;
+mod pptx_view_props;
 mod rich_char_adv;
 mod rich_char_fx;
 mod rich_char_fx_hwpx;
@@ -170,6 +171,7 @@ pub use pdf_highlight::{PdfHighlight, PdfHighlightKind, MAX_HIGHLIGHT_ANNOTATION
 pub use pdf_sheet_rules::{plain_cell_numeric, CellRule, CellShown, SheetShown};
 pub use pdf_slide::encode_slide_pdf;
 pub use pdf_writer::PdfWriteOptions;
+pub use pptx_view_props::validate_view_props;
 pub use rich_char_adv::{
     char_kerning, char_position, char_scale, CharAdvanced, MAX_KERNING_HALF_PT,
     MAX_POSITION_HALF_PT, MAX_SCALE_PERCENT,

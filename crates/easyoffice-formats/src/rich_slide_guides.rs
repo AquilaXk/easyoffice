@@ -3,16 +3,17 @@
 //! Reference implementation (3-step check): (1) no maintained crate reads or writes a PresentationML view part, and the
 //! reference writers named for this work (PptxGenJS, python-pptx) write no guides, so there is no source to take; (2) the
 //! deck settings (`DeckSettings`) and the part helpers of the PPTX package already carry the other deck-wide parts, so the
-//! guides join them; (3) the element names and attributes follow ECMA-376 Part 1 19.2.1.15 (`p:guide`, `orient` `horz` or
+//! guides join them, and the part is read and patched with the `quick-xml` tokenizer the other readers use
+//! (`pptx_view_props.rs`); (3) the element names and attributes follow ECMA-376 Part 1 19.2.1.15 (`p:guide`, `orient` `horz` or
 //! `vert` with `vert` the default, `pos` in 1/8 point, which is what the Korean presentation program writes: the center guides of a 10 in x 7.5 in
 //! slide are `pos="2880"` and `pos="2160"`) and 19.2.1.16 (`p:guideLst` inside `p:cSldViewPr`, whose `showGuides` attribute is
 //! the 안내선 check box). Nothing is copied. Guides are capped in number and position; a part past a limit is refused.
 
 use std::fmt::Write;
 
+use crate::pptx_view_props::{patch, scan, slide_view_fragment};
 use crate::rich_slide::MAX_SLIDE_COORD_PT;
 use crate::rich_slide_ext::DeckSettings;
-use crate::rtf_xml_helpers::{extract_attr_from_fragment, extract_balanced_elements};
 use crate::EasyOfficeError;
 
 pub const MAX_SLIDE_GUIDES: usize = 64;
@@ -61,8 +62,8 @@ pub(crate) fn needs_view_props(settings: &DeckSettings) -> bool {
     settings.show_guides || !settings.guides.is_empty() || settings.view_props.is_some()
 }
 
-/// The `p:guideLst` of the guides, empty when there are none.
-fn guide_list_xml(settings: &DeckSettings) -> String {
+/// The `p:guideLst` of the guides (its elements under the prefix `pp`, `"p:"` or `""`), empty when there are none.
+fn guide_list_xml(settings: &DeckSettings, pp: &str) -> String {
     let mut list = String::new();
     for g in settings
         .guides
@@ -71,160 +72,70 @@ fn guide_list_xml(settings: &DeckSettings) -> String {
         .filter(|g| g.is_valid())
     {
         let orient = if g.vertical { "" } else { " orient=\"horz\"" };
-        let _ = write!(list, "<p:guide{orient} pos=\"{}\"/>", g.pos);
+        let _ = write!(list, "<{pp}guide{orient} pos=\"{}\"/>", g.pos);
     }
     if list.is_empty() {
         list
     } else {
-        format!("<p:guideLst>{list}</p:guideLst>")
+        format!("<{pp}guideLst>{list}</{pp}guideLst>")
     }
-}
-
-/// The index just past the `>` of the start tag that begins at `from` (which holds `<name`), and whether it ends in `/>`.
-fn tag_end(xml: &str, from: usize) -> Option<(usize, bool)> {
-    let close = from + xml[from..].find('>')?;
-    Some((close + 1, xml[..close].ends_with('/')))
-}
-
-/// `p:slideViewPr` of a view part with its guides and `showGuides` replaced and every other element left as it was; `None`
-/// when the part has no shape this can patch (the caller then writes a fresh part).
-fn patch_view_props(raw: &str, settings: &DeckSettings) -> Option<String> {
-    let list = guide_list_xml(settings);
-    let show = if settings.show_guides {
-        " showGuides=\"1\""
-    } else {
-        ""
-    };
-    let fresh_view = |list: &str| {
-        format!("<p:slideViewPr><p:cSldViewPr{show}><p:cViewPr varScale=\"1\"><p:scale><a:sx n=\"100\" d=\"100\"/><a:sy n=\"100\" d=\"100\"/></p:scale><p:origin x=\"0\" y=\"0\"/></p:cViewPr>{list}</p:cSldViewPr></p:slideViewPr>")
-    };
-    let Some(s_open) = raw.find("<p:slideViewPr") else {
-        // No slide view yet: it goes before the views that follow it in the schema order.
-        let at = [
-            "<p:outlineViewPr",
-            "<p:notesTextViewPr",
-            "<p:sorterViewPr",
-            "<p:notesViewPr",
-            "<p:gridSpacing",
-            "<p:extLst",
-        ]
-        .iter()
-        .filter_map(|t| raw.find(t))
-        .min()
-        .or_else(|| raw.find("</p:viewPr>"))?;
-        return Some(format!("{}{}{}", &raw[..at], fresh_view(&list), &raw[at..]));
-    };
-    let (s_body, s_self_closed) = tag_end(raw, s_open)?;
-    if s_self_closed {
-        return Some(format!(
-            "{}{}{}",
-            &raw[..s_open],
-            fresh_view(&list),
-            &raw[s_body..]
-        ));
-    }
-    let s_close = s_body + raw[s_body..].find("</p:slideViewPr>")?;
-    let body = &raw[s_body..s_close];
-    let patched = match body.find("<p:cSldViewPr") {
-        None => format!("<p:cSldViewPr{show}><p:cViewPr varScale=\"1\"><p:scale><a:sx n=\"100\" d=\"100\"/><a:sy n=\"100\" d=\"100\"/></p:scale><p:origin x=\"0\" y=\"0\"/></p:cViewPr>{list}</p:cSldViewPr>{body}"),
-        Some(c_open) => {
-            let (c_body, c_self_closed) = tag_end(body, c_open)?;
-            let start_tag = &body[c_open..c_body];
-            // The start tag without `showGuides`, then with it when the guides are shown.
-            let without = match start_tag.find(" showGuides=\"") {
-                Some(at) => {
-                    let end = at + " showGuides=\"".len() + start_tag[at + " showGuides=\"".len()..].find('"')? + 1;
-                    format!("{}{}", &start_tag[..at], &start_tag[end..])
-                }
-                None => start_tag.to_string(),
-            };
-            let name_end = "<p:cSldViewPr".len();
-            let tag = format!("{}{show}{}", &without[..name_end], &without[name_end..]);
-            if c_self_closed {
-                let open = tag.trim_end_matches("/>").to_string() + ">";
-                format!("{}{open}{list}</p:cSldViewPr>{}", &body[..c_open], &body[c_body..])
-            } else {
-                let c_close = c_body + body[c_body..].find("</p:cSldViewPr>")?;
-                let mut inner = body[c_body..c_close].to_string();
-                if let Some(at) = inner.find("<p:guideLst") {
-                    let (g_body, g_self_closed) = tag_end(&inner, at)?;
-                    let end = if g_self_closed {
-                        g_body
-                    } else {
-                        g_body + inner[g_body..].find("</p:guideLst>")? + "</p:guideLst>".len()
-                    };
-                    inner.replace_range(at..end, "");
-                }
-                // `p:extLst` is the last child of the view, the guides come before it.
-                let at = inner.find("<p:extLst").unwrap_or(inner.len());
-                inner.insert_str(at, &list);
-                format!("{}{tag}{inner}{}", &body[..c_open], &body[c_close..])
-            }
-        }
-    };
-    Some(format!("{}{patched}{}", &raw[..s_body], &raw[s_close..]))
 }
 
 /// `ppt/viewProps.xml` with the guides (and whether they are shown). A deck read from a file keeps the part it came with, so
-/// the other views (normal, outline, notes, sorter, grid) are written back as they were.
+/// the other views (normal, outline, notes, sorter, grid) are written back as they were, but only a part, and a patch of it,
+/// that passes the same check as every other door of the part (`pptx_view_props.rs`); anything else is written fresh.
 pub(crate) fn view_props_xml(settings: &DeckSettings) -> String {
-    if let Some(patched) = settings
-        .view_props
-        .as_deref()
-        .filter(|raw| raw.len() <= MAX_VIEW_PROPS_BYTES)
-        .and_then(|raw| patch_view_props(raw, settings))
-    {
-        return patched;
-    }
-    let show = if settings.show_guides {
-        " showGuides=\"1\""
-    } else {
-        ""
-    };
-    let list = guide_list_xml(settings);
-    format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:viewPr xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"><p:slideViewPr><p:cSldViewPr{show}><p:cViewPr varScale=\"1\"><p:scale><a:sx n=\"100\" d=\"100\"/><a:sy n=\"100\" d=\"100\"/></p:scale><p:origin x=\"0\" y=\"0\"/></p:cViewPr>{list}</p:cSldViewPr></p:slideViewPr></p:viewPr>"
-    )
+    let patched = settings.view_props.as_deref().and_then(|raw| {
+        let found = scan(raw).ok()?;
+        let list = guide_list_xml(settings, &found.prefix);
+        let out = patch(raw, &found, settings.show_guides, &list)?;
+        scan(&out).ok().map(|_| out)
+    });
+    patched.unwrap_or_else(|| {
+        let view = slide_view_fragment("p:", settings.show_guides, &guide_list_xml(settings, "p:"));
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:viewPr xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\">{view}</p:viewPr>"
+        )
+    })
 }
 
-/// The guides and the show flag of a `ppt/viewProps.xml`. A guide past the position limit is dropped and more than
-/// [`MAX_SLIDE_GUIDES`] guides refuse the file.
-pub(crate) fn read_guides(xml: &str) -> Result<(Vec<SlideGuide>, bool), EasyOfficeError> {
-    // Only the guides of the slide view count: the notes view and the others carry guides of their own.
-    let slide_view = extract_balanced_elements(xml, "p:slideViewPr")
-        .into_iter()
-        .next()
-        .map_or("", |(_, body)| body);
-    let show = extract_balanced_elements(slide_view, "p:cSldViewPr")
-        .first()
-        .and_then(|(attrs, _)| extract_attr_from_fragment(attrs, "showGuides"))
-        .is_some_and(|v| v == "1" || v == "true");
-    let found = extract_balanced_elements(slide_view, "p:guide");
-    if found.len() > MAX_SLIDE_GUIDES {
+/// What a view part gives a deck: the guides and the show flag of its slide view, and the part itself when it passes the check
+/// (so a save can write it back patched). A part that fails the check gives neither guides nor a part (the deck then gets a
+/// fresh one); more than [`MAX_SLIDE_GUIDES`] guides refuse the file.
+pub(crate) type ReadView = (Vec<SlideGuide>, bool, Option<String>);
+
+pub(crate) fn read_view_part(xml: &str) -> Result<ReadView, EasyOfficeError> {
+    let Ok(found) = scan(xml) else {
+        return Ok((Vec::new(), false, None));
+    };
+    if found.guides.len() > MAX_SLIDE_GUIDES {
         return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
             "PPTX 안내선 수가 상한({MAX_SLIDE_GUIDES})을 초과했습니다."
         )));
     }
-    let guides = found
-        .iter()
-        .filter_map(|(attrs, _)| {
-            let pos = extract_attr_from_fragment(attrs, "pos")?
-                .trim()
-                .parse::<i32>()
-                .ok()?;
-            let vertical = extract_attr_from_fragment(attrs, "orient") != Some("horz");
-            Some(SlideGuide { vertical, pos }).filter(|g| g.is_valid())
-        })
-        .collect();
-    Ok((guides, show))
+    let show = found
+        .slide
+        .as_ref()
+        .and_then(|s| s.csld.as_ref())
+        .is_some_and(|c| c.show);
+    let guides = found.guides.into_iter().filter(|g| g.is_valid()).collect();
+    Ok((guides, show, Some(xml.to_string())))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pptx_view_props::validate_view_props;
+
+    const NS: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
 
     fn guide(vertical: bool, pos: i32) -> SlideGuide {
         SlideGuide { vertical, pos }
+    }
+
+    fn read(xml: &str) -> (Vec<SlideGuide>, bool) {
+        let (guides, show, _) = read_view_part(xml).unwrap();
+        (guides, show)
     }
 
     #[test]
@@ -236,20 +147,22 @@ mod tests {
         };
         let xml = view_props_xml(&settings);
         assert!(xml.contains("<p:guide pos=\"2880\"/><p:guide orient=\"horz\" pos=\"2160\"/>"));
-        assert_eq!(read_guides(&xml).unwrap(), (settings.guides, true));
+        validate_view_props(&xml).unwrap();
+        assert_eq!(read(&xml), (settings.guides, true));
     }
 
-    const FILE_VIEW: &str = "<?xml version=\"1.0\"?><p:viewPr xmlns:p=\"p\"><p:normalViewPr><p:restoredLeft sz=\"15620\"/></p:normalViewPr><p:slideViewPr><p:cSldViewPr snapToGrid=\"0\" showGuides=\"1\"><p:cViewPr varScale=\"1\"><p:scale><a:sx n=\"1\" d=\"1\"/></p:scale></p:cViewPr><p:guideLst><p:guide pos=\"10\"/></p:guideLst><p:extLst/></p:cSldViewPr></p:slideViewPr><p:notesViewPr><p:cSldViewPr><p:cViewPr/><p:guideLst><p:guide orient=\"horz\" pos=\"99\"/></p:guideLst></p:cSldViewPr></p:notesViewPr><p:gridSpacing cx=\"72008\" cy=\"72008\"/></p:viewPr>";
+    const FILE_VIEW: &str = "<?xml version=\"1.0\"?><p:viewPr xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"><p:normalViewPr><p:restoredLeft sz=\"15620\"/></p:normalViewPr><p:slideViewPr><p:cSldViewPr snapToGrid=\"0\" showGuides=\"1\"><p:cViewPr varScale=\"1\"><p:scale><a:sx n=\"1\" d=\"1\"/></p:scale></p:cViewPr><p:guideLst><p:guide pos=\"10\"/></p:guideLst><p:extLst/></p:cSldViewPr></p:slideViewPr><p:notesViewPr><p:cSldViewPr><p:cViewPr/><p:guideLst><p:guide orient=\"horz\" pos=\"99\"/></p:guideLst></p:cSldViewPr></p:notesViewPr><p:gridSpacing cx=\"72008\" cy=\"72008\"/></p:viewPr>";
 
     #[test]
     fn only_the_guides_of_the_slide_view_are_read() {
-        let (guides, show) = read_guides(FILE_VIEW).unwrap();
+        let (guides, show, kept) = read_view_part(FILE_VIEW).unwrap();
         assert_eq!(
             guides,
             vec![guide(true, 10)],
             "the notes view's guide is not a slide guide"
         );
         assert!(show);
+        assert_eq!(kept.as_deref(), Some(FILE_VIEW));
     }
 
     #[test]
@@ -273,43 +186,165 @@ mod tests {
         assert!(xml.contains("<p:guideLst><p:guide orient=\"horz\" pos=\"160\"/><p:guide pos=\"8\"/></p:guideLst><p:extLst/>"));
         assert!(!xml.contains("pos=\"10\""), "the old slide guide is gone");
         assert!(!xml.contains("showGuides"), "hidden guides drop the flag");
-        assert_eq!(read_guides(&xml).unwrap(), (settings.guides.clone(), false));
-        // Without guides the list goes and the rest stays; a part with no slide view gets one.
+        assert_eq!(read(&xml), (settings.guides.clone(), false));
+        // Without guides the list goes and the rest stays.
         let none = DeckSettings {
             view_props: Some(FILE_VIEW.to_string()),
             ..DeckSettings::default()
         };
-        assert!(
-            !view_props_xml(&none).contains("pos=\"10\"")
-                && view_props_xml(&none).contains("pos=\"99\"")
-        );
-        let no_slide = DeckSettings {
-            guides: vec![guide(true, 8)],
-            view_props: Some("<p:viewPr><p:notesViewPr/></p:viewPr>".to_string()),
+        let xml = view_props_xml(&none);
+        assert!(!xml.contains("pos=\"10\"") && xml.contains("pos=\"99\""));
+    }
+
+    #[test]
+    fn a_part_without_a_slide_view_or_with_empty_pieces_is_patched_in_place() {
+        let list = |g: Vec<SlideGuide>| DeckSettings {
+            guides: g,
+            show_guides: true,
             ..DeckSettings::default()
         };
-        let xml = view_props_xml(&no_slide);
+        let with = |raw: &str, g: Vec<SlideGuide>| {
+            let mut s = list(g);
+            s.view_props = Some(raw.to_string());
+            view_props_xml(&s)
+        };
+        let no_slide = format!("<p:viewPr xmlns:p=\"{NS}\"><p:notesViewPr/><p:gridSpacing cx=\"1\" cy=\"1\"/></p:viewPr>");
+        let xml = with(&no_slide, vec![guide(true, 8)]);
         assert!(xml.contains("<p:guide pos=\"8\"/>") && xml.contains("<p:notesViewPr/>"));
         assert!(xml.find("<p:slideViewPr").unwrap() < xml.find("<p:notesViewPr").unwrap());
-        let broken = DeckSettings {
-            view_props: Some("<p:viewPr><p:slideViewPr>".to_string()),
-            ..DeckSettings::default()
-        };
-        assert!(
-            view_props_xml(&broken).contains("<p:viewPr "),
-            "a torn part is replaced by a fresh one"
+        assert_eq!(read(&xml), (vec![guide(true, 8)], true));
+        let root_empty = format!("<p:viewPr xmlns:p=\"{NS}\"/>");
+        assert_eq!(
+            read(&with(&root_empty, vec![guide(true, 8)])),
+            (vec![guide(true, 8)], true)
+        );
+        let slide_empty =
+            format!("<p:viewPr xmlns:p=\"{NS}\"><p:slideViewPr/><p:notesViewPr/></p:viewPr>");
+        let xml = with(&slide_empty, vec![guide(false, 16)]);
+        assert!(xml.contains("<p:notesViewPr/>"));
+        assert_eq!(read(&xml), (vec![guide(false, 16)], true));
+        let csld_empty = format!("<p:viewPr xmlns:p=\"{NS}\"><p:slideViewPr><p:cSldViewPr snapToGrid=\"0\"/></p:slideViewPr></p:viewPr>");
+        let xml = with(&csld_empty, vec![guide(true, 24)]);
+        assert!(xml.contains("snapToGrid=\"0\" showGuides=\"1\">"), "{xml}");
+        assert_eq!(read(&xml), (vec![guide(true, 24)], true));
+        let no_csld =
+            format!("<p:viewPr xmlns:p=\"{NS}\"><p:slideViewPr></p:slideViewPr></p:viewPr>");
+        assert_eq!(
+            read(&with(&no_csld, vec![guide(true, 32)])),
+            (vec![guide(true, 32)], true)
         );
     }
 
     #[test]
+    fn the_patch_follows_the_markup_not_the_text() {
+        // A comment, a single-quoted attribute, a `>` inside an attribute value, a default namespace and a prefix of its own.
+        let tricky = format!(
+            "<?xml version='1.0' encoding='utf-8'?>\n<!-- <p:slideViewPr><p:guideLst><p:guide pos=\"1\"/></p:guideLst> -->\n<v:viewPr xmlns:v='{NS}' note='a > b'><v:slideViewPr><!-- <v:guideLst/> --><v:cSldViewPr note=\"x>y\" showGuides='1' snap='a&amp;b'><v:cViewPr/><v:guideLst><v:guide pos='7'/></v:guideLst></v:cSldViewPr></v:slideViewPr><v:notesViewPr><v:cSldViewPr><v:guideLst><v:guide pos='55'/></v:guideLst></v:cSldViewPr></v:notesViewPr></v:viewPr>\n"
+        );
+        let (guides, show, kept) = read_view_part(&tricky).unwrap();
+        assert_eq!((guides, show), (vec![guide(true, 7)], true));
+        assert!(kept.is_some());
+        let settings = DeckSettings {
+            guides: vec![guide(false, 40)],
+            show_guides: false,
+            view_props: Some(tricky.clone()),
+            ..DeckSettings::default()
+        };
+        let xml = view_props_xml(&settings);
+        assert!(xml.starts_with("<?xml version='1.0' encoding='utf-8'?>\n<!-- <p:slideViewPr>"));
+        assert!(
+            xml.contains(
+                "<v:guideLst><v:guide orient=\"horz\" pos=\"40\"/></v:guideLst></v:cSldViewPr>"
+            ),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("note=\"x&gt;y\"") && xml.contains("snap=\"a&amp;b\""),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<v:guide pos='55'/>")
+                && xml.contains("note='a > b'")
+                && xml.contains("<!-- <v:guideLst/> -->")
+        );
+        assert!(!xml.contains("showGuides"));
+        assert_eq!(read(&xml), (vec![guide(false, 40)], false));
+    }
+
+    #[test]
+    fn hostile_view_parts_fail_the_check_everywhere() {
+        let ok = format!("<p:viewPr xmlns:p=\"{NS}\"><p:slideViewPr/></p:viewPr>");
+        validate_view_props(&ok).unwrap();
+        validate_view_props(&format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<viewPr xmlns=\"{NS}\"/>\n"
+        ))
+        .unwrap();
+        validate_view_props(&format!("<a:viewPr xmlns:a='{NS}'><a:x/></a:viewPr> \n\t")).unwrap();
+        let big = format!(
+            "<p:viewPr xmlns:p=\"{NS}\">{}</p:viewPr>",
+            " ".repeat(MAX_VIEW_PROPS_BYTES)
+        );
+        let hostile = [
+            format!("<!DOCTYPE x><viewPr xmlns=\"{NS}\"/>"),
+            format!("<!DOCTYPE x [<!ENTITY e \"v\">]><p:viewPr xmlns:p=\"{NS}\">&e;</p:viewPr>"),
+            format!("<p:viewPr xmlns:p=\"{NS}\"><p:slideViewPr>"),
+            format!("<p:viewPr xmlns:p=\"{NS}\"><p:a></p:b></p:viewPr>"),
+            format!("<p:viewPr xmlns:p=\"{NS}\"></p:viewPr>tail"),
+            format!("<p:viewPr xmlns:p=\"{NS}\"/><p:viewPr xmlns:p=\"{NS}\"/>"),
+            format!("<p:viewPr xmlns:p=\"{NS}\"/><!-- later -->"),
+            format!("<p:viewPr xmlns:p=\"{NS}\"/><?pi x?>"),
+            format!("<?xml version=\"1.0\" encoding=\"UTF-16\"?><p:viewPr xmlns:p=\"{NS}\"/>"),
+            format!("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><p:viewPr xmlns:p=\"{NS}\"/>"),
+            format!(" <?xml version=\"1.0\"?><p:viewPr xmlns:p=\"{NS}\"/>"),
+            format!("<?xml-stylesheet href=\"x\"?><p:viewPr xmlns:p=\"{NS}\"/>"),
+            format!("<p:viewPr xmlns:p=\"{NS}\"><?pi x?></p:viewPr>"),
+            format!("<!-- <p:viewPr xmlns:p=\"{NS}\"> -->"),
+            format!("x<p:viewPr xmlns:p=\"{NS}\"/>"),
+            "<p:viewPr xmlns:p=\"urn:other\"/>".to_string(),
+            "<p:viewPr/>".to_string(),
+            format!("<p:other xmlns:p=\"{NS}\"/>"),
+            format!("<q:viewPr xmlns:p=\"{NS}\"/>"),
+            format!("<p:viewPr xmlns:p=\"{NS}\"><p:x xmlns:p=\"urn:other\"/></p:viewPr>"),
+            format!("<viewPr xmlns=\"{NS}\"><x xmlns=\"urn:other\"/></viewPr>"),
+            format!("<p:viewPr xmlns:p=\"{NS}\">&bogus;</p:viewPr>"),
+            format!("<p:viewPr xmlns:p=\"{NS}\" a=\"1\" a=\"2\"/>"),
+            String::new(),
+            big,
+        ];
+        for xml in &hostile {
+            assert!(
+                validate_view_props(xml).is_err(),
+                "{}",
+                &xml[..xml.len().min(70)]
+            );
+            // A part the reader cannot keep gives no guides and no part, and the writer sets a fresh one in its place.
+            let (guides, _, kept) = read_view_part(xml).unwrap();
+            assert!(guides.is_empty() && kept.is_none());
+            let settings = DeckSettings {
+                guides: vec![guide(true, 8)],
+                view_props: Some(xml.clone()),
+                ..DeckSettings::default()
+            };
+            let written = view_props_xml(&settings);
+            validate_view_props(&written).unwrap();
+            assert_eq!(
+                read(&written),
+                (vec![guide(true, 8)], false),
+                "{}",
+                &xml[..xml.len().min(70)]
+            );
+        }
+    }
+
+    #[test]
     fn hostile_guide_lists_are_cut_or_refused() {
-        let far = "<p:viewPr><p:slideViewPr><p:cSldViewPr><p:guideLst><p:guide pos=\"99999999\"/><p:guide pos=\"x\"/><p:guide pos=\"80\"/></p:guideLst></p:cSldViewPr></p:slideViewPr></p:viewPr>";
-        assert_eq!(read_guides(far).unwrap().0, vec![guide(true, 80)]);
+        let far = format!("<p:viewPr xmlns:p=\"{NS}\"><p:slideViewPr><p:cSldViewPr><p:guideLst><p:guide pos=\"99999999\"/><p:guide pos=\"x\"/><p:guide pos=\"80\"/></p:guideLst></p:cSldViewPr></p:slideViewPr></p:viewPr>");
+        assert_eq!(read(&far).0, vec![guide(true, 80)]);
         let many = format!(
-            "<p:viewPr><p:slideViewPr><p:cSldViewPr><p:guideLst>{}</p:guideLst></p:cSldViewPr></p:slideViewPr></p:viewPr>",
+            "<p:viewPr xmlns:p=\"{NS}\"><p:slideViewPr><p:cSldViewPr><p:guideLst>{}</p:guideLst></p:cSldViewPr></p:slideViewPr></p:viewPr>",
             "<p:guide pos=\"8\"/>".repeat(MAX_SLIDE_GUIDES + 1)
         );
-        assert!(read_guides(&many).is_err());
+        assert!(read_view_part(&many).is_err());
         assert!(check_guides(&vec![guide(true, 0); MAX_SLIDE_GUIDES + 1]).is_err());
         assert!(check_guides(&[guide(true, MAX_GUIDE_POS + 1)]).is_err());
     }

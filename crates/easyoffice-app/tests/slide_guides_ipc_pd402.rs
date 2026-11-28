@@ -146,6 +146,94 @@ fn a_file_view_part_keeps_its_other_views_through_a_save() {
     }
 }
 
+fn with_view_part(view: &str) -> Vec<u8> {
+    let first = converted(&save_req(
+        r#""showGuides":true,"guides":[{"orient":"vert","posPt":1}],"#,
+    ));
+    let entries = ZipArchiveCodec::unpack(&first, &ZipSecurityPolicy::default()).unwrap();
+    let edited: Vec<(String, Vec<u8>)> = entries
+        .into_iter()
+        .map(|e| {
+            if e.path == "ppt/viewProps.xml" {
+                (e.path, view.as_bytes().to_vec())
+            } else {
+                (e.path, e.data)
+            }
+        })
+        .collect();
+    ZipArchiveCodec::pack(&edited).unwrap()
+}
+
+fn decoded(file: &[u8]) -> StrictJsonValue {
+    let dec = EasyOfficeIpcRouter::dispatch(
+        "convert_document_format",
+        &format!(
+            r#"{{"action":"decode","fileName":"g.pptx","sourceBase64":"{}"}}"#,
+            EasyOfficeIpcRouter::encode_base64(file)
+        ),
+    )
+    .unwrap();
+    StrictJsonValue::parse(&dec).unwrap()
+}
+
+#[test]
+fn a_default_namespace_part_opens_and_saves_and_a_part_that_fails_the_check_is_not_kept() {
+    // The default namespace and a single-quoted attribute open and save: what the reader keeps the JSON door takes.
+    let default_ns = r#"<?xml version="1.0" encoding="UTF-8"?><viewPr xmlns="http://schemas.openxmlformats.org/presentationml/2006/main"><slideViewPr><cSldViewPr showGuides='1'><guideLst><guide pos="10"/></guideLst></cSldViewPr></slideViewPr><notesViewPr/></viewPr>"#;
+    let value = decoded(&with_view_part(default_ns));
+    let obj = value.as_object().unwrap();
+    assert_eq!(field(obj, "guides").as_array().unwrap().len(), 1);
+    let raw = field(obj, "viewProps").as_str().unwrap().to_string();
+    assert_eq!(raw, default_ns);
+    let escaped = raw.replace('"', "\\\"");
+    let saved = converted(&save_req(&format!(
+        r#""showGuides":true,"viewProps":"{escaped}","guides":[{{"orient":"horz","posPt":20}}],"#
+    )));
+    let xml = view_part(&saved);
+    assert!(
+        xml.contains(r#"<guideLst><guide orient="horz" pos="160"/></guideLst>"#),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("<notesViewPr/>") && xml.starts_with("<?xml"),
+        "{xml}"
+    );
+
+    // A DOCTYPE in any part of a package refuses the whole file before the view part is looked at (the archive check).
+    let doctype = with_view_part(
+        "<!DOCTYPE v><viewPr xmlns=\"http://schemas.openxmlformats.org/presentationml/2006/main\"/>",
+    );
+    let refused = EasyOfficeIpcRouter::dispatch(
+        "convert_document_format",
+        &format!(
+            r#"{{"action":"decode","fileName":"g.pptx","sourceBase64":"{}"}}"#,
+            EasyOfficeIpcRouter::encode_base64(&doctype)
+        ),
+    );
+    assert!(refused.is_err());
+
+    // A tail, another encoding and an unclosed tag: the file opens, no part and no guides come back, and a save
+    // writes a fresh part with the guides of the deck.
+    let ns = "xmlns=\"http://schemas.openxmlformats.org/presentationml/2006/main\"";
+    for bad in [
+        format!("<viewPr {ns}/>tail"),
+        format!("<?xml version=\"1.0\" encoding=\"UTF-16\"?><viewPr {ns}/>"),
+        format!("<viewPr {ns}><slideViewPr>"),
+    ] {
+        let value = decoded(&with_view_part(&bad));
+        let obj = value.as_object().unwrap();
+        assert!(
+            StrictJsonValue::get_field(obj, "viewProps").is_none(),
+            "{bad}"
+        );
+        assert!(StrictJsonValue::get_field(obj, "guides").is_none(), "{bad}");
+        let saved = converted(&save_req(
+            r#""showGuides":true,"guides":[{"orient":"vert","posPt":2}],"#,
+        ));
+        assert!(view_part(&saved).contains(r#"<p:guide pos="16"/>"#));
+    }
+}
+
 #[test]
 fn hostile_guides_refuse_the_save() {
     let many = (0..65)
