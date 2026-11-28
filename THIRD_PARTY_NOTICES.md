@@ -559,7 +559,7 @@ SOFTWARE.
 
 ## PptxGenJS (MIT)
 
-Source: https://github.com/gitbrent/PptxGenJS (`src/gen-xml.ts`, `src/gen-objects.ts`; Copyright (c) 2015-present Brent Ely). Nothing is vendored or linked. `crates/easyoffice-formats/src/pptx_ext_write.rs` and `crates/easyoffice-app/ui/slide-fx.js` follow its unit conventions and element shapes for slide extensions: rotation and angles in 60000ths of a degree, shadow blur and distance in EMU, shadow opacity in 1000ths of a percent, `spcPct` line spacing, `p:bg`, `a:outerShdw`, `a:buChar` and `a:buAutoNum`. It has no animation writer, so the `p:timing` skeleton is written to ECMA-376 19.5 instead.
+Source: https://github.com/gitbrent/PptxGenJS (`src/gen-xml.ts`, `src/gen-objects.ts`; Copyright (c) 2015-present Brent Ely). Nothing is vendored or linked. `crates/easyoffice-formats/src/pptx_ext_write.rs` and `crates/easyoffice-app/ui/slide-fx.js` follow its unit conventions and element shapes for slide extensions: rotation and angles in 60000ths of a degree, shadow blur and distance in EMU, shadow opacity in 1000ths of a percent, `spcPct` line spacing, `p:bg`, `a:outerShdw`, `a:buChar` and `a:buAutoNum`. It has no animation writer, so the `p:timing` skeleton is written to ECMA-376 19.5 instead. PD-398 follows its element names and attribute values for slide transitions (`p:transition`, `src/gen-xml.ts`) in `crates/easyoffice-formats/src/pptx_transition.rs` and its theme part (`a:clrScheme` slot order) in `pptx_deck_settings.rs`; nothing is copied.
 
 ```
 The MIT License (MIT)
@@ -588,6 +588,8 @@ SOFTWARE.
 ## reveal.js (MIT)
 
 Source: https://github.com/hakimel/reveal.js (`js/controllers/fragments.js`; Copyright (c) 2011-2024 Hakim El Hattab, http://hakim.se). Nothing is vendored or linked. `crates/easyoffice-app/ui/slide-show-anim.js` follows its stepping model for animations in the slide show: one step per "next", one step taken back per "previous", an element hidden until its step. The effects are Web Animations, and the steps follow the start modes of the file formats.
+
+PD-398 follows three more parts at commit e240e175232fa2de660a02bc0d7bf5f655b159bb (Copyright (C) 2011-2025 Hakim El Hattab): `js/controllers/overview.js` lines 98-135 and 230-253 (the cell scale `max(vmin / 5, 150) / vmin` and "a click leaves the overview and shows that slide") in `crates/easyoffice-app/ui/slide-overview.js`; `js/reveal.js` lines 2328-2398 (`cueAutoSlide`: the slide's own wait, no timer after the last slide unless `loop`) in `crates/easyoffice-app/ui/slide-show-timing.js`; `css/reveal.scss` lines 831-848 (slide), 896-916 (zoom) and 1068-1074 (fade) for the slide transition styles in `crates/easyoffice-app/ui/styles.css`. No code is copied: the structure, the constants and the formulas are followed.
 
 ```
 Copyright (C) 2011-2024 Hakim El Hattab, http://hakim.se, and reveal.js contributors
