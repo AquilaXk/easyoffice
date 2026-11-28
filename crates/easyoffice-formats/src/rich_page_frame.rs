@@ -128,7 +128,9 @@ pub(crate) fn page_text_width_twips(frame: &crate::RichPageFrame) -> usize {
     let margins = frame.margins.unwrap_or(RichPageMargins::DOC_DEFAULT);
     let side_gutter = match frame.binding.kind {
         RichBindingKind::Top => 0,
-        RichBindingKind::Single | RichBindingKind::Duplex => frame.binding.gutter,
+        RichBindingKind::Single | RichBindingKind::Duplex | RichBindingKind::BookFold => {
+            frame.binding.gutter
+        }
     };
     paper
         .width
@@ -147,7 +149,7 @@ pub(crate) fn docx_settings(
 ) -> (String, String, String) {
     let mut flags = String::new();
     match binding.kind {
-        RichBindingKind::Single => {}
+        RichBindingKind::Single | RichBindingKind::BookFold => {}
         RichBindingKind::Duplex => flags.push_str("<w:mirrorMargins/>"),
         RichBindingKind::Top => flags.push_str("<w:gutterAtTop/>"),
     }
@@ -157,6 +159,10 @@ pub(crate) fn docx_settings(
     flags.push_str(&format!("<w:defaultTabStop w:val=\"{tab_stop_twips}\"/>"));
     if even_odd_different {
         flags.push_str("<w:evenAndOddHeaders/>");
+    }
+    // `bookFoldPrinting` follows `evenAndOddHeaders` in `CT_Settings`.
+    if binding.kind == RichBindingKind::BookFold {
+        flags.push_str("<w:bookFoldPrinting/>");
     }
     let xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:settings xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">{flags}</w:settings>"
@@ -447,7 +453,10 @@ pub(crate) fn odt_master_page(inp: OdtMasterInput<'_>) -> (String, String) {
     } else {
         (m.bottom, 0)
     };
-    let usage = if inp.binding.kind == RichBindingKind::Duplex {
+    let usage = if matches!(
+        inp.binding.kind,
+        RichBindingKind::Duplex | RichBindingKind::BookFold
+    ) {
         " style:page-usage=\"mirrored\""
     } else {
         ""

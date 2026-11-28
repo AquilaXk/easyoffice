@@ -15,6 +15,8 @@ pub(crate) struct DocxSettings {
     pub(crate) even_and_odd_headers: bool,
     pub(crate) mirror_margins: bool,
     pub(crate) gutter_at_top: bool,
+    /// `w:bookFoldPrinting`: the pages are printed as a folded booklet.
+    pub(crate) book_fold: bool,
     pub(crate) track_revisions: bool,
     /// `w:defaultTabStop`, in twips.
     pub(crate) default_tab_stop: Option<u32>,
@@ -53,6 +55,7 @@ pub(super) fn read_word_settings(settings: Option<&str>) -> Result<DocxSettings,
                 "w:evenAndOddHeaders" => s.even_and_odd_headers = on,
                 "w:mirrorMargins" => s.mirror_margins = on,
                 "w:gutterAtTop" => s.gutter_at_top = on,
+                "w:bookFoldPrinting" => s.book_fold = on,
                 "w:trackRevisions" => s.track_revisions = on,
                 "w:defaultTabStop" => {
                     s.default_tab_stop = attr(&attrs, "w:val").and_then(|v| v.trim().parse().ok());

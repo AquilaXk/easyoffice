@@ -81,6 +81,7 @@ mod rich_list_writers;
 mod rich_markdown_writer;
 pub mod rich_notes;
 mod rich_page_frame;
+mod rich_page_setup;
 mod rich_read_hwpx;
 mod rich_read_images;
 mod rich_read_numbering;

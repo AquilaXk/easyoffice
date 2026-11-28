@@ -33,9 +33,11 @@
   // The binding (제본) follows the eight values when it is not the default: its gutter in twips and its kind (0 한쪽, 1 맞쪽,
   // 2 위로, the engine's `RichBindingKind`). A page bound at the top takes its gutter from the height, the others from the width.
   const BINDING_KEYS = ["gutter", "binding"];
-  const BINDING_KINDS = ["single", "duplex", "top"];
+  const BINDING_KINDS = ["single", "duplex", "top", "bookfold"];
   const DUPLEX_BINDING = 1;
   const TOP_BINDING = 2;
+  // 책 접기 (DOCX `w:bookFoldPrinting`): the pages are a folded booklet; Word turns the page to landscape for it.
+  const BOOKFOLD_BINDING = 3;
   // The new-document margins of a page without a setup (`RichPageMargins::DOC_DEFAULT` / `HWP_DEFAULT`).
   const DEFAULT_SIDE = { top: 1701, bottom: 1440, left: 1440, right: 1440, header: 851, footer: 992 };
   const HWP_DEFAULT_SIDE = { top: 1984, bottom: 1701, left: 1701, right: 1701, header: 1134, footer: 850 };
@@ -66,7 +68,7 @@
   function parse(text) {
     const parts = String(text ?? "").split(",").map(Number);
     if (parts.length !== KEYS.length && parts.length !== KEYS.length + BINDING_KEYS.length) return null;
-    if (!parts.every((v, i) => Number.isInteger(v) && v >= 0 && v <= (i === KEYS.length + 1 ? TOP_BINDING : MAX_TWIPS))) return null;
+    if (!parts.every((v, i) => Number.isInteger(v) && v >= 0 && v <= (i === KEYS.length + 1 ? BOOKFOLD_BINDING : MAX_TWIPS))) return null;
     return Object.fromEntries([...KEYS, ...BINDING_KEYS].map((key, i) => [key, parts[i] ?? 0]));
   }
 
@@ -253,7 +255,8 @@
     function bindingNow() {
       if (isHwp()) return BINDING_IDS.findIndex((id) => kit.checked(id));
       if (isPages()) return kit.checked("doc-ps-facing") ? DUPLEX_BINDING : 0;
-      return kit.val("doc-ps-multi") === String(DUPLEX_BINDING) ? DUPLEX_BINDING : Number(kit.val("doc-ps-gutter-pos")) || 0;
+      const multi = Number(kit.val("doc-ps-multi"));
+      return multi === DUPLEX_BINDING || multi === BOOKFOLD_BINDING ? multi : Number(kit.val("doc-ps-gutter-pos")) || 0;
     }
 
     function readFields() {
@@ -277,7 +280,7 @@
     // Facing pages (맞쪽, 여백 미러, 페이지 마주보기) name the side margins 안쪽 and 바깥쪽; Word keeps its position box off then.
     function markBinding() {
       for (const id of BINDING_IDS) byId(id)?.closest(".icon-radio-card")?.classList.toggle("selected", kit.checked(id));
-      const facing = !isHwp() && bindingNow() === DUPLEX_BINDING;
+      const facing = !isHwp() && [DUPLEX_BINDING, BOOKFOLD_BINDING].includes(bindingNow());
       setTxt("doc-ps-left-label", facing ? "안쪽" : "왼쪽");
       setTxt("doc-ps-right-label", facing ? "바깥쪽" : "오른쪽");
       const position = byId("doc-ps-gutter-pos");
@@ -325,9 +328,9 @@
       kit.setChecked(setup.width > setup.height ? "doc-ps-landscape" : "doc-ps-portrait", true);
       markOrientation();
       // Pages has no top binding: what the dialog cannot show reads as 한쪽.
-      const kind = isPages() && setup.binding === TOP_BINDING ? 0 : (setup.binding ?? 0);
-      kit.setChecked(BINDING_IDS[kind], true);
-      kit.setSelect("doc-ps-multi", kind === DUPLEX_BINDING ? "1" : "0");
+      const kind = isPages() && [TOP_BINDING, BOOKFOLD_BINDING].includes(setup.binding) ? 0 : (setup.binding ?? 0);
+      kit.setChecked(BINDING_IDS[kind] ?? BINDING_IDS[DUPLEX_BINDING], true);
+      kit.setSelect("doc-ps-multi", [DUPLEX_BINDING, BOOKFOLD_BINDING].includes(kind) ? String(kind) : "0");
       kit.setSelect("doc-ps-gutter-pos", kind === TOP_BINDING ? "2" : "0");
       kit.setChecked("doc-ps-facing", kind === DUPLEX_BINDING);
       markBinding();
@@ -361,6 +364,31 @@
       show("doc-ps-binding-word", !hwp && !pages);
       for (const id of ["doc-ps-gutter-label", "doc-ps-gutter", "doc-ps-gutter-unit"]) show(id, !pages);
       show("doc-ps-facing-row", pages);
+      setTxt("doc-ps-layout-title", hwp || pages ? "머리말·꼬리말" : "머리글 및 바닥글");
+      // Word's page setup has the three tabs 여백, 용지 and 레이아웃; the other products show every section at once.
+      show("doc-ps-tabs", !hwp && !pages);
+      showPane(!hwp && !pages ? "margin" : null);
+    }
+
+    // One pane at a time under the tabs (`name` null: no tabs, every pane shows).
+    function showPane(name) {
+      const dialog = byId("doc-page-setup-dialog");
+      for (const tab of dialog?.querySelectorAll("[data-ps-tab]") ?? []) {
+        const on = tab.dataset.psTab === name;
+        tab.classList.toggle("active", on);
+        tab.setAttribute("aria-selected", on ? "true" : "false");
+        tab.tabIndex = on ? 0 : -1;
+      }
+      for (const pane of dialog?.querySelectorAll("[data-ps-pane]") ?? []) pane.hidden = name !== null && pane.dataset.psPane !== name;
+    }
+
+    // 여러 페이지 > 책 접기 turns the page to landscape, as the Word program does (two pages of the booklet on one sheet).
+    function onMultiChange() {
+      if (kit.val("doc-ps-multi") === String(BOOKFOLD_BINDING) && !landscape()) {
+        kit.setChecked("doc-ps-landscape", true);
+        onOrientChange();
+      }
+      markBinding();
     }
 
     function open() {
@@ -452,7 +480,9 @@
       byId("btn-doc-ps-apply")?.addEventListener("click", apply);
       byId("doc-ps-paper")?.addEventListener("change", onPaperChange);
       for (const id of ["doc-ps-portrait", "doc-ps-landscape"]) byId(id)?.addEventListener("change", onOrientChange);
-      for (const id of [...BINDING_IDS, "doc-ps-multi", "doc-ps-gutter-pos", "doc-ps-facing"]) byId(id)?.addEventListener("change", markBinding);
+      for (const id of [...BINDING_IDS, "doc-ps-gutter-pos", "doc-ps-facing"]) byId(id)?.addEventListener("change", markBinding);
+      byId("doc-ps-multi")?.addEventListener("change", onMultiChange);
+      for (const tab of byId("doc-page-setup-dialog")?.querySelectorAll("[data-ps-tab]") ?? []) tab.addEventListener("click", () => showPane(tab.dataset.psTab));
       // A field cannot go below zero or past the engine's bound (the reference clamps the minimum on `change`).
       const max = round1(MAX_TWIPS / TWIPS_PER_MM);
       for (const id of Object.values(FIELD_IDS)) {

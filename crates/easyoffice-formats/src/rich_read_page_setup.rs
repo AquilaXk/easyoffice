@@ -32,9 +32,12 @@ pub(crate) fn page_gutter(attrs: &Attrs<'_>) -> u32 {
 }
 
 /// The binding of a section: its gutter and, from `word/settings.xml`, whether the pages face each other
-/// (`w:mirrorMargins`) or the gutter is at the top (`w:gutterAtTop`).
-pub(crate) fn binding_of(gutter: u32, mirror: bool, at_top: bool) -> RichBinding {
-    let kind = if mirror {
+/// (`w:mirrorMargins`), the gutter is at the top (`w:gutterAtTop`) or the pages are a folded booklet
+/// (`w:bookFoldPrinting`).
+pub(crate) fn binding_of(gutter: u32, mirror: bool, at_top: bool, book_fold: bool) -> RichBinding {
+    let kind = if book_fold {
+        RichBindingKind::BookFold
+    } else if mirror {
         RichBindingKind::Duplex
     } else if at_top {
         RichBindingKind::Top

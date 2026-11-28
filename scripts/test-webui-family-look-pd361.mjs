@@ -682,7 +682,7 @@ test("The page setup dialog shows each product's own items and words", async () 
   assert.equal(text("doc-page-setup-title"), "페이지 설정");
   assert.deepEqual(["doc-ps-paper-title", "doc-ps-width-label", "doc-ps-height-label", "doc-ps-margin-title", "doc-ps-gutter-label"].map(text), ["용지 크기", "너비", "높이", "여백", "제본용 여백"]);
   assert.deepEqual(["doc-ps-binding-word", "doc-ps-gutter", "doc-ps-binding-cards", "doc-ps-binding-title", "doc-ps-facing-row"].map(shown), [true, true, false, false, false]);
-  assert.deepEqual([...byId("doc-ps-multi").querySelectorAll("option")].map((o) => o.textContent), ["기본", "여백 미러"]);
+  assert.deepEqual([...byId("doc-ps-multi").querySelectorAll("option")].map((o) => o.textContent), ["보통", "대칭 여백", "책 접기"]);
   assert.deepEqual([...byId("doc-ps-gutter-pos").querySelectorAll("option")].map((o) => o.textContent), ["왼쪽", "위쪽"]);
   assert.deepEqual(sidePair(), ["왼쪽", "오른쪽"]);
   change("doc-ps-multi", 1);

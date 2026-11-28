@@ -1900,8 +1900,13 @@
     <dialog id="doc-page-setup-dialog" class="tool-dialog" aria-labelledby="doc-page-setup-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="doc-page-setup-title">페이지 설정</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div id="doc-ps-tabs" class="dialog-tabs" role="tablist" aria-label="페이지 설정" hidden>
+          <button type="button" class="dialog-tab active" role="tab" id="doc-ps-tab-margin" aria-selected="true" data-ps-tab="margin">여백</button>
+          <button type="button" class="dialog-tab" role="tab" id="doc-ps-tab-paper" aria-selected="false" tabindex="-1" data-ps-tab="paper">용지</button>
+          <button type="button" class="dialog-tab" role="tab" id="doc-ps-tab-layout" aria-selected="false" tabindex="-1" data-ps-tab="layout">레이아웃</button>
+        </div>
         <div class="dialog-body">
-          <div class="dialog-section">
+          <div class="dialog-section" data-ps-pane="paper">
             <div id="doc-ps-paper-title" class="dialog-section-title">용지 종류</div>
             <div class="dialog-row"><select id="doc-ps-paper" class="sb-combo dialog-select" aria-label="용지 종류"><option value="A4">A4</option><option value="A3">A3</option><option value="B4">B4</option><option value="B5">B5</option><option value="Letter">Letter</option><option value="Legal">Legal</option><option value="custom">사용자 정의</option></select></div>
             <div class="dialog-row">
@@ -1909,7 +1914,7 @@
               <label id="doc-ps-height-label" class="dialog-label" for="doc-ps-height">길이</label><input id="doc-ps-height" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
             </div>
           </div>
-          <div class="page-setup-sections">
+          <div class="page-setup-sections" data-ps-pane="margin">
             <div class="dialog-section">
               <div class="dialog-section-title">용지 방향</div>
               <div class="dialog-icon-radio-group">
@@ -1925,23 +1930,28 @@
               <label class="icon-radio-card"><input class="icon-radio-input" type="radio" name="doc-ps-binding" value="2" id="doc-ps-top-binding" /><span class="icon-radio-icon"><svg width="24" height="32" viewBox="0 0 24 32" aria-hidden="true" focusable="false"><rect x="1" y="1" width="22" height="13" rx="1.5" fill="var(--ui-surface)" stroke="var(--accent-subtle)" stroke-width="1.2" /><rect x="1" y="18" width="22" height="13" rx="1.5" fill="var(--ui-surface)" stroke="var(--accent-subtle)" stroke-width="1.2" /><line x1="4" y1="15" x2="20" y2="15" stroke="var(--accent-strong)" stroke-width="1.5" stroke-dasharray="2,2" /></svg></span><span id="doc-ps-top-label" class="icon-radio-text">위로</span></label>
             </div>
             <div id="doc-ps-binding-word" hidden>
-              <div class="dialog-row"><label class="dialog-label" for="doc-ps-multi">여러 페이지</label><select id="doc-ps-multi" class="sb-combo dialog-select"><option value="0">기본</option><option value="1">여백 미러</option></select></div>
+              <div class="dialog-row"><label class="dialog-label" for="doc-ps-multi">여러 페이지</label><select id="doc-ps-multi" class="sb-combo dialog-select"><option value="0">보통</option><option value="1">대칭 여백</option><option value="3">책 접기</option></select></div>
               <div class="dialog-row"><label class="dialog-label" for="doc-ps-gutter-pos">제본용 여백 위치</label><select id="doc-ps-gutter-pos" class="sb-combo dialog-select"><option value="0">왼쪽</option><option value="2">위쪽</option></select></div>
             </div>
           </div>
           </div>
-          <div class="dialog-section">
+          <div class="dialog-section" data-ps-pane="margin">
             <div id="doc-ps-margin-title" class="dialog-section-title">용지 여백</div>
             <div class="margin-grid">
               <label id="doc-ps-margin-top-label" class="dialog-label" for="doc-ps-top">위쪽</label><input id="doc-ps-top" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
               <label id="doc-ps-margin-bottom-label" class="dialog-label" for="doc-ps-bottom">아래쪽</label><input id="doc-ps-bottom" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
               <label id="doc-ps-left-label" class="dialog-label" for="doc-ps-left">왼쪽</label><input id="doc-ps-left" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
               <label id="doc-ps-right-label" class="dialog-label" for="doc-ps-right">오른쪽</label><input id="doc-ps-right" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
-              <label id="doc-ps-header-label" class="dialog-label" for="doc-ps-header">머리글</label><input id="doc-ps-header" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
-              <label id="doc-ps-footer-label" class="dialog-label" for="doc-ps-footer">바닥글</label><input id="doc-ps-footer" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
               <label id="doc-ps-gutter-label" class="dialog-label" for="doc-ps-gutter">제본</label><input id="doc-ps-gutter" class="dialog-input" type="number" step="0.1" min="0" /><span id="doc-ps-gutter-unit" class="dialog-unit">mm</span>
             </div>
             <div id="doc-ps-facing-row" class="dialog-row" hidden><label class="dialog-checkbox"><input id="doc-ps-facing" type="checkbox" /> 페이지 마주보기</label></div>
+          </div>
+          <div class="dialog-section" data-ps-pane="layout">
+            <div id="doc-ps-layout-title" class="dialog-section-title">머리글 및 바닥글</div>
+            <div class="margin-grid">
+              <label id="doc-ps-header-label" class="dialog-label" for="doc-ps-header">머리글</label><input id="doc-ps-header" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
+              <label id="doc-ps-footer-label" class="dialog-label" for="doc-ps-footer">바닥글</label><input id="doc-ps-footer" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
+            </div>
           </div>
           <div class="dialog-status-row"><span id="doc-ps-status" class="dialog-status" role="status" aria-live="polite"></span></div>
         </div>

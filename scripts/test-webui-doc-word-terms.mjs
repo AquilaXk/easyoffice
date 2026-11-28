@@ -95,3 +95,46 @@ test("the Hangul window keeps its own status line and the shared statistics dial
   const { statusTexts } = h.host.__EASYOFFICE_DOC_STATUS_TEXT__;
   assert.equal(statusTexts({ word: false, current: 2, total: 5, cols: 1, line: 3, col: 4, words: 0, insertMode: "삽입" }).pos, "2/5 쪽   1단   3줄   4칸 | 구역: 1 / 1 |");
 });
+
+// ---- 페이지 설정: the tabs 여백, 용지, 레이아웃 and 여러 페이지 > 책 접기
+
+test("페이지 설정 has the tabs 여백, 용지 and 레이아웃, and each tab shows its own sections", async () => {
+  const h = await openDoc("<p>가</p>");
+  const { document } = h;
+  const byId = (id) => document.getElementById(id);
+  h.userClick(studioItem(document, "layout-paper"));
+  await flushAsyncTurns(4);
+  assert.equal(byId("doc-ps-tabs").hidden, false);
+  assert.deepEqual(Array.from(document.querySelectorAll("#doc-ps-tabs [data-ps-tab]"), (el) => el.textContent), ["여백", "용지", "레이아웃"]);
+  const visible = () => Array.from(document.querySelectorAll("#doc-page-setup-dialog [data-ps-pane]")).filter((el) => !el.hidden).map((el) => el.dataset.psPane);
+  assert.deepEqual(visible(), ["margin", "margin"], "the page opens on 여백: the orientation and binding, then the margins");
+  h.userClick(byId("doc-ps-tab-paper"));
+  assert.deepEqual(visible(), ["paper"]);
+  assert.equal(byId("doc-ps-tab-paper").getAttribute("aria-selected"), "true");
+  h.userClick(byId("doc-ps-tab-layout"));
+  assert.deepEqual(visible(), ["layout"]);
+  assert.equal(byId("doc-ps-layout-title").textContent, "머리글 및 바닥글");
+});
+
+test("여러 페이지 > 책 접기 turns the page to landscape and is saved as the book fold binding", async () => {
+  const h = await openDoc("<p>가</p>");
+  const { document } = h;
+  const byId = (id) => document.getElementById(id);
+  h.userClick(studioItem(document, "layout-paper"));
+  await flushAsyncTurns(4);
+  assert.deepEqual(Array.from(byId("doc-ps-multi").querySelectorAll("option"), (o) => o.textContent), ["보통", "대칭 여백", "책 접기"]);
+  byId("doc-ps-multi").value = "3";
+  byId("doc-ps-multi").dispatchEvent({ type: "change", target: byId("doc-ps-multi"), bubbles: true });
+  assert.equal(byId("doc-ps-landscape").checked, true);
+  assert.deepEqual([byId("doc-ps-left-label").textContent, byId("doc-ps-right-label").textContent], ["안쪽", "바깥쪽"]);
+  byId("doc-ps-gutter").value = "10";
+  byId("btn-doc-ps-apply").click();
+  await flushAsyncTurns(4);
+  const payload = h.host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.payloadOf(h.editor.dataset.eoPage);
+  assert.equal(payload.pageSetup.binding.kind, "bookfold");
+  assert.ok(payload.pageSetup.paper.width > payload.pageSetup.paper.height);
+  // The dialog opens on what the document has.
+  h.userClick(studioItem(document, "layout-paper"));
+  await flushAsyncTurns(4);
+  assert.equal(byId("doc-ps-multi").value, "3");
+});

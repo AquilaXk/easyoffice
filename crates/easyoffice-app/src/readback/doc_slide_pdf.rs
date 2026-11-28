@@ -82,6 +82,7 @@ pub(super) fn write_document_readback(out: &mut String, doc: &RichDocument, max_
         RichBindingKind::Single => "single",
         RichBindingKind::Duplex => "duplex",
         RichBindingKind::Top => "top",
+        RichBindingKind::BookFold => "bookfold",
     };
     let _ = write!(
         out,

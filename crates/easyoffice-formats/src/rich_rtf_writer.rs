@@ -369,7 +369,10 @@ pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
     } else {
         ""
     };
-    let facing = if doc.page_frame.binding.kind == RichBindingKind::Duplex {
+    let facing = if matches!(
+        doc.page_frame.binding.kind,
+        RichBindingKind::Duplex | RichBindingKind::BookFold
+    ) {
         "\\facingp"
     } else {
         ""

@@ -70,6 +70,7 @@ pub(crate) fn write_page_setup(out: &mut String, frame: &RichPageFrame) {
                 RichBindingKind::Single => "single",
                 RichBindingKind::Duplex => "duplex",
                 RichBindingKind::Top => "top",
+                RichBindingKind::BookFold => "bookfold",
             },
             gutter: binding.gutter,
         }),
@@ -150,6 +151,7 @@ fn parse_binding(obj: &JsonObject) -> Result<RichBinding, EasyOfficeError> {
         Some("single") | None => RichBindingKind::Single,
         Some("duplex") => RichBindingKind::Duplex,
         Some("top") => RichBindingKind::Top,
+        Some("bookfold") => RichBindingKind::BookFold,
         Some(_) => {
             return Err(invalid(
                 "구조화 저장: 'pageSetup.binding.kind'가 올바르지 않습니다.",

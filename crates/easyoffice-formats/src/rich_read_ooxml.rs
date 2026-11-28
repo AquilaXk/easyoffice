@@ -840,6 +840,7 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         walker.first_gutter,
         settings.mirror_margins,
         settings.gutter_at_top,
+        settings.book_fold,
     );
     (page_frame.margins, page_frame.paper) =
         fitting_setup(walker.first_margins, walker.first_paper, binding);

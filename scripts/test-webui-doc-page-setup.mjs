@@ -200,7 +200,8 @@ test("the binding is a gutter and a kind: it travels in data-eo-page, takes room
   assert.equal(core.encode({ ...base, gutter: 0, binding: 0 }), "11906,16838,1701,1701,1985,1590,1134,680", "an unbound page keeps the eight values");
   assert.equal(core.encode({ ...base, gutter: 567, binding: 1 }), "11906,16838,1701,1701,1985,1590,1134,680,567,1");
   assert.deepEqual(core.parse("11906,16838,1701,1701,1985,1590,1134,680,567,1"), { ...base, gutter: 567, binding: 1 });
-  assert.equal(core.parse("11906,16838,1701,1701,1985,1590,1134,680,567,3"), null, "a kind past 위로 is not one");
+  assert.deepEqual(core.parse("11906,16838,1701,1701,1985,1590,1134,680,567,3"), { ...base, gutter: 567, binding: 3 }, "책 접기 is the kind after 위로");
+  assert.equal(core.parse("11906,16838,1701,1701,1985,1590,1134,680,567,4"), null, "a kind past 책 접기 is not one");
   assert.equal(core.parse("1,2,3,4,5,6,7,8,9"), null);
   assert.equal(core.violation({ ...base, gutter: 9000, binding: 0 })?.startsWith("좌우 여백이 너무 커서"), true);
   assert.equal(core.violation({ ...base, gutter: 9000, binding: 2 }), null, "a gutter at the top takes height");

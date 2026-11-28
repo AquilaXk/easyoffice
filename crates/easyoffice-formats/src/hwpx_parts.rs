@@ -511,7 +511,7 @@ fn page_box(
 pub(crate) fn gutter_type(kind: RichBindingKind) -> &'static str {
     match kind {
         RichBindingKind::Single => "LEFT_ONLY",
-        RichBindingKind::Duplex => "LEFT_RIGHT",
+        RichBindingKind::Duplex | RichBindingKind::BookFold => "LEFT_RIGHT",
         RichBindingKind::Top => "TOP_BOTTOM",
     }
 }
