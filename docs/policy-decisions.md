@@ -6866,3 +6866,17 @@
 - **Trade-offs** BASE 가져오기 대화상자(파일을 고른 뒤 열림), 파일이 필요한 슬라이드·PDF 대화상자, 피벗·차트 하위 대화상자는 아직 검사하지 않는다.
 - **Verified by** `scripts/test-design-guard.mjs`, 전체 WebKit 묶음(`scripts/webkit-dom/run.mjs`).
 - **Revisit when** 남은 대화상자를 열 방법이 생길 때, 코파일럿 작업이 끝나 `copilot-ext-ops.js`의 `→`를 바꿀 때.
+
+## PD-390 — 내장 한글의 아래에 삽입·포인터를 실제 WebKit으로 확인해 결함 둘을 고치고, SLIDE 읽기 도구 `read_slides`를 더한다 (2026-11-28)
+
+- **Decision (QA 2026-11-28)** 모의 시험만 있던 한글 편집기 쪽 코파일럿 기능을 실제 `hwp-studio` 번들과 실제 HWP 문서(고정한 rhwp 체크아웃의 `biz_plan.hwp`)로 헤드리스 WebKit에서 확인한다(`scripts/webkit-dom/hwp.mjs`, 모듈 `HWP`). 편집기의 답은 셸 쪽 MessagePort 끝을 가로채 직접 묻는다(`window.__eoCall`). 여기서 결함 둘이 나왔다.
+  - **`target-navigation-v1`을 셸이 협상하지 않았다** 편집기는 이 이름이 협상되지 않으면 `focusTarget`을 거부한다. 그래서 위치 칩의 이동과 포인터 연출(PD-387)의 문단 자리 조회가 한 번도 성공하지 못하고 늘 편집기 가운데를 가리켰다. `hwp-host.js`가 이름을 협상한다.
+  - **문서 끝 컨트롤이 새 문단으로 옮겨 갔다** `splitParagraph`의 오프셋은 인라인 컨트롤(표·그림)을 한 자리로 세는데 `insert_after`와 `append`는 글자 수(`getParagraphLength`)로 쪼갰다. 문단 끝에 컨트롤이 있으면(표가 마지막인 문서, 표만 있는 문단) 컨트롤이 새 문단으로 가고 그 문단이 넣은 글을 품었다. 쪼갤 오프셋을 글자 수에 컨트롤 수를 더한 값(`paragraphEndOffset`, 쪼개기가 넘는 부분을 자른다)으로 바꿨다.
+  - 거부된 이동(`focused: false`, 예: 이 샘플의 79번 문단)은 캐럿이 이전 자리에 남는다. 셸은 이때 캐럿 상자를 읽지 않고 자리를 모른다고 답해 포인터가 옛 자리를 가리키지 않게 한다.
+  - 확인한 것: 이동 직후 캐럿 상자는 편집기가 안정된 뒤의 상자와 같다(늦게 갱신되지 않는다). 대상이 바뀌면 상자가 따라 움직이고, 편집기의 선택이 그 문단이며, 포인터의 선택 상자가 편집기가 말하는 캐럿 상자 위에 놓인다. 아래에 삽입은 원문 문단·컨트롤을 그대로 두고 줄마다 새 문단을 바로 아래에 넣으며, 실행 취소 한 번으로 문서가 원래대로 돌아온다. 표·컨트롤 문단 세 곳(글이 있는 문단, 빈 앵커, 마지막 문단)도 같다.
+  - **`read_slides(start, count)`** SLIDE 읽기 도구. 문맥에는 활성 슬라이드만 자세하고 나머지는 제목과 개수뿐이라, 모델이 다른 슬라이드의 항목·노트·개체를 읽을 때 쓴다. 일반 대화에는 슬라이드 수와 상관없이 늘 노출한다(DOC·HWP의 `read_doc_blocks`와 같이 도구 스키마 토글로 캐시가 깨지지 않게). 선택 명령·가벼운 예측에는 없다. `count`는 1..=20(`MAX_READ_SLIDES`)으로 줄이고 생략하면 5, `start`는 256 미만이며 생략하면 0이다. 인수가 있는데 음수·소수·문자열이면 호출을 버린다(다른 읽기 도구처럼 0으로 보지 않는다). 결과는 `[슬라이드 전체 N장]`과 엔진의 문맥 줄과 같은 항목의 줄이고, 같은 읽기를 되풀이하면 기존 SHA-256 영수증(`copilot-context-compact.js`)으로 바뀐다. 진행 단계 문구는 `슬라이드 3~5 읽음`이다(숫자만, 상한까지만 적는다). 문맥을 싣는 코드(`extractSlideContext`)는 읽기 도구와 모양을 같이 쓰도록 `copilot-slide-read.js`로 옮겼다.
+- **재사용 판단 (구현 원칙 3단계)** (1) HWP 캐럿 조회·삽입을 하는 라이브러리는 없고 슬라이드 읽기를 하는 라이브러리도 없다. (2) 이미 쓰는 구조를 그대로 썼다: 도구 스키마·검증(`schema.rs`, `operations_ext.rs`), 도구 실행(`executeReadTool`), 결과 영수증·압축(`copilot-context-compact.js`), 진행 문구(`copilot-step-labels.js`). 편집기 쪽은 rhwp의 `focusBodyParagraph`·`split_at`의 오프셋 규칙을 따랐다. (3) 이식한 외부 코드는 없다.
+- **Why** 모의 시험은 편집기가 실제로 하는 일(협상, 오프셋 규칙)을 가정으로만 두어 이 결함 둘을 못 잡았다.
+- **Trade-offs** 컨트롤이 있는 문단을 바꾸기(제자리 교체)는 여전히 자동 검증이 먼저 거부하므로 화면의 `아래에 삽입` 단추는 그런 문단에서 나오지 않는다(편집기 쪽 삽입만 확인했다). 포인터의 선택 상자는 캐럿(문단 끝)에서 시작한다: 편집기가 문단 전체를 선택하지만 그 시작 자리는 묻지 않는다. WebKit 시험은 고정한 rhwp 체크아웃의 샘플과 편집기 번들 빌드가 필요해 `webkit-dom` CI 작업이 번들을 빌드한다.
+- **Verified by** WebKit `scripts/webkit-dom/run.mjs`(모듈 `HWP` 다섯 단계), `scripts/test-copilot-bridge-controls.mjs`, `scripts/test-webui-copilot-pointer-pd387.mjs`, `scripts/test-webui-copilot-read-slides-pd390.mjs`, `scripts/test-webui-copilot-panel-ui-pd388.mjs`, `crates/easyoffice-app/tests/copilot_read_slides_pd390.rs`.
+- **Revisit when** 컨트롤 문단 아래 삽입을 화면 단추에서도 열 때(검증기가 제자리 교체만 막도록), 편집기에 선택 시작 자리 조회가 생길 때.
