@@ -135,6 +135,17 @@ const DOC_DIALOGS = [
   ["셀 테두리", "doc-cell-border-dialog", [pasteTable, DOC_MENU("table-border-bg")]],
   ["셀 배경", "doc-cell-border-dialog", [pasteTable, DOC_MENU("table-border-bg"), click('[data-doc-cb-tab="bg"]')]],
   ["그림 크기", "doc-image-size-dialog", [pasteImage]],
+  ["페이지 설정 용지 탭", "doc-page-setup-dialog", [click('[data-studio-menu-cmd="layout-paper"]'), click("#doc-ps-tab-paper")]],
+  ["페이지 설정 레이아웃 탭", "doc-page-setup-dialog", [click('[data-studio-menu-cmd="layout-paper"]'), click("#doc-ps-tab-layout")]],
+  ["날짜 및 시간", "doc-datetime-dialog", [selectDocText, DOC_MENU("insert-datetime")]],
+  ["책갈피", "doc-bookmark-dialog", [selectDocText, DOC_MENU("insert-bookmark")]],
+  ["상호 참조", "doc-xref-dialog", [selectDocText, DOC_MENU("insert-xref")]],
+  ["캡션", "doc-caption-dialog", [selectDocText, DOC_MENU("insert-caption")]],
+  ["문서 속성", "doc-properties-dialog", [DOC_MENU("doc-properties")]],
+  ["줄 번호", "doc-linenumbers-dialog", [DOC_MENU("layout-linenumbers")]],
+  ["인쇄된 워터마크", "doc-watermark-dialog", [DOC_MENU("layout-watermark")]],
+  ["텍스트를 표로 변환", "doc-table-convert-dialog", [selectDocText, DOC_MENU("table-from-text")]],
+  ["표를 텍스트로 변환", "doc-table-convert-dialog", [pasteTable, DOC_MENU("table-to-text")]],
 ];
 
 /** Violations the step may still have (`KNOWN_DIALOG_VIOLATIONS`), minus what the browser's fonts decide: a clipped box is listed but its absence is not an error. */

@@ -382,4 +382,30 @@ export const docSteps = [
     assert.deepEqual([hit.font, hit.fontEastAsia], ["Pretendard", "바탕"], "영어 글꼴 and 한글 글꼴 are two run values");
     assert.equal(await page.$eval(`${EDITOR} .eo-run`, (el) => el.style.fontFamily.replaceAll('"', "")), "Pretendard, 바탕", "Latin first, then East Asian");
   }],
+
+  // The Word-style features (PD-395) on the real selection: a section break splits the paragraph at the caret, a bookmark and a
+  // field are markers and a chip in the real DOM, and the save payload carries them.
+  ["구역 나누기 splits the paragraph at the caret and 책갈피, 날짜 및 시간 and 캡션 reach the save payload", async (page) => {
+    await typeFirstParagraph(page, "앞뒤 본문");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await page.evaluate(() => document.querySelector('[data-studio-menu-cmd="section-break-oddPage"]').click());
+    assert.deepEqual(await paragraphs(page), ["앞뒤 ", "본문"]);
+    assert.deepEqual(await page.$$eval(`${EDITOR} > p[data-eo-section-break]`, (nodes) => nodes.map((p) => [p.textContent, p.dataset.eoSectionBreak])), [["앞뒤 ", "oddPage"]]);
+    await page.keyboard.press("Shift+ArrowRight");
+    await page.keyboard.press("Shift+ArrowRight");
+    await page.evaluate(() => document.querySelector('[data-studio-menu-cmd="insert-bookmark"]').click());
+    await page.fill("#doc-bm-name", "본문표시");
+    await page.click("#btn-doc-bm-add");
+    await page.waitForFunction(() => !document.getElementById("doc-bookmark-dialog").open);
+    await page.evaluate(() => document.querySelector('[data-studio-menu-cmd="insert-datetime"]').click());
+    await page.check("#doc-dt-update");
+    await page.click("#btn-doc-dt-ok");
+    await page.waitForSelector(`${EDITOR} [data-eo-field-code^="DATE"]`);
+    const blocks = await page.evaluate(() => window.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(document.getElementById("doc-editor")));
+    assert.equal(blocks[0].sectionBreak, "oddPage");
+    const runs = blocks.flatMap((b) => b.runs ?? []);
+    assert.ok(runs.some((r) => r.bookmarkStart === "본문표시") && runs.some((r) => r.bookmarkEnd === "본문표시"), JSON.stringify(runs));
+    assert.ok(runs.some((r) => r.fieldCode?.startsWith("DATE")), "the date is a field of the payload");
+  }],
 ];
