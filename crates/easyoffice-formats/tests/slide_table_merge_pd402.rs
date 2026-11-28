@@ -174,9 +174,7 @@ fn repeated_odp_cells_take_their_columns_and_a_hostile_count_is_refused() {
         |c| {
             c.replacen(
                 &format!("{X_CELL}{X_CELL}{X_CELL}{X_CELL}"),
-                &format!(
-                    "<table:table-cell office:value-type=\"string\" table:number-columns-repeated=\"3\"><text:p>x</text:p></table:table-cell><table:table-cell office:value-type=\"string\" table:number-columns-spanned=\"1\" table:number-rows-spanned=\"2\"><text:p>x</text:p></table:table-cell>"
-                ),
+                "<table:table-cell office:value-type=\"string\" table:number-columns-repeated=\"3\"><text:p>x</text:p></table:table-cell><table:table-cell office:value-type=\"string\" table:number-columns-spanned=\"1\" table:number-rows-spanned=\"2\"><text:p>x</text:p></table:table-cell>",
                 1,
             )
         },
