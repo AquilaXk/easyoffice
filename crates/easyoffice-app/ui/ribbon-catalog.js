@@ -358,6 +358,8 @@
     { keys: "Ctrl+F", action: "find" },
     { keys: "Ctrl+H", action: "replace", macControl: true },
     { keys: "Ctrl+F2", action: "replace", module: "HWP" },
+    // 이동 of the spreadsheet: Ctrl+G, and on macOS the Control key itself, as ⌘G is the system's find-next key (PD-391).
+    { keys: "Ctrl+G", action: "sheet-goto", module: "SHEET", macControl: true, notInField: true },
     { keys: "Ctrl+B", action: "home-bold", ribbon: true },
     { keys: "Ctrl+I", action: "home-italic", ribbon: true },
     { keys: "Ctrl+U", action: "home-underline", ribbon: true },

@@ -100,6 +100,7 @@
     const mediaUi = host.__EASYOFFICE_CREATE_SHEET_MEDIA_UI__?.(deps) ?? null;
     const noteUi = host.__EASYOFFICE_CREATE_SHEET_NOTE_UI__?.(deps) ?? null;
     const viewOptions = host.__EASYOFFICE_CREATE_SHEET_VIEW_OPTIONS__?.(deps) ?? null;
+    const gotoUi = host.__EASYOFFICE_CREATE_SHEET_GOTO__?.(deps) ?? null;
     const kit = host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document);
 
     function say(text) {
@@ -565,6 +566,7 @@
       ...(mediaUi?.actions || {}),
       ...(noteUi?.actions || {}),
       ...(viewOptions?.actions || {}),
+      ...(gotoUi?.actions || {}),
       "tab-add": () => tabs.insert(null),
       "tab-color": () => Promise.resolve(tabMenu.openColor(getActiveSheetName())),
       ...tabs.actions,

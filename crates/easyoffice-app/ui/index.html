@@ -111,6 +111,7 @@
               <div class="md-item" data-kinds="DOC PAGES HWP SHEET SLIDE BASE BOARD PDF" data-studio-menu-cmd="find" role="menuitem" tabindex="-1"><span class="md-label">찾기</span><span class="md-shortcut">Ctrl+F</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">바꾸기</span><span class="md-shortcut">⌃H</span></div>
               <div class="md-item" data-kinds="SHEET BASE" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">찾기 및 바꾸기</span><span class="md-shortcut">⌃H</span></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="goto" role="menuitem" tabindex="-1"><span class="md-label">이동…</span><span class="md-shortcut">⌃G</span></div>
               <div class="md-item" data-kinds="PAGES" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">찾기 및 대치</span><span class="md-shortcut">⌃H</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">찾아 바꾸기</span><span class="md-shortcut">Ctrl+F2</span></div>
               <div class="md-item" data-studio-menu-cmd="palette" role="menuitem" tabindex="-1"><span class="md-label">명령 검색</span><span class="md-shortcut">Ctrl+/</span></div>
@@ -2453,6 +2454,60 @@
       </div>
     </dialog>
 
+    <dialog id="sheet-goto-dialog" class="tool-dialog" aria-labelledby="sheet-goto-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-goto-title">이동</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-stack">
+            <span id="sheet-goto-list-label" class="dialog-label">이동:</span>
+            <ul id="sheet-goto-list" class="dialog-list" role="listbox" aria-labelledby="sheet-goto-list-label"></ul>
+          </div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-goto-ref">참조:</label><input id="sheet-goto-ref" class="dialog-text-input" type="text" autocomplete="off" spellcheck="false" /></div>
+          <p id="sheet-goto-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-goto-special" type="button" class="dialog-btn">옵션…</button>
+          <button id="btn-sheet-goto-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-special-dialog" class="tool-dialog" aria-labelledby="sheet-special-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-special-title">이동 옵션</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-stack" role="radiogroup" aria-label="선택">
+            <label class="dialog-checkbox"><input type="radio" name="sheet-special-kind" value="notes" /> 메모</label>
+            <label class="dialog-checkbox"><input type="radio" name="sheet-special-kind" value="constants" checked /> 상수</label>
+            <div class="dialog-row">
+              <label class="dialog-checkbox"><input id="sheet-special-constant-number" type="checkbox" checked /> 숫자</label>
+              <label class="dialog-checkbox"><input id="sheet-special-constant-text" type="checkbox" checked /> 텍스트</label>
+              <label class="dialog-checkbox"><input id="sheet-special-constant-logical" type="checkbox" checked /> 논리값</label>
+              <label class="dialog-checkbox"><input id="sheet-special-constant-error" type="checkbox" checked /> 오류</label>
+            </div>
+            <label class="dialog-checkbox"><input type="radio" name="sheet-special-kind" value="formulas" /> 수식</label>
+            <div class="dialog-row">
+              <label class="dialog-checkbox"><input id="sheet-special-formula-number" type="checkbox" checked /> 숫자</label>
+              <label class="dialog-checkbox"><input id="sheet-special-formula-text" type="checkbox" checked /> 텍스트</label>
+              <label class="dialog-checkbox"><input id="sheet-special-formula-logical" type="checkbox" checked /> 논리값</label>
+              <label class="dialog-checkbox"><input id="sheet-special-formula-error" type="checkbox" checked /> 오류</label>
+            </div>
+            <label class="dialog-checkbox"><input type="radio" name="sheet-special-kind" value="blanks" /> 빈 셀</label>
+            <label class="dialog-checkbox"><input type="radio" name="sheet-special-kind" value="region" /> 현재 영역</label>
+            <label class="dialog-checkbox"><input type="radio" name="sheet-special-kind" value="array" /> 현재 배열</label>
+            <label class="dialog-checkbox"><input type="radio" name="sheet-special-kind" value="last" /> 마지막 셀</label>
+            <label class="dialog-checkbox"><input type="radio" name="sheet-special-kind" value="visible" /> 화면에 보이는 셀만</label>
+          </div>
+          <p id="sheet-special-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-special-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="sheet-names-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-names-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="sheet-names-dialog-title">이름 관리자</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -3501,6 +3556,8 @@
     <script src="./sheet-size-dialogs.js"></script>
     <script src="./sheet-context-menu.js"></script>
     <script src="./sheet-text-columns.js"></script>
+    <script src="./sheet-special-cells.js"></script>
+    <script src="./sheet-goto.js"></script>
     <script src="./sheet-structure.js"></script>
     <script src="./sheet-cell-write.js"></script>
     <script src="./sheet-view-live.js"></script>

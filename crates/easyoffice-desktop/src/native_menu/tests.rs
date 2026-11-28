@@ -3,7 +3,9 @@ use super::*;
 mod contracts;
 
 const MODIFIERS: &[&str] = &["CmdOrCtrl", "Ctrl", "Alt", "Shift"];
-const REPLACE_ACCELERATOR: &str = "Ctrl+H";
+/// The keys that are the Control key itself on macOS, because the Command key of the same letter is a system key
+/// (Cmd+H hides the app, Cmd+G finds the next match): replace and the spreadsheet's 이동.
+const CONTROL_ACCELERATORS: [&str; 2] = ["Ctrl+H", "Ctrl+G"];
 const GROUPS: &[&str] = &[
     "app", "file", "edit", "view", "insert", "format", "page", "slide", "sheet", "table", "tool",
     "help",
@@ -37,7 +39,7 @@ fn accelerators_are_command_based_and_do_not_collide() {
         let key = parts.pop().unwrap();
         // The replace key is the Control key itself on macOS: Cmd+H is the system's "hide" key.
         assert!(
-            parts.contains(&"CmdOrCtrl") || accelerator == REPLACE_ACCELERATOR,
+            parts.contains(&"CmdOrCtrl") || CONTROL_ACCELERATORS.contains(&accelerator),
             "{accelerator} uses Cmd"
         );
         assert!(parts.iter().all(|p| MODIFIERS.contains(p)), "{accelerator}");
@@ -752,6 +754,7 @@ fn synced_edit_and_format_accelerators_match_webui_while_other_format_items_stay
     let explicit = [
         ("edit:find", Some("CmdOrCtrl+F")),
         ("edit:replace", Some("Ctrl+H")),
+        ("edit:goto", Some("Ctrl+G")),
         ("edit:paste-special", Some("CmdOrCtrl+Alt+V")),
         ("format:bold", Some("CmdOrCtrl+B")),
         ("format:italic", Some("CmdOrCtrl+I")),

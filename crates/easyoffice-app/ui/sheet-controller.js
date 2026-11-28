@@ -705,6 +705,7 @@
       getSelection: () => input.getSelection(),
       selectAxis: (axis, index, extend) => input.selectAxis(axis, index, extend),
       selectRange: (rg) => input.selectRange(rg),
+      selectRanges: (list) => input.selectRanges(list),
       clearExtras: () => input.clearExtras(),
       runClipboardCommand: (cmd) => input.runClipboardCommand(cmd),
       openPasteSpecial: () => input.openPasteSpecial(),

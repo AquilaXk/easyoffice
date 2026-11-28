@@ -65,6 +65,7 @@
     "edit:paste-special": "sheet-paste:special",
     "edit:find": "find",
     "edit:replace": "replace",
+    "edit:goto": "sheet-act:goto",
     "view:zoom-in": "studio-cmd:zoom-in",
     "view:zoom-out": "studio-cmd:zoom-out",
     "view:zoom-fit-page": "studio-cmd:zoom-fit-page",

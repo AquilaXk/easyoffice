@@ -308,6 +308,11 @@
 .tool-dialog .dialog-list li { padding: var(--list-row-padding-y) var(--list-row-padding-x); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tool-dialog .dialog-list li[aria-selected="true"] { background: var(--color-accent-bg); font-weight: 700; }
 #sheet-names-dialog { width: min(760px, calc(100vw - 32px)); }
+#sheet-goto-dialog { width: min(360px, calc(100vw - 32px)); }
+#sheet-special-dialog { width: min(360px, calc(100vw - 32px)); }
+#sheet-goto-list { max-height: 160px; overflow-y: auto; }
+#sheet-goto-list:empty::before { content: ""; padding: 0; }
+#sheet-special-dialog .dialog-row { padding-inline-start: var(--space-6); }
 #sheet-name-edit-dialog .dialog-label { width: 64px; min-width: 64px; flex-shrink: 0; }
 /* The name list of the 이름 관리 dialog: the list cell of the rules dialog, three columns (PD-214). */
 .tool-dialog .sheet-names-head, .tool-dialog .sheet-names-list li { display: grid; grid-template-columns: minmax(0, 18fr) minmax(0, 18fr) minmax(0, 30fr) minmax(0, 14fr) minmax(0, 20fr); gap: var(--space-4); }

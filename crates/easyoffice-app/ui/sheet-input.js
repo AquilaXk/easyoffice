@@ -258,6 +258,14 @@
       refreshChrome();
     }
 
+    // Selects several ranges at once (이동 옵션): the first is the main range, the others its companions (at most `MAX_MULTI_RANGES`).
+    function selectRanges(list) {
+      selectRange(list[0]);
+      if (!multiApi || list.length < 2) return;
+      extraRanges = list.slice(1, multiApi.MAX_MULTI_RANGES).map((r) => ({ ...r }));
+      refreshChrome();
+    }
+
     // Selects whole rows or columns (a click on a header; `extend` grows the selection to `index`).
     function selectAxis(axis, index, extend, keepExtras = false) {
       commitIfEditing();
@@ -938,7 +946,7 @@
       bindTd, bindSheetCellEvents, updateSelection, refreshChrome, paintSelection, focusAnchor, commitIfEditing, endEdit,
       getRange, getRanges, clearExtras, clearSelectionContents: () => (clip.clearRanges ? clip.clearRanges(getRanges()) : clip.clearRange(getRange())),
       openPasteSpecial: () => pasteUi.open(),
-      selectAxis, selectRange, restoreSelection, runClipboardCommand, shiftFormula: clip.shiftFormula, getSelection: () => ({ ...sel }),
+      selectAxis, selectRange, selectRanges, restoreSelection, runClipboardCommand, shiftFormula: clip.shiftFormula, getSelection: () => ({ ...sel }),
       handleBarKey: (ev) => { if (!shortcuts?.handleBarKey(ev)) point.barKey(ev); },
       holdsTabPress: point.holdsTabPress, detachForSwitch: point.detach, afterSheetSwitch: point.afterSwitch, insertFormulaName: point.insertName,
       hasFormulaEditSurface: point.hasInsertSurface, holdsFormulaMenu: point.holdsFormulaMenu, isEditingFormula: point.isEditingFormula,

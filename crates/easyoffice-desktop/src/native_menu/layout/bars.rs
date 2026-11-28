@@ -197,6 +197,7 @@ const EDIT_SHEET: MenuSpec = menu(
         S,
         "edit:find",
         "edit:replace",
+        "edit:goto",
     ],
 );
 const EDIT_PDF: MenuSpec = menu(

@@ -206,6 +206,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
         Some("Ctrl+H"),
         "replace",
     ),
+    item("edit:goto", "이동…", Some("Ctrl+G"), "sheet-act:goto"),
     item(
         "view:zoom-in",
         "확대",

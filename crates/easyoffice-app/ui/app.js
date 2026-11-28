@@ -808,6 +808,7 @@
       print: () => void printActiveModule().catch((err) => setStatusFeedback(err?.message || String(err))),
       find: () => findActiveModule("find"),
       replace: () => findActiveModule("replace"),
+      "sheet-goto": () => document.querySelector('#menu-bar .md-item[data-sheet-act="goto"]')?.click(),
       "hwp-export-pdf": () => void hwpSession.exportPdf(),
       "studio-save": () => void saveWorkspaceDocument().catch(() => {}),
       "file-save-as": () => (activeModule === "HWP" && hwpHost.isEmbedActive() ? void hwpSession.saveAs("hwp") : void saveWorkspaceDocument({ saveAs: true }).catch(() => {})),
