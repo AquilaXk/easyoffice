@@ -26,6 +26,8 @@ pub const MIN_PAGE_SCALE: u16 = 10;
 pub const MAX_PAGE_SCALE: u16 = 400;
 /// Pages across or down a fitted sheet may cover.
 pub const MAX_FIT_PAGES: u16 = 1_000;
+/// Manual page breaks one axis of a sheet may carry (the spreadsheet program's own limit).
+pub const MAX_PAGE_BREAKS: usize = 1_026;
 /// Largest margin, in thousandths of an inch (22 inches, as for a document page).
 pub const MAX_MARGIN_MILS: u32 = 22_000;
 
@@ -111,6 +113,10 @@ pub struct SheetPage {
     /// Rows and columns repeated on every page: zero-based inclusive runs.
     pub title_rows: Option<(u32, u32)>,
     pub title_cols: Option<(u32, u32)>,
+    /// The manual page breaks (PD-391): the zero-based row or column that starts a new page, sorted, each once and past the
+    /// first line (`rowBreaks/brk@id` of the file counts the rows above the break, which is the same number).
+    pub row_breaks: Vec<u32>,
+    pub col_breaks: Vec<u32>,
 }
 
 impl Default for SheetPage {
@@ -127,8 +133,26 @@ impl Default for SheetPage {
             print_area: Vec::new(),
             title_rows: None,
             title_cols: None,
+            row_breaks: Vec::new(),
+            col_breaks: Vec::new(),
         }
     }
+}
+
+/// Whether `breaks` is a sorted list of distinct lines past the first and inside a sheet of `limit` lines, within the count bound.
+fn breaks_within(breaks: &[u32], limit: u32) -> bool {
+    breaks.len() <= MAX_PAGE_BREAKS
+        && breaks.iter().all(|b| (1..limit).contains(b))
+        && breaks.windows(2).all(|pair| pair[0] < pair[1])
+}
+
+/// `breaks` made valid: out of the sheet or repeated entries go, the rest is sorted and cut at the bound.
+pub(crate) fn clean_breaks(breaks: impl IntoIterator<Item = u32>, limit: u32) -> Vec<u32> {
+    let mut out: Vec<u32> = breaks.into_iter().filter(|b| (1..limit).contains(b)).collect();
+    out.sort_unstable();
+    out.dedup();
+    out.truncate(MAX_PAGE_BREAKS);
+    out
 }
 
 fn run_within(run: Option<(u32, u32)>, limit: u32, max: u32) -> bool {
@@ -156,6 +180,8 @@ impl SheetPage {
             })
             && run_within(self.title_rows, max_row, MAX_TITLE_ROWS)
             && run_within(self.title_cols, max_col, MAX_TITLE_COLS)
+            && breaks_within(&self.row_breaks, max_row)
+            && breaks_within(&self.col_breaks, max_col)
     }
 
     /// The paper's size in millimetres, upright (width, height); A4 for a code the page setup does not know.
@@ -227,6 +253,18 @@ mod tests {
         assert!(!bad.within_bounds(100, 10));
         bad.print_area = vec![CellBox::cell(100, 0)];
         assert!(!bad.within_bounds(100, 10));
+        let mut bad = ok.clone();
+        bad.row_breaks = vec![5, 5];
+        assert!(!bad.within_bounds(100, 10), "a break is listed once");
+        bad.row_breaks = vec![0];
+        assert!(!bad.within_bounds(100, 10), "no break before the first row");
+        bad.row_breaks = vec![100];
+        assert!(!bad.within_bounds(100, 10), "a break inside the sheet");
+        bad.row_breaks = vec![3, 99];
+        assert!(bad.within_bounds(100, 10));
+        bad.col_breaks = vec![10];
+        assert!(!bad.within_bounds(100, 10));
+        assert_eq!(clean_breaks([9, 3, 3, 0, 500], 100), vec![3, 9]);
         let mut bad = ok;
         bad.margins = Some(PageMargins {
             left: MAX_MARGIN_MILS + 1,

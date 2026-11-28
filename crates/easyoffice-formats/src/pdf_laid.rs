@@ -292,8 +292,14 @@ pub(crate) struct Area {
 }
 
 /// Cuts `sizes` into groups of at most `budget`; a line wider than the budget has a group of its own. The groups after the
-/// first carry the repeated lines `title` (indexes into `sizes`) when those lie before the group (the page's cut).
-fn cut(sizes: &[f64], budget: f64, title: Option<(usize, usize)>) -> Vec<(usize, usize, bool)> {
+/// first carry the repeated lines `title` (indexes into `sizes`) when those lie before the group (the page's cut). A group
+/// never runs over a manual break: `breaks` are the indexes into `sizes` that start a page, sorted.
+fn cut(
+    sizes: &[f64],
+    budget: f64,
+    title: Option<(usize, usize)>,
+    breaks: &[usize],
+) -> Vec<(usize, usize, bool)> {
     let mut prefix = Vec::with_capacity(sizes.len() + 1);
     prefix.push(0.0);
     for s in sizes {
@@ -305,8 +311,9 @@ fn cut(sizes: &[f64], budget: f64, title: Option<(usize, usize)>) -> Vec<(usize,
     while i < sizes.len() {
         let repeated = !groups.is_empty() && title.is_some_and(|(_, b)| i > b);
         let room = budget - if repeated { title_size } else { 0.0 };
+        let stop = breaks.iter().copied().find(|&b| b > i).unwrap_or(sizes.len());
         let mut j = i + 1;
-        while j < sizes.len() && prefix[j + 1] - prefix[i] <= room {
+        while j < sizes.len() && j < stop && prefix[j + 1] - prefix[i] <= room {
             j += 1;
         }
         groups.push((i, j - 1, repeated));
@@ -585,8 +592,26 @@ fn sheet_area_pages(
             "PDF 인쇄 영역이 너무 좁아 저장할 수 없습니다.".to_string(),
         ));
     }
-    let col_groups = cut(&col_sizes, avail_w, title_cols);
-    let row_groups = cut(&row_sizes, avail_h, title_rows);
+    // The manual breaks inside the printed range, as indexes into its lines.
+    let breaks_in = |breaks: &[u32], first: u32, len: usize| -> Vec<usize> {
+        breaks
+            .iter()
+            .filter_map(|&b| b.checked_sub(first).map(|at| at as usize))
+            .filter(|&at| at > 0 && at < len)
+            .collect()
+    };
+    let col_groups = cut(
+        &col_sizes,
+        avail_w,
+        title_cols,
+        &breaks_in(&page.col_breaks, area.c1, col_sizes.len()),
+    );
+    let row_groups = cut(
+        &row_sizes,
+        avail_h,
+        title_rows,
+        &breaks_in(&page.row_breaks, area.r1, row_sizes.len()),
+    );
     let Some(total_pages) = col_groups
         .len()
         .checked_mul(row_groups.len())
@@ -836,6 +861,20 @@ mod tests {
 
     fn one_cell_sheet() -> Vec<crate::OdsUnpacked> {
         vec![("S1".to_string(), vec![(0, 0, "a".to_string())])]
+    }
+
+    #[test]
+    fn a_manual_break_starts_a_page_even_when_more_lines_would_fit() {
+        let sizes = [10.0; 6];
+        assert_eq!(cut(&sizes, 100.0, None, &[]), vec![(0, 5, false)]);
+        assert_eq!(
+            cut(&sizes, 100.0, None, &[2, 4]),
+            vec![(0, 1, false), (2, 3, false), (4, 5, false)]
+        );
+        assert_eq!(
+            cut(&sizes, 25.0, None, &[3]),
+            vec![(0, 1, false), (2, 2, false), (3, 4, false), (5, 5, false)]
+        );
     }
 
     #[test]

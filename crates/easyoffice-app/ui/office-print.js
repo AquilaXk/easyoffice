@@ -267,8 +267,8 @@
         const scale = pagePrint.scaleOf(page, totalW, totalH, boxW, boxH);
         const titleRows = inside(page?.titleRows ? [page.titleRows[0] - box.r1, page.titleRows[1] - box.r1] : null, rowSizes.length);
         const titleCols = inside(page?.titleCols ? [page.titleCols[0] - box.c1, page.titleCols[1] - box.c1] : null, colSizes.length);
-        const colCut = pagePrint.cut(colSizes, boxW / scale - headW, titleCols);
-        const rowCut = pagePrint.cut(rowSizes, boxH / scale - headH, titleRows);
+        const colCut = pagePrint.cut(colSizes, boxW / scale - headW, titleCols, pagePrint.breaksIn(page?.colBreaks, box.c1, colSizes.length));
+        const rowCut = pagePrint.cut(rowSizes, boxH / scale - headH, titleRows, pagePrint.breaksIn(page?.rowBreaks, box.r1, rowSizes.length));
         for (const cg of colCut.groups) {
           for (const rg of rowCut.groups) {
             const holder = pages[pageIdx++]?.querySelector?.(".eo-print-sheet-box");

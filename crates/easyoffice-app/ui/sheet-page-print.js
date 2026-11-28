@@ -31,22 +31,32 @@
   }
 
   // Cuts `sizes` into groups of at most `budget` (a line wider than the budget has a group of its own); the groups after the
-  // first one carry the repeated lines `title` (`[first, last]`, indexes into `sizes`) when those lie before the group.
-  function cut(sizes, budget, title) {
+  // first one carry the repeated lines `title` (`[first, last]`, indexes into `sizes`) when those lie before the group. A group
+  // never runs over a manual page break: `breaks` are the sorted indexes into `sizes` that start a page.
+  function cut(sizes, budget, title, breaks = []) {
     const prefix = new Float64Array(sizes.length + 1);
     for (let i = 0; i < sizes.length; i += 1) prefix[i + 1] = prefix[i] + sizes[i];
     const titleSize = title ? prefix[title[1] + 1] - prefix[title[0]] : 0;
     const groups = [];
     let i = 0;
+    let nextBreak = 0;
     while (i < sizes.length) {
       const repeated = groups.length > 0 && title && i > title[1];
       const room = budget - (repeated ? titleSize : 0);
+      while (nextBreak < breaks.length && breaks[nextBreak] <= i) nextBreak += 1;
+      const stop = nextBreak < breaks.length ? breaks[nextBreak] : sizes.length;
       let j = i + 1;
-      while (j < sizes.length && prefix[j + 1] - prefix[i] <= room) j += 1;
+      while (j < sizes.length && j < stop && prefix[j + 1] - prefix[i] <= room) j += 1;
       groups.push({ first: i, last: j - 1, title: Boolean(repeated) });
       i = j;
     }
     return { groups, total: prefix[sizes.length] };
+  }
+
+  // The manual breaks of a page setup (`rowBreaks` or `colBreaks`: the first line of each new page, 1-based) as indexes into the
+  // lines `first` and after that a range holds, `size` of them; a break at the first line or outside the range is no break.
+  function breaksIn(breaks, first, size) {
+    return (breaks || []).map((b) => b - first).filter((at) => at > 0 && at < size).sort((a, b) => a - b);
   }
 
   // The scale a setup prints at for a range of `width` by `height` px on a content box `boxW` by `boxH`: its percentage, or the
@@ -92,8 +102,8 @@
       const titleRows = page?.titleRows ? [page.titleRows[0] - box.r1, page.titleRows[1] - box.r1] : null;
       const titleCols = page?.titleCols ? [page.titleCols[0] - box.c1, page.titleCols[1] - box.c1] : null;
       const inside = (t, size) => (t && t[0] >= 0 && t[1] < size ? t : null);
-      const colCut = cut(colSizes, boxW / scale - headW, inside(titleCols, colSizes.length));
-      const rowCut = cut(rowSizes, boxH / scale - headH, inside(titleRows, rowSizes.length));
+      const colCut = cut(colSizes, boxW / scale - headW, inside(titleCols, colSizes.length), breaksIn(page?.colBreaks, box.c1, colSizes.length));
+      const rowCut = cut(rowSizes, boxH / scale - headH, inside(titleRows, rowSizes.length), breaksIn(page?.rowBreaks, box.r1, rowSizes.length));
       if (out.length + colCut.groups.length * rowCut.groups.length > MAX_PRINT_PAGES) throw new Error(MSG_TOO_BIG);
       for (const cg of colCut.groups) {
         for (const rg of rowCut.groups) {
@@ -256,5 +266,5 @@
     return tr;
   }
 
-  host.__EASYOFFICE_SHEET_PAGE_PRINT__ = { buildPages, cut, scaleOf, MAX_PRINT_CELLS, MAX_PRINT_PAGES, MSG_TOO_BIG };
+  host.__EASYOFFICE_SHEET_PAGE_PRINT__ = { buildPages, cut, breaksIn, scaleOf, MAX_PRINT_CELLS, MAX_PRINT_PAGES, MSG_TOO_BIG };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

@@ -2,7 +2,8 @@
 //!
 //! `page`: `{"landscape": bool, "paper": code, "margins": {"left","right","top","bottom","header","footer"},
 //! "scale": {"percent": n} | {"fitWidth": n, "fitHeight": n}, "centerH": bool, "centerV": bool, "grid": bool,
-//! "headings": bool, "printArea": ["A1:D10", ...], "titleRows": [first, last], "titleCols": [first, last]}`.
+//! "headings": bool, "printArea": ["A1:D10", ...], "titleRows": [first, last], "titleCols": [first, last],
+//! "rowBreaks": [row, ...], "colBreaks": [col, ...]}` (the breaks are the first row or column of each new page, 2 or more).
 //! Margins are thousandths of an inch (`SheetPage::margins`), rows and columns are 1-based and inclusive,
 //! `paper` is the code of `pageSetup@paperSize`, and a fit of `0` leaves that direction as long as it needs.
 //! Input past a bound (`SheetPage::within_bounds`: scale 10 to 400, pages across and down, margins, ranges, the
@@ -84,6 +85,27 @@ fn parse_run(v: &StrictJsonValue, limit: u32, what: &str) -> Result<(u32, u32), 
     }
 }
 
+/// `[row, ...]` (1-based, the first line of each new page, so 2 or more) as zero-based lines, sorted and without repeats.
+fn parse_breaks(v: &StrictJsonValue, limit: u32, what: &str) -> Result<Vec<u32>, EasyOfficeError> {
+    let items = v.as_array().ok_or_else(|| bad(what))?;
+    if items.len() > easyoffice_formats::MAX_PAGE_BREAKS {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(
+            "쪽 나누기 수가 한도를 초과했습니다.".into(),
+        ));
+    }
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        let n = number(Some(item), what)?;
+        if !(2..=limit).contains(&n) {
+            return Err(bad(what));
+        }
+        out.push(n - 1);
+    }
+    out.sort_unstable();
+    out.dedup();
+    Ok(out)
+}
+
 fn parse_print_area(v: &StrictJsonValue) -> Result<Vec<CellBox>, EasyOfficeError> {
     let items = v.as_array().ok_or_else(|| bad("printArea"))?;
     if items.len() > easyoffice_formats::MAX_PRINT_RANGES {
@@ -132,6 +154,12 @@ pub(crate) fn parse_page(obj: Obj<'_>, styling: &mut SheetStyling) -> Result<(),
     }
     if let Some(v) = field(page_obj, "titleCols") {
         page.title_cols = Some(parse_run(v, COLS, "titleCols")?);
+    }
+    if let Some(v) = field(page_obj, "rowBreaks") {
+        page.row_breaks = parse_breaks(v, ROWS, "rowBreaks")?;
+    }
+    if let Some(v) = field(page_obj, "colBreaks") {
+        page.col_breaks = parse_breaks(v, COLS, "colBreaks")?;
     }
     if !page.within_bounds(ROWS, COLS) {
         return Err(EasyOfficeError::ResourceBudgetExceeded(
@@ -196,6 +224,12 @@ fn page_json(page: &SheetPage) -> String {
     if let Some((a, b)) = page.title_cols {
         put(&mut out, format!("\"titleCols\":[{},{}]", a + 1, b + 1));
     }
+    for (key, breaks) in [("rowBreaks", &page.row_breaks), ("colBreaks", &page.col_breaks)] {
+        if !breaks.is_empty() {
+            let items: Vec<String> = breaks.iter().map(|b| (b + 1).to_string()).collect();
+            put(&mut out, format!("\"{key}\":[{}]", items.join(",")));
+        }
+    }
     out.push('}');
     out
 }
@@ -222,6 +256,19 @@ pub(crate) fn moved_page_json(
     };
     page.title_rows = on_axis(page.title_rows, easyoffice_sheet::Axis::Row);
     page.title_cols = on_axis(page.title_cols, easyoffice_sheet::Axis::Col);
+    // A break sits before a line: it moves with the line and goes with it when the line is deleted. A column-bounded edit
+    // leaves the breaks of whole lines alone.
+    let moved = |breaks: &[u32], axis| -> Vec<u32> {
+        if edit.axis != axis {
+            return breaks.to_vec();
+        }
+        breaks
+            .iter()
+            .filter_map(|&b| easyoffice_sheet::shift_runs(&[(b, b)], edit).first().map(|run| run.0))
+            .collect()
+    };
+    page.row_breaks = moved(&page.row_breaks, easyoffice_sheet::Axis::Row);
+    page.col_breaks = moved(&page.col_breaks, easyoffice_sheet::Axis::Col);
     Ok(page_json(page))
 }
 
@@ -313,6 +360,50 @@ mod tests {
             r#"{"page":{"titleRows":[1,256],"titleCols":[1,64],"scale":{"percent":400}}}"#
         )
         .is_ok());
+    }
+
+    #[test]
+    fn manual_breaks_round_trip_sorted_and_hostile_lists_are_refused() {
+        let styling = read(r#"{"page":{"rowBreaks":[31,11,11],"colBreaks":[5]}}"#).unwrap();
+        assert_eq!(styling.page.row_breaks, vec![10, 30]);
+        assert_eq!(styling.page.col_breaks, vec![4]);
+        assert_eq!(
+            page_json(&styling.page),
+            r#"{"rowBreaks":[11,31],"colBreaks":[5]}"#
+        );
+        for text in [
+            r#"{"page":{"rowBreaks":[1]}}"#,
+            r#"{"page":{"rowBreaks":[0]}}"#,
+            r#"{"page":{"rowBreaks":[1048577]}}"#,
+            r#"{"page":{"colBreaks":[16385]}}"#,
+            r#"{"page":{"rowBreaks":"7"}}"#,
+            r#"{"page":{"rowBreaks":["x"]}}"#,
+        ] {
+            assert!(read(text).is_err(), "{text}");
+        }
+        let many = (2..=1030).map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+        assert!(read(&format!("{{\"page\":{{\"rowBreaks\":[{many}]}}}}")).is_err());
+    }
+
+    #[test]
+    fn manual_breaks_move_with_their_lines_when_rows_or_columns_are_edited() {
+        use easyoffice_sheet::{Axis, AxisEdit, EditKind};
+        let page = StrictJsonValue::parse(r#"{"rowBreaks":[11,21],"colBreaks":[5]}"#).unwrap();
+        let moved = |axis, kind, at, count| {
+            moved_page_json(&page, &AxisEdit::new(axis, kind, at, count).unwrap()).unwrap()
+        };
+        assert_eq!(
+            moved(Axis::Row, EditKind::Insert, 5, 2),
+            r#"{"rowBreaks":[13,23],"colBreaks":[5]}"#
+        );
+        assert_eq!(
+            moved(Axis::Row, EditKind::Delete, 10, 1),
+            r#"{"rowBreaks":[20],"colBreaks":[5]}"#
+        );
+        assert_eq!(
+            moved(Axis::Col, EditKind::Insert, 0, 1),
+            r#"{"rowBreaks":[11,21],"colBreaks":[6]}"#
+        );
     }
 
     #[test]

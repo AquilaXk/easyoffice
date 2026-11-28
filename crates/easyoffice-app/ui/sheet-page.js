@@ -140,6 +140,8 @@
     if (area.length > 0) page.printArea = area;
     if (rows.length === 2) page.titleRows = rows;
     if (cols.length === 2) page.titleCols = cols;
+    // The manual breaks are not in the dialog; its 확인 keeps them.
+    for (const key of ["rowBreaks", "colBreaks"]) if (original?.[key]?.length > 0) page[key] = [...original[key]];
     return { page };
   }
 
@@ -302,6 +304,72 @@
       });
     }
 
+    // ---- the manual page breaks (삽입 > 페이지 나누기, PD-391) ----------------------------------------------------------------
+    // `rowBreaks` and `colBreaks` of a page setup hold the first row or column of each new page (1-based, at least 2).
+    const MESSAGES = {
+      first: "첫 행이나 첫 열 앞에는 쪽을 나눌 수 없음",
+      none: "제거할 쪽 나누기가 없음",
+    };
+
+    // The lines the commands act on: a selected row or column header names its axis, a cell names both.
+    function breakLines() {
+      const { axis } = deps.getSelection();
+      const rg = getRange();
+      return { row: axis === "col" ? 0 : rg.r1, col: axis === "row" ? 0 : rg.c1 };
+    }
+
+    function withBreaks(name, key, list) {
+      const { rowBreaks, colBreaks, ...rest } = layoutApi.pageOf(name) ?? {};
+      const next = { ...rest, rowBreaks, colBreaks, [key]: list };
+      for (const k of ["rowBreaks", "colBreaks"]) if (!next[k] || next[k].length === 0) delete next[k];
+      layoutApi.setPage(name, next);
+    }
+
+    function insertPageBreak() {
+      return step((name) => {
+        const page = layoutApi.pageOf(name) ?? {};
+        const at = breakLines();
+        const rows = at.row >= 2 ? [...new Set([...(page.rowBreaks ?? []), at.row])].sort((a, b) => a - b) : null;
+        const cols = at.col >= 2 ? [...new Set([...(page.colBreaks ?? []), at.col])].sort((a, b) => a - b) : null;
+        if (!rows && !cols) {
+          say(MESSAGES.first);
+          return null;
+        }
+        if (rows) withBreaks(name, "rowBreaks", rows);
+        if (cols) withBreaks(name, "colBreaks", cols);
+        return "쪽 나누기 삽입";
+      });
+    }
+
+    function removePageBreak() {
+      return step((name) => {
+        const page = layoutApi.pageOf(name) ?? {};
+        const at = breakLines();
+        const hasRow = (page.rowBreaks ?? []).includes(at.row);
+        const hasCol = (page.colBreaks ?? []).includes(at.col);
+        if (!hasRow && !hasCol) {
+          say(MESSAGES.none);
+          return null;
+        }
+        if (hasRow) withBreaks(name, "rowBreaks", page.rowBreaks.filter((r) => r !== at.row));
+        if (hasCol) withBreaks(name, "colBreaks", (layoutApi.pageOf(name)?.colBreaks ?? []).filter((c) => c !== at.col));
+        return "쪽 나누기 제거";
+      });
+    }
+
+    function resetPageBreaks() {
+      return step((name) => {
+        const page = layoutApi.pageOf(name) ?? {};
+        if (!(page.rowBreaks?.length > 0) && !(page.colBreaks?.length > 0)) {
+          say(MESSAGES.none);
+          return null;
+        }
+        const { rowBreaks, colBreaks, ...rest } = page;
+        layoutApi.setPage(name, rest);
+        return "모든 쪽 나누기 원래대로";
+      });
+    }
+
     function bind() {
       byId("btn-sheet-page-apply")?.addEventListener("click", () => void apply());
       for (const tab of document.querySelectorAll("#sheet-page-dialog [data-sp-tab]")) tab.addEventListener("click", () => showPane(tab.dataset.spTab));
@@ -313,6 +381,9 @@
       "page-setup": () => Promise.resolve(open()),
       "print-area-set": setPrintArea,
       "print-area-clear": clearPrintArea,
+      "page-break-insert": insertPageBreak,
+      "page-break-remove": removePageBreak,
+      "page-break-reset": resetPageBreaks,
     };
     return { actions, open, apply, bind, setPrintArea, clearPrintArea };
   }

@@ -34,6 +34,8 @@ fn full_page() -> SheetPage {
         ],
         title_rows: Some((0, 1)),
         title_cols: Some((0, 0)),
+        row_breaks: vec![20, 45],
+        col_breaks: vec![4],
     }
 }
 
@@ -102,8 +104,31 @@ fn a_full_setup_round_trips_through_xlsx_and_a_second_write_is_the_same() {
     let book = part(&bytes, "xl/workbook.xml");
     assert!(book.contains("<definedName name=\"_xlnm.Print_Area\" localSheetId=\"0\">Sheet1!$A$1:$D$10,Sheet1!$F$15</definedName>"), "{book}");
     assert!(book.contains("<definedName name=\"_xlnm.Print_Titles\" localSheetId=\"0\">Sheet1!$A:$A,Sheet1!$1:$2</definedName>"), "{book}");
+    assert!(
+        sheet.contains("<rowBreaks count=\"2\" manualBreakCount=\"2\"><brk id=\"20\" max=\"16383\" man=\"1\"/><brk id=\"45\" max=\"16383\" man=\"1\"/></rowBreaks><colBreaks count=\"1\" manualBreakCount=\"1\"><brk id=\"4\" max=\"1048575\" man=\"1\"/></colBreaks>"),
+        "{sheet}"
+    );
     assert_eq!(read(&bytes), vec![full_page()]);
     assert_eq!(read(&pack(&["Sheet1"], read(&bytes))), vec![full_page()]);
+}
+
+#[test]
+fn only_the_breaks_a_user_set_are_read_and_a_hostile_list_is_bounded() {
+    let bytes = pack(&["Sheet1"], vec![SheetPage::default()]);
+    let sheet = "<?xml version=\"1.0\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData/>\
+        <rowBreaks count=\"4\" manualBreakCount=\"2\"><brk id=\"10\" max=\"16383\" man=\"1\"/><brk id=\"20\" max=\"16383\"/>\
+        <brk id=\"5\" max=\"16383\" man=\"1\"/><brk id=\"5\" man=\"1\"/><brk id=\"0\" man=\"1\"/><brk id=\"9999999\" man=\"1\"/></rowBreaks>\
+        <colBreaks><brk id=\"3\" man=\"1\"/></colBreaks></worksheet>";
+    let page = read(&replace_part(&bytes, "xl/worksheets/sheet1.xml", sheet)).remove(0);
+    assert_eq!(page.row_breaks, vec![5, 10], "sorted, once, without the program's own and the ones outside the sheet");
+    assert_eq!(page.col_breaks, vec![3]);
+    let many: String = (1..=3000)
+        .map(|i| format!("<brk id=\"{i}\" man=\"1\"/>"))
+        .collect();
+    let hostile = format!("<?xml version=\"1.0\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData/><rowBreaks>{many}</rowBreaks></worksheet>");
+    let page = read(&replace_part(&bytes, "xl/worksheets/sheet1.xml", &hostile)).remove(0);
+    assert!(page.row_breaks.len() <= easyoffice_formats::MAX_PAGE_BREAKS);
+    assert!(page.within_bounds(1_048_576, 16_384));
 }
 
 #[test]
@@ -270,9 +295,13 @@ fn read_ods(bytes: &[u8]) -> Vec<SheetPage> {
         .collect()
 }
 
-/// What an ODS keeps of a page: all of it, the repeated lines when they start at the first row and column.
+/// What an ODS keeps of a page: all of it but the manual page breaks, which the ODF model here leaves to the row styles.
 fn ods_kept(page: &SheetPage) -> SheetPage {
-    page.clone()
+    SheetPage {
+        row_breaks: Vec::new(),
+        col_breaks: Vec::new(),
+        ..page.clone()
+    }
 }
 
 #[test]

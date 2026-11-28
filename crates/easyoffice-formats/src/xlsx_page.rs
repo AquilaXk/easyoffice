@@ -10,7 +10,8 @@ use crate::rtf_xml_helpers::{
 };
 use crate::sheet_page::{inches_to_mils, mils_text, PageMargins, PageScale, SheetPage};
 use crate::sheet_page::{
-    MAX_FIT_PAGES, MAX_MARGIN_MILS, MAX_PAPER_CODE, MAX_TITLE_COLS, MAX_TITLE_ROWS,
+    clean_breaks, MAX_FIT_PAGES, MAX_MARGIN_MILS, MAX_PAGE_BREAKS, MAX_PAPER_CODE, MAX_TITLE_COLS,
+    MAX_TITLE_ROWS,
 };
 use crate::xml_stream::{Attrs, XmlEvent};
 use crate::{CellBox, OoxmlCodec, SheetStyling, XmlSanitizer};
@@ -75,7 +76,26 @@ pub(crate) fn page_tail_xml(page: &SheetPage) -> String {
     if !setup.is_empty() {
         let _ = write!(xml, "<pageSetup{setup}/>");
     }
+    breaks_xml(&mut xml, "rowBreaks", &page.row_breaks, LAST_COL);
+    breaks_xml(&mut xml, "colBreaks", &page.col_breaks, LAST_ROW);
     xml
+}
+
+/// `<rowBreaks>` or `<colBreaks>`: each `brk@id` counts the lines above the break and `max` is the last line of the other axis
+/// (ECMA-376 18.3.1.73 `rowBreaks`, 18.3.1.14 `colBreaks`, 18.3.1.1 `brk`).
+fn breaks_xml(xml: &mut String, element: &str, breaks: &[u32], other_last: u32) {
+    if breaks.is_empty() {
+        return;
+    }
+    let _ = write!(
+        xml,
+        "<{element} count=\"{n}\" manualBreakCount=\"{n}\">",
+        n = breaks.len()
+    );
+    for id in breaks {
+        let _ = write!(xml, "<brk id=\"{id}\" max=\"{other_last}\" man=\"1\"/>");
+    }
+    let _ = write!(xml, "</{element}>");
 }
 
 fn flag(attrs: &Attrs<'_>, name: &str) -> bool {
@@ -93,14 +113,37 @@ pub(crate) struct PageScan {
     page: SheetPage,
     scale: Option<u16>,
     fit: (Option<u16>, Option<u16>),
+    /// Which list of breaks the scan is inside: `Some(true)` for `rowBreaks`, `Some(false)` for `colBreaks`.
+    in_breaks: Option<bool>,
 }
 
 impl PageScan {
     pub(crate) fn feed(&mut self, event: &XmlEvent<'_>) {
-        let XmlEvent::Start { name, attrs } = event else {
-            return;
+        let (name, attrs) = match event {
+            XmlEvent::Start { name, attrs } => (name, attrs),
+            XmlEvent::End("rowBreaks" | "colBreaks") => {
+                self.in_breaks = None;
+                return;
+            }
+            _ => return,
         };
         match *name {
+            "rowBreaks" => self.in_breaks = Some(true),
+            "colBreaks" => self.in_breaks = Some(false),
+            // Only the breaks a user set (`man`) count; the ones the program worked out are its own to recompute. Anything
+            // past the bound of the model is left out.
+            "brk" if flag(attrs, "man") => {
+                let id = attrs.get("id").as_deref().and_then(|v| v.trim().parse::<u32>().ok());
+                match (self.in_breaks, id) {
+                    (Some(true), Some(id)) if self.page.row_breaks.len() < MAX_PAGE_BREAKS => {
+                        self.page.row_breaks.push(id);
+                    }
+                    (Some(false), Some(id)) if self.page.col_breaks.len() < MAX_PAGE_BREAKS => {
+                        self.page.col_breaks.push(id);
+                    }
+                    _ => {}
+                }
+            }
             "pageSetUpPr" => self.fit_to_page = flag(attrs, "fitToPage"),
             "printOptions" => {
                 self.page.center_horizontal = flag(attrs, "horizontalCentered");
@@ -122,6 +165,8 @@ impl PageScan {
 
     /// The setup read, each part within its bounds (a scale or a page count out of range is the default).
     pub(crate) fn finish(mut self) -> SheetPage {
+        self.page.row_breaks = clean_breaks(std::mem::take(&mut self.page.row_breaks), LAST_ROW + 1);
+        self.page.col_breaks = clean_breaks(std::mem::take(&mut self.page.col_breaks), LAST_COL + 1);
         let (width, height) = (self.fit.0.unwrap_or(1), self.fit.1.unwrap_or(1));
         self.page.scale = if self.fit_to_page && width <= MAX_FIT_PAGES && height <= MAX_FIT_PAGES {
             PageScale::Fit { width, height }

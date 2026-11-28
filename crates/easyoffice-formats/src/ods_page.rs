@@ -34,6 +34,9 @@ fn layout_of(page: &SheetPage) -> SheetPage {
         print_area: Vec::new(),
         title_rows: None,
         title_cols: None,
+        // ODS keeps no manual breaks in this model (an ODF row break is a style of the row).
+        row_breaks: Vec::new(),
+        col_breaks: Vec::new(),
         ..page.clone()
     }
 }
