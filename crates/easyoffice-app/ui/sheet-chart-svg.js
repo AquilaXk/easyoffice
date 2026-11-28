@@ -15,7 +15,16 @@
     line: "꺾은선형",
     pie: "원형",
     scatter: "분산형",
+    doughnut: "도넛형",
+    radar: "방사형",
+    bubble: "거품형",
+    stock: "주식형",
+    combo: "혼합",
   });
+  // The kinds whose categories are X values: scatter and the bubble chart.
+  const usesX = (chartType) => chartType === "scatter" || chartType === "bubble";
+  // The kinds drawn inside one round plot with no axes of the rectangle kind: no room for an axis label row.
+  const isRoundKind = (chartType) => chartType === "pie" || chartType === "doughnut" || chartType === "radar";
   const MAX_CHART_SERIES = 32;
   const MAX_SERIES_POINTS = 2048;
 
@@ -191,7 +200,7 @@
     if (!box) return [];
     const map = resolveSheetMap(sheetDataStore, box.sheet);
     const swapped = chart.switchRowCol === true;
-    const isScatter = chart.chartType === "scatter";
+    const isScatter = usesX(chart.chartType);
     const { nMajor, nMinor, at, hasCatAxis, hasSeriesHeader } = inspectMatrixLayout(box, swapped, map, isScatter);
     const startMaj = hasSeriesHeader ? 1 : 0;
     const endMaj = Math.min(nMajor - 1, startMaj + MAX_SERIES_POINTS - 1);
@@ -234,7 +243,7 @@
   }
 
   function extractFromExplicitSeries(chart, defaultSheet, sheetDataStore) {
-    const isScatter = chart.chartType === "scatter";
+    const isScatter = usesX(chart.chartType);
     const seriesList = chart.series.slice(0, MAX_CHART_SERIES);
     const parsedSeries = [];
     let maxPoints = 0;
@@ -293,7 +302,7 @@
     if (!box) return { categories: [], xValues: [], series: [], allPercent: false };
     const map = resolveSheetMap(sheetDataStore, box.sheet);
     const swapped = chart?.switchRowCol === true;
-    const isScatter = chart?.chartType === "scatter";
+    const isScatter = usesX(chart?.chartType);
     const { nMajor, nMinor, at, hasCatAxis, hasSeriesHeader } = inspectMatrixLayout(box, swapped, map, isScatter);
     const startMaj = hasSeriesHeader ? 1 : 0;
     const endMaj = Math.min(nMajor - 1, startMaj + MAX_SERIES_POINTS - 1);
@@ -819,6 +828,9 @@
     return true;
   }
 
+  // What the renderers of the other kinds take from this file.
+  const CHART_KIT = Object.freeze({ makeSvgEl, seriesColor, round2, buildNiceScale, formatTickValue, truncateLabel, seriesExtent });
+
   function renderChartSvg(opts) {
     const { document, chart, sheetName, sheetDataStore, forPrint = false } = opts;
     const width = Math.max(120, Math.round(Number(opts.width || chart?.anchor?.width) || 420));
@@ -853,7 +865,7 @@
     }
 
     const legendPos = chart?.legend || "right";
-    const isPie = chart?.chartType === "pie";
+    const isPie = isRoundKind(chart?.chartType);
     const isBar = chart?.chartType === "bar";
     const sideLegendW = Math.min(104, Math.max(76, Math.round(width * 0.24)));
     const leftReserve = legendPos === "left" ? sideLegendW : 0;
@@ -878,7 +890,12 @@
       rendered = pieRes.ok;
       legendItems = pieRes.legendItems;
     } else if (chart?.chartType === "scatter") rendered = renderScatterPlot(document, svg, dataset, box, colors);
-    else rendered = renderColumnPlot(document, svg, dataset, box, colors);
+    else if (Object.hasOwn(host.__EASYOFFICE_CHART_KINDS__ || {}, chart?.chartType)) {
+      // doughnut, radar, bubble, stock and combo draw in their own files (`chart-kind-*.js`).
+      const res = host.__EASYOFFICE_CHART_KINDS__[chart.chartType].render(CHART_KIT, document, svg, dataset, box, colors);
+      rendered = res.ok;
+      legendItems = res.legendItems;
+    } else rendered = renderColumnPlot(document, svg, dataset, box, colors);
 
     if (!rendered) {
       svg.appendChild(makeSvgEl(document, "text", { class: "eo-chart-empty", x: round2(width / 2), y: round2(height / 2), fill: colors.muted, "font-size": "11", "font-family": "sans-serif", "text-anchor": "middle" }, "데이터 없음"));
@@ -916,7 +933,7 @@
       throw new Error("시트당 차트 수 한도(64개)를 초과했습니다.");
     }
     const chartType = String(spec.chartType || "column");
-    if (!(layoutApi?.CHART_TYPES || ["column", "bar", "line", "pie", "scatter"]).includes(chartType)) {
+    if (!(layoutApi?.CHART_TYPES || Object.keys(CHART_TYPE_LABELS)).includes(chartType)) {
       throw new Error("지원하지 않는 차트 종류입니다: " + chartType);
     }
     const dataRange = String(spec.dataRange ?? spec.range ?? "").trim();

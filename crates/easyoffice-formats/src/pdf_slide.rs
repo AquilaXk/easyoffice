@@ -379,6 +379,8 @@ fn draw_chart(
     if r.w <= 0.0 || r.h <= 0.0 {
         return;
     }
+    // A kind the PDF has no drawing of its own for is drawn as its nearest classic chart (PD-402).
+    let kind = kind.pdf_base();
     cv.fill_rect(r.x, r.y, r.w, r.h, 0xFFFFFF);
     cv.stroke_rect(r.x, r.y, r.w, r.h, 0xCBD5E1, 0.75);
     let top_pad = if title.is_empty() {

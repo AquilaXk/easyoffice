@@ -19,6 +19,7 @@
   });
   const CHART_LABELS = Object.freeze({
     column: "묶은 세로 막대형", bar: "묶은 가로 막대형", line: "꺾은선형", pie: "원형", scatter: "분산형",
+    doughnut: "도넛형", radar: "방사형", bubble: "거품형", stock: "주식형", combo: "혼합",
   });
   // The slide transitions by their file name, with the names of the Korean presentation program's 화면 전환 list.
   const TRANSITION_LABELS = Object.freeze({
@@ -330,7 +331,7 @@
     const { categories, series } = sanitizeChartSeries(el.categories, el.series);
     const map = Object.create(null);
     map.A1 = { value: "", t: "s" };
-    const isScatter = el.chartType === "scatter";
+    const isScatter = el.chartType === "scatter" || el.chartType === "bubble";
     for (let r = 0; r < categories.length; r += 1) {
       const cat = String(categories[r] ?? ""), asNum = Number(cat);
       map["A" + (r + 2)] = isScatter && cat !== "" && Number.isFinite(asNum) ? { value: String(asNum) } : { value: cat, t: "s" };

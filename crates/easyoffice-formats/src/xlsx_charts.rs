@@ -5,6 +5,7 @@
 
 use std::fmt::Write;
 
+use crate::chart_kinds::{axes_xml, plot_groups, STOCK_SERIES_LOOK};
 use crate::sheet_styling::sheet_chart::{
     parse_sheet_and_box, ChartAnchor, ChartKind, ChartLegendPos, ChartSeriesRef, SheetCellIndex,
     SheetChart, MAX_CHART_TEXT_BYTES, MAX_POINTS_PER_SERIES, MAX_SERIES_PER_CHART,
@@ -55,63 +56,27 @@ pub(crate) fn build_chart_xml(
 
     xml.push_str("<c:plotArea><c:layout/>");
     let series_list = chart.resolved_series(sheet_name, sheets);
-    if chart.kind == ChartKind::Pie {
-        xml.push_str("<c:pieChart><c:varyColors val=\"1\"/>");
+    let series_list = &series_list[..series_list.len().min(MAX_SERIES_PER_CHART)];
+    for group in plot_groups(chart.kind, series_list.len()) {
+        let _ = write!(xml, "<{}>{}", group.tag, group.header);
         push_series_list(
             &mut xml,
-            &series_list,
+            series_list,
             sheet_name,
             caches,
             cell_index,
-            false,
+            (chart.kind, group.series.clone()),
         );
-        xml.push_str("<c:firstSliceAng val=\"0\"/></c:pieChart>");
-    } else {
-        let (tag, hdr, extra) = match chart.kind {
-            ChartKind::Bar => (
-                "c:barChart",
-                "<c:barDir val=\"bar\"/><c:grouping val=\"clustered\"/>",
-                "",
-            ),
-            ChartKind::Column => (
-                "c:barChart",
-                "<c:barDir val=\"col\"/><c:grouping val=\"clustered\"/>",
-                "",
-            ),
-            ChartKind::Line => (
-                "c:lineChart",
-                "<c:grouping val=\"standard\"/>",
-                "<c:marker val=\"1\"/>",
-            ),
-            ChartKind::Scatter => ("c:scatterChart", "<c:scatterStyle val=\"lineMarker\"/>", ""),
-            ChartKind::Pie => unreachable!(),
-        };
-        let is_scatter = chart.kind == ChartKind::Scatter;
-        let (cat_pos, val_pos) = if chart.kind == ChartKind::Bar {
-            ("l", "b")
-        } else {
-            ("b", "l")
-        };
-        let _ = write!(xml, "<{tag}>{hdr}");
-        push_series_list(
-            &mut xml,
-            &series_list,
-            sheet_name,
-            caches,
-            cell_index,
-            is_scatter,
-        );
-        let _ = write!(
-            xml,
-            "{extra}<c:axId val=\"{AX_ID_CAT}\"/><c:axId val=\"{AX_ID_VAL}\"/></{tag}>"
-        );
-        if is_scatter {
-            push_val_ax(&mut xml, AX_ID_CAT, AX_ID_VAL, cat_pos, false);
-        } else {
-            push_cat_ax(&mut xml, cat_pos);
+        xml.push_str(group.tail);
+        if group.has_axes {
+            let _ = write!(
+                xml,
+                "<c:axId val=\"{AX_ID_CAT}\"/><c:axId val=\"{AX_ID_VAL}\"/>"
+            );
         }
-        push_val_ax(&mut xml, AX_ID_VAL, AX_ID_CAT, val_pos, true);
+        let _ = write!(xml, "</{}>", group.tag);
     }
+    xml.push_str(&axes_xml(chart.kind));
     xml.push_str("</c:plotArea>");
     if let Some(pos) = chart.legend.ooxml_val() {
         let _ = write!(
@@ -129,14 +94,17 @@ fn push_series_list(
     sheet_name: &str,
     caches: &[XlsxFormulaCache],
     cell_index: &SheetCellIndex<'_>,
-    is_scatter: bool,
+    (kind, emitted): (ChartKind, std::ops::Range<usize>),
 ) {
-    let (cat_tag, val_tag) = if is_scatter {
+    let (cat_tag, val_tag) = if kind.has_numeric_x() {
         ("c:xVal", "c:yVal")
     } else {
         ("c:cat", "c:val")
     };
-    for (idx, ser) in series_list.iter().take(MAX_SERIES_PER_CHART).enumerate() {
+    // A bubble chart reads its series in pairs: the Y values, then the sizes.
+    let step = if kind == ChartKind::Bubble { 2 } else { 1 };
+    for idx in emitted {
+        let ser = &series_list[idx * step];
         let resolved = cell_index.resolve_series(sheet_name, caches, ser);
         let _ = write!(xml, "<c:ser><c:idx val=\"{idx}\"/><c:order val=\"{idx}\"/>");
         let tx_name = if ser.name.is_empty() {
@@ -160,6 +128,9 @@ fn push_series_list(
                 "<c:tx><c:v>{}</c:v></c:tx>",
                 XmlSanitizer::escape(tx_name)
             );
+        }
+        if kind == ChartKind::Stock {
+            xml.push_str(STOCK_SERIES_LOOK);
         }
 
         if let Some(cref) = ser.categories_ref.as_deref() {
@@ -191,25 +162,25 @@ fn push_series_list(
                 "<c:numLit><c:formatCode>General</c:formatCode><c:ptCount val=\"0\"/></c:numLit>",
             );
         }
-        let _ = write!(xml, "</{val_tag}></c:ser>");
+        let _ = write!(xml, "</{val_tag}>");
+        if let Some(size_ser) = series_list.get(idx * step + 1).filter(|_| step == 2) {
+            let sizes = cell_index.resolve_series(sheet_name, caches, size_ser);
+            xml.push_str("<c:bubbleSize>");
+            if size_ser.values_ref.is_empty() {
+                xml.push_str("<c:numLit><c:formatCode>General</c:formatCode><c:ptCount val=\"0\"/></c:numLit>");
+            } else {
+                let _ = write!(
+                    xml,
+                    "<c:numRef><c:f>{}</c:f>",
+                    XmlSanitizer::escape(&size_ser.values_ref)
+                );
+                push_num_cache(xml, &sizes.values);
+                xml.push_str("</c:numRef>");
+            }
+            xml.push_str("</c:bubbleSize>");
+        }
+        xml.push_str("</c:ser>");
     }
-}
-
-fn push_cat_ax(xml: &mut String, ax_pos: &str) {
-    let _ = write!(
-        xml,
-        "<c:catAx><c:axId val=\"{AX_ID_CAT}\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling>\
-         <c:delete val=\"0\"/><c:axPos val=\"{ax_pos}\"/><c:crossAx val=\"{AX_ID_VAL}\"/></c:catAx>"
-    );
-}
-
-fn push_val_ax(xml: &mut String, ax_id: &str, cross_ax: &str, ax_pos: &str, gridlines: bool) {
-    let grid = if gridlines { "<c:majorGridlines/>" } else { "" };
-    let _ = write!(
-        xml,
-        "<c:valAx><c:axId val=\"{ax_id}\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling>\
-         <c:delete val=\"0\"/><c:axPos val=\"{ax_pos}\"/>{grid}<c:crossAx val=\"{cross_ax}\"/></c:valAx>"
-    );
 }
 
 fn push_text_cache<S: AsRef<str>>(xml: &mut String, items: &[S], numeric: bool) {
@@ -252,6 +223,7 @@ enum SerSlot {
     Tx,
     Cat,
     Val,
+    Size,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -279,6 +251,7 @@ pub(crate) fn parse_chart_xml(
     let mut legend = ChartLegendPos::None;
     let mut series: Vec<ChartSeriesRef> = Vec::new();
     let mut cur_ser = ChartSeriesRef::default();
+    let mut size_ref: Option<String> = None;
     let mut text_buf = String::new();
     let (mut depth, mut pt_count) = (0usize, 0usize);
 
@@ -313,8 +286,26 @@ pub(crate) fn parse_chart_xml(
                     "lineChart" | "line3DChart" if plot_d > 0 && kind.is_none() => {
                         kind = Some(ChartKind::Line);
                     }
-                    "pieChart" | "pie3DChart" | "doughnutChart" if plot_d > 0 && kind.is_none() => {
+                    // A line group after a bar group of one series is a combo (PD-402).
+                    "lineChart" | "line3DChart"
+                        if plot_d > 0 && kind == Some(ChartKind::Column) && series.len() == 1 =>
+                    {
+                        kind = Some(ChartKind::Combo);
+                    }
+                    "pieChart" | "pie3DChart" if plot_d > 0 && kind.is_none() => {
                         kind = Some(ChartKind::Pie);
+                    }
+                    "doughnutChart" if plot_d > 0 && kind.is_none() => {
+                        kind = Some(ChartKind::Doughnut);
+                    }
+                    "radarChart" if plot_d > 0 && kind.is_none() => {
+                        kind = Some(ChartKind::Radar);
+                    }
+                    "bubbleChart" if plot_d > 0 && kind.is_none() => {
+                        kind = Some(ChartKind::Bubble);
+                    }
+                    "stockChart" if plot_d > 0 && kind.is_none() => {
+                        kind = Some(ChartKind::Stock);
                     }
                     "scatterChart" if plot_d > 0 && kind.is_none() => {
                         kind = Some(ChartKind::Scatter);
@@ -328,12 +319,13 @@ pub(crate) fn parse_chart_xml(
                         slot = None;
                         slot_d = 0;
                     }
-                    tag @ ("tx" | "cat" | "xVal" | "val" | "yVal")
+                    tag @ ("tx" | "cat" | "xVal" | "val" | "yVal" | "bubbleSize")
                         if ser_d > 0 && depth == ser_d + 1 && slot.is_none() =>
                     {
                         slot = Some(match tag {
                             "tx" => SerSlot::Tx,
                             "cat" | "xVal" => SerSlot::Cat,
+                            "bubbleSize" => SerSlot::Size,
                             _ => SerSlot::Val,
                         });
                         slot_d = depth;
@@ -395,6 +387,7 @@ pub(crate) fn parse_chart_xml(
                                 cur_ser.categories_ref = (!f.is_empty()).then_some(f);
                             }
                             Some(SerSlot::Val) => cur_ser.values_ref = f,
+                            Some(SerSlot::Size) => size_ref = (!f.is_empty()).then_some(f),
                             None => {}
                         }
                     }
@@ -420,7 +413,20 @@ pub(crate) fn parse_chart_xml(
                     if !cur_ser.within_bounds() {
                         return Ok(None);
                     }
+                    // The sizes of a bubble series are the next series of the model (see `ChartKind`).
+                    let sizes = size_ref.take().map(|values_ref| ChartSeriesRef {
+                        name: format!("{} (크기)", cur_ser.name),
+                        categories_ref: cur_ser.categories_ref.clone(),
+                        values_ref,
+                        ..ChartSeriesRef::default()
+                    });
                     series.push(std::mem::take(&mut cur_ser));
+                    if let Some(sizes) = sizes {
+                        if series.len() >= MAX_SERIES_PER_CHART || !sizes.within_bounds() {
+                            return Ok(None);
+                        }
+                        series.push(sizes);
+                    }
                     ser_d = 0;
                 }
                 if depth == bar_d {

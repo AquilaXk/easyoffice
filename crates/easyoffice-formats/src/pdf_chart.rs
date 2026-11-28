@@ -119,7 +119,7 @@ fn draw_single_chart(
         top_y -= title_pt + 6.0 * scale;
     }
 
-    let legend_items = collect_legend_items(chart.kind, &series);
+    let legend_items = collect_legend_items(chart.kind.pdf_base(), &series);
     let mut plot_bottom = bottom_y;
     if chart.legend != ChartLegendPos::None && !legend_items.is_empty() {
         let leg_pt = (7.0 * scale).clamp(5.0, 10.0);
@@ -167,7 +167,7 @@ fn draw_single_chart(
     let plot_h = (top_y - plot_bottom).max(12.0);
     let label_pt = (6.8 * scale).clamp(4.5, 9.5);
 
-    match chart.kind {
+    match chart.kind.pdf_base() {
         ChartKind::Column => draw_column_chart(
             canvas,
             &series,
@@ -195,7 +195,8 @@ fn draw_single_chart(
             (left_x, plot_bottom, plot_w, plot_h),
             scale,
         ),
-        ChartKind::Scatter => draw_scatter_chart(
+        // Scatter; `pdf_base` returns no other kind.
+        _ => draw_scatter_chart(
             canvas,
             &series,
             (left_x, plot_bottom, plot_w, plot_h),

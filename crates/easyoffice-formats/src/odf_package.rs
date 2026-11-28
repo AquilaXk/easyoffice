@@ -49,10 +49,15 @@ pub(crate) fn build_odp_chart_xml(
     legend: ChartLegendPos,
 ) -> String {
     let class = match chart_type {
-        ChartKind::Column | ChartKind::Bar => "chart:bar",
+        // A combo has no ODF chart class of its own here: it is written as columns (PD-402 trade-off).
+        ChartKind::Column | ChartKind::Bar | ChartKind::Combo => "chart:bar",
         ChartKind::Line => "chart:line",
         ChartKind::Pie => "chart:circle",
+        ChartKind::Doughnut => "chart:ring",
         ChartKind::Scatter => "chart:scatter",
+        ChartKind::Radar => "chart:radar",
+        ChartKind::Bubble => "chart:bubble",
+        ChartKind::Stock => "chart:stock",
     };
     let vertical = chart_type == ChartKind::Bar;
     let mut xml = format!(
@@ -215,8 +220,12 @@ pub(crate) fn parse_odp_chart_xml(xml: &str) -> Result<ParsedSlideChart, EasyOff
             }
         }
         c if c.ends_with("line") | c.ends_with("area") => ChartKind::Line,
-        c if c.ends_with("circle") | c.ends_with("ring") => ChartKind::Pie,
+        c if c.ends_with("circle") => ChartKind::Pie,
+        c if c.ends_with("ring") => ChartKind::Doughnut,
         c if c.ends_with("scatter") => ChartKind::Scatter,
+        c if c.ends_with("radar") => ChartKind::Radar,
+        c if c.ends_with("bubble") => ChartKind::Bubble,
+        c if c.ends_with("stock") => ChartKind::Stock,
         _ => {
             return Err(EasyOfficeError::CorruptedContainer(format!(
                 "ODP 차트 유형을 판별할 수 없습니다: {kind_class}"

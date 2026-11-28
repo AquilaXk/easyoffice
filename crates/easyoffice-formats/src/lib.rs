@@ -7,6 +7,7 @@ mod biff8_xls_reader;
 mod bytes_hash;
 mod cell_numbers;
 mod cell_type;
+pub(crate) mod chart_kinds;
 mod code_pages;
 pub mod converter;
 pub(crate) mod cp949;

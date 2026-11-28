@@ -5,6 +5,7 @@
 //! tree, `p:nvSpPr`/`p:spPr`/`p:txBody` on each shape, slide titles in a title placeholder shape,
 //! speaker notes in real notes slides, and the presentation title in `docProps/core.xml`.
 
+use crate::chart_kinds::{axes_xml, plot_groups, STOCK_SERIES_LOOK};
 use crate::ooxml_shared_parts::{
     core_properties_xml, drawingml_theme_xml, CORE_PROPERTIES_CONTENT_TYPE,
     CORE_PROPERTIES_REL_TYPE, PML_CLR_MAP, PML_SP_TREE_HEADER,
@@ -212,8 +213,8 @@ pub(crate) fn extract_notes_xml_text(notes_xml: &str) -> Option<String> {
     }
 }
 
-const AX_ID_CAT: &str = "64052224";
-const AX_ID_VAL: &str = "64055552";
+pub(crate) const AX_ID_CAT: &str = "64052224";
+pub(crate) const AX_ID_VAL: &str = "64055552";
 const MAX_CHART_XML_EVENTS: usize = 65_536;
 const CHART_CT: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 
@@ -466,7 +467,7 @@ pub(crate) fn build_slide_chart_xml(
         let _ = write!(xml, "<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr/></a:pPr><a:r><a:t>{}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val=\"0\"/></c:title><c:autoTitleDeleted val=\"0\"/>", XmlSanitizer::escape(title));
     }
     xml.push_str("<c:plotArea><c:layout/>");
-    let scatter = chart_type == ChartKind::Scatter;
+    let scatter = chart_type.has_numeric_x();
     let (cat_tag, val_tag) = if scatter {
         ("c:xVal", "c:yVal")
     } else {
@@ -477,13 +478,24 @@ pub(crate) fn build_slide_chart_xml(
         && categories
             .iter()
             .all(|c| c.trim().parse::<f64>().is_ok_and(f64::is_finite));
-    let mut ser_xml = String::new();
-    for (idx, ser) in series.iter().enumerate() {
+    let mut sers: Vec<String> = Vec::new();
+    // A bubble chart reads its series in pairs: the Y values, then the sizes of the bubbles (PD-402).
+    let step = if chart_type == ChartKind::Bubble {
+        2
+    } else {
+        1
+    };
+    for (idx, pair) in series.chunks(step).enumerate() {
+        let ser = &pair[0];
+        let mut ser_xml = String::new();
         let _ = write!(
             ser_xml,
             "<c:ser><c:idx val=\"{idx}\"/><c:order val=\"{idx}\"/><c:tx><c:v>{}</c:v></c:tx>",
             XmlSanitizer::escape(&ser.name)
         );
+        if chart_type == ChartKind::Stock {
+            ser_xml.push_str(STOCK_SERIES_LOOK);
+        }
         if !categories.is_empty() {
             push_chart_pts(
                 &mut ser_xml,
@@ -508,45 +520,34 @@ pub(crate) fn build_slide_chart_xml(
             ser.values.iter().map(|v| v.to_string()),
             ser.values.len(),
         );
+        if let Some(sizes) = pair.get(1) {
+            push_chart_pts(
+                &mut ser_xml,
+                "c:bubbleSize",
+                "Chart!$C$1",
+                true,
+                sizes.values.iter().map(|v| v.to_string()),
+                sizes.values.len(),
+            );
+        }
         ser_xml.push_str("</c:ser>");
+        sers.push(ser_xml);
     }
-    if chart_type == ChartKind::Pie {
-        let _ = write!(xml, "<c:pieChart><c:varyColors val=\"1\"/>{ser_xml}<c:firstSliceAng val=\"0\"/></c:pieChart>");
-    } else {
-        let (tag, hdr, extra, cp, vp) = match chart_type {
-            ChartKind::Bar => (
-                "c:barChart",
-                "<c:barDir val=\"bar\"/><c:grouping val=\"clustered\"/>",
-                "",
-                "l",
-                "b",
-            ),
-            ChartKind::Column => (
-                "c:barChart",
-                "<c:barDir val=\"col\"/><c:grouping val=\"clustered\"/>",
-                "",
-                "b",
-                "l",
-            ),
-            ChartKind::Line => (
-                "c:lineChart",
-                "<c:grouping val=\"standard\"/>",
-                "<c:marker val=\"1\"/>",
-                "b",
-                "l",
-            ),
-            ChartKind::Scatter => (
-                "c:scatterChart",
-                "<c:scatterStyle val=\"lineMarker\"/>",
-                "",
-                "b",
-                "l",
-            ),
-            ChartKind::Pie => unreachable!(),
-        };
-        let ax = if scatter { "c:valAx" } else { "c:catAx" };
-        let _ = write!(xml, "<{tag}>{hdr}{ser_xml}{extra}<c:axId val=\"{AX_ID_CAT}\"/><c:axId val=\"{AX_ID_VAL}\"/></{tag}><{ax}><c:axId val=\"{AX_ID_CAT}\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"{cp}\"/><c:crossAx val=\"{AX_ID_VAL}\"/></{ax}><c:valAx><c:axId val=\"{AX_ID_VAL}\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"{vp}\"/><c:majorGridlines/><c:crossAx val=\"{AX_ID_CAT}\"/></c:valAx>");
+    for group in plot_groups(chart_type, series.len()) {
+        let _ = write!(xml, "<{}>{}", group.tag, group.header);
+        sers[group.series.clone()]
+            .iter()
+            .for_each(|s| xml.push_str(s));
+        xml.push_str(group.tail);
+        if group.has_axes {
+            let _ = write!(
+                xml,
+                "<c:axId val=\"{AX_ID_CAT}\"/><c:axId val=\"{AX_ID_VAL}\"/>"
+            );
+        }
+        let _ = write!(xml, "</{}>", group.tag);
     }
+    xml.push_str(&axes_xml(chart_type));
     xml.push_str("</c:plotArea>");
     if let Some(pos) = legend.ooxml_val() {
         let _ = write!(
@@ -578,6 +579,7 @@ pub(crate) fn parse_slide_chart_xml(xml: &str) -> Result<DecodedSlideChart, Easy
         (0usize, 0, 0, 0, 0, 0, 0, 0);
     let (mut slot, mut tk, mut pt_i, mut pt_n) = ("", "", 0usize, 0usize);
     let (mut kind, mut title, mut legend) = (None, String::new(), ChartLegendPos::None);
+    let mut s_sizes: Vec<(usize, f64)> = Vec::new();
     let (mut cats, mut series, mut buf, mut s_name, mut s_cats, mut s_vals) = (
         Vec::new(),
         Vec::new(),
@@ -618,9 +620,20 @@ pub(crate) fn parse_slide_chart_xml(xml: &str) -> Result<DecodedSlideChart, Easy
                     "lineChart" | "line3DChart" if pd > 0 && kind.is_none() => {
                         kind = Some(ChartKind::Line)
                     }
-                    "pieChart" | "pie3DChart" | "doughnutChart" if pd > 0 && kind.is_none() => {
+                    // A line group after a bar group with one series is a combo (PD-402); with more bar series the lines are
+                    // read as bars, which is what a model without a kind per series can hold.
+                    "lineChart" | "line3DChart"
+                        if pd > 0 && kind == Some(ChartKind::Column) && series.len() == 1 =>
+                    {
+                        kind = Some(ChartKind::Combo)
+                    }
+                    "pieChart" | "pie3DChart" if pd > 0 && kind.is_none() => {
                         kind = Some(ChartKind::Pie)
                     }
+                    "doughnutChart" if pd > 0 && kind.is_none() => kind = Some(ChartKind::Doughnut),
+                    "radarChart" if pd > 0 && kind.is_none() => kind = Some(ChartKind::Radar),
+                    "bubbleChart" if pd > 0 && kind.is_none() => kind = Some(ChartKind::Bubble),
+                    "stockChart" if pd > 0 && kind.is_none() => kind = Some(ChartKind::Stock),
                     "scatterChart" if pd > 0 && kind.is_none() => kind = Some(ChartKind::Scatter),
                     "ser" if pd > 0 && sd == 0 => {
                         if series.len() >= MAX_SLIDE_CHART_SERIES {
@@ -632,15 +645,17 @@ pub(crate) fn parse_slide_chart_xml(xml: &str) -> Result<DecodedSlideChart, Easy
                         s_name.clear();
                         s_cats.clear();
                         s_vals.clear();
+                        s_sizes.clear();
                         slot = "";
                         x_d = 0;
                     }
-                    tag @ ("tx" | "cat" | "xVal" | "val" | "yVal")
+                    tag @ ("tx" | "cat" | "xVal" | "val" | "yVal" | "bubbleSize")
                         if sd > 0 && d == sd + 1 && slot.is_empty() =>
                     {
                         slot = match tag {
                             "tx" => "tx",
                             "cat" | "xVal" => "cat",
+                            "bubbleSize" => "size",
                             _ => "val",
                         };
                         x_d = d;
@@ -685,11 +700,15 @@ pub(crate) fn parse_slide_chart_xml(xml: &str) -> Result<DecodedSlideChart, Easy
                     match slot {
                         "tx" if s_name.is_empty() => s_name = v,
                         "cat" if pt_i < MAX_SLIDE_CHART_POINTS => s_cats.push((pt_i, v)),
-                        "val" if pt_i < MAX_SLIDE_CHART_POINTS => {
+                        "val" | "size" if pt_i < MAX_SLIDE_CHART_POINTS => {
                             let n = v.parse::<f64>().ok().filter(|x| x.is_finite()).ok_or_else(
                                 || EasyOfficeError::InvalidArgument(format!("차트 수치 오류: {v}")),
                             )?;
-                            s_vals.push((pt_i, n));
+                            if slot == "size" {
+                                s_sizes.push((pt_i, n));
+                            } else {
+                                s_vals.push((pt_i, n));
+                            }
                         }
                         _ => {}
                     }
@@ -716,10 +735,28 @@ pub(crate) fn parse_slide_chart_xml(xml: &str) -> Result<DecodedSlideChart, Easy
                     for (i, n) in s_vals.drain(..) {
                         values[i] = n;
                     }
-                    series.push(SlideChartSeries {
-                        name: std::mem::take(&mut s_name),
-                        values,
+                    let name = std::mem::take(&mut s_name);
+                    // The sizes of a bubble series are the next series of the model (see `ChartKind`).
+                    let sizes = (!s_sizes.is_empty()).then(|| {
+                        let mut sizes =
+                            vec![0.0; s_sizes.iter().map(|(i, _)| *i).max().unwrap_or(0) + 1];
+                        for (i, n) in s_sizes.drain(..) {
+                            sizes[i] = n;
+                        }
+                        SlideChartSeries {
+                            name: format!("{name} (크기)"),
+                            values: sizes,
+                        }
                     });
+                    series.push(SlideChartSeries { name, values });
+                    if let Some(sizes) = sizes {
+                        if series.len() >= MAX_SLIDE_CHART_SERIES {
+                            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                                "슬라이드 차트 계열 수({MAX_SLIDE_CHART_SERIES}) 초과"
+                            )));
+                        }
+                        series.push(sizes);
+                    }
                     sd = 0;
                 }
                 for dp in [&mut bd, &mut td, &mut ld, &mut pd, &mut cd] {

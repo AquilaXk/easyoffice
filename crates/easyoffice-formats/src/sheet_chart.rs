@@ -29,7 +29,11 @@ pub const DEFAULT_CHART_HEIGHT_PX: u32 = 260;
 
 pub const EMU_PER_PX: u64 = 9_525;
 
-/// Supported chart types (`column`, `bar`, `line`, `pie`, `scatter`).
+/// Supported chart types (`column`, `bar`, `line`, `pie`, `scatter`, and from PD-402 `doughnut`, `radar`, `bubble`, `stock`,
+/// `combo`). The data shape of the new ones, in the series list every chart keeps (see `chart_kinds.rs`): a doughnut is a pie,
+/// a radar is a line over its categories, a bubble reads its series in pairs of Y values and sizes over shared X values
+/// (the categories), a stock chart reads open, high, low and close (or high, low, close) series, and a combo draws its first
+/// series as columns and the others as lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ChartKind {
     #[default]
@@ -38,9 +42,27 @@ pub enum ChartKind {
     Line,
     Pie,
     Scatter,
+    Doughnut,
+    Radar,
+    Bubble,
+    Stock,
+    Combo,
 }
 
 impl ChartKind {
+    pub const ALL: [Self; 10] = [
+        Self::Column,
+        Self::Bar,
+        Self::Line,
+        Self::Pie,
+        Self::Scatter,
+        Self::Doughnut,
+        Self::Radar,
+        Self::Bubble,
+        Self::Stock,
+        Self::Combo,
+    ];
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Column => "column",
@@ -48,24 +70,40 @@ impl ChartKind {
             Self::Line => "line",
             Self::Pie => "pie",
             Self::Scatter => "scatter",
+            Self::Doughnut => "doughnut",
+            Self::Radar => "radar",
+            Self::Bubble => "bubble",
+            Self::Stock => "stock",
+            Self::Combo => "combo",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         let t = s.trim();
-        if t.eq_ignore_ascii_case("column") {
-            Some(Self::Column)
-        } else if t.eq_ignore_ascii_case("bar") {
-            Some(Self::Bar)
-        } else if t.eq_ignore_ascii_case("line") {
-            Some(Self::Line)
-        } else if t.eq_ignore_ascii_case("pie") {
-            Some(Self::Pie)
-        } else if t.eq_ignore_ascii_case("scatter") {
-            Some(Self::Scatter)
-        } else {
-            None
+        Self::ALL
+            .into_iter()
+            .find(|k| t.eq_ignore_ascii_case(k.as_str()))
+    }
+
+    /// The classic chart the PDF drawing falls back to for a kind it has no drawing of its own for (PD-402 trade-off).
+    pub const fn pdf_base(self) -> Self {
+        match self {
+            Self::Doughnut => Self::Pie,
+            Self::Radar | Self::Stock => Self::Line,
+            Self::Bubble => Self::Scatter,
+            Self::Combo => Self::Column,
+            other => other,
         }
+    }
+
+    /// True for a chart whose categories are the X values (scatter and bubble).
+    pub const fn has_numeric_x(self) -> bool {
+        matches!(self, Self::Scatter | Self::Bubble)
+    }
+
+    /// True for a chart drawn as slices of the first series (pie and doughnut).
+    pub const fn is_sliced(self) -> bool {
+        matches!(self, Self::Pie | Self::Doughnut)
     }
 }
 

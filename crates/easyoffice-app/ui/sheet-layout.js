@@ -23,7 +23,7 @@
   const MAX_MERGES = 100000, MAX_CHARTS_PER_SHEET = 64, MAX_CHART_SERIES = 32;
   const MAX_IMAGES_PER_SHEET = 64, MAX_IMAGES_WORKBOOK = 256, MAX_SINGLE_IMAGE_BYTES = 32 * 1024 * 1024, MAX_TOTAL_IMAGE_BYTES = 128 * 1024 * 1024;
   const MAX_NOTES_PER_SHEET = 4096, MAX_NOTES_WORKBOOK = 16384, MAX_NOTE_AUTHOR_BYTES = 256, MAX_NOTE_TEXT_BYTES = 32768, EMU_PER_PX = 9525;
-  const CHART_TYPES = Object.freeze(["column", "bar", "line", "pie", "scatter"]);
+  const CHART_TYPES = Object.freeze(["column", "bar", "line", "pie", "scatter", "doughnut", "radar", "bubble", "stock", "combo"]);
   const CHART_TYPE_SET = new Set(CHART_TYPES);
   const CHART_LEGENDS = Object.freeze(["right", "bottom", "top", "none", "left"]);
   const CHART_LEGEND_SET = new Set(CHART_LEGENDS);
