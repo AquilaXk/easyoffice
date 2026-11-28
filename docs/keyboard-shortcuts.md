@@ -28,6 +28,7 @@ EasyOffice의 단축키 목록이다. macOS는 ⌘(Command), Windows와 Linux는
 | 명령 팔레트 | ⌘/ | Ctrl+/ | 참조 편집기와 같은 키. `/`만 눌러도 같은 동작(입력란 밖). 한글 창은 편집기 자체의 Ctrl+/가 편집기 팔레트를 연다 |
 | 하이퍼링크 | ⌘K | Ctrl+K | 문서·시트·슬라이드 창(사무 프로그램의 표준 키). 입력란 안에서는 그 입력란이 받음. 한글 창은 편집기 자체 키(Ctrl+K,H) |
 | 찾기 | ⌘F | Ctrl+F | 문서·시트·슬라이드·PDF·BASE·BOARD: 찾기 대화상자(`#find-dialog`). 한글: 편집기 찾기. 변환기 등 그 밖: 명령 팔레트 |
+| 이동 | ⌃G | Ctrl+G | 시트 창. macOS는 Control 키(⌘G는 다음 찾기라 쓰지 않는다) |
 | 바꾸기 | ⌃H | Ctrl+H | 문서·시트·BASE. macOS는 Control 키(⌘H는 시스템 숨기기라 쓰지 않는다). 한글은 편집기 자체 키(Ctrl+F2) |
 | 굵게 | ⌘B | Ctrl+B | |
 | 기울임 | ⌘I | Ctrl+I | |
