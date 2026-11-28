@@ -51,15 +51,11 @@
 - [ ] Developer ID 서명과 함께: Quick Look 두 확장이 rhwp를 공유 dylib(`Contents/Frameworks/libeasyoffice_ql.dylib`) 하나로 쓰게 함(아키텍처당 약 -11 MB). ad-hoc 서명에서는 library validation이 Team ID 불일치로 적재를 막아 QA가 Developer ID 이후로 미룸(2026-11-22). 동작 확인한 시제품 diff는 SSD `Caches/eo-ci/ql-share/`
 
 ## 경량화 (`docs/performance.md` 8.5절, 적용한 심볼 제거·가변 글꼴·아키텍처 분리는 뺌)
-- [ ] 글꼴 부분 집합화: 문서에서 안 쓰는 글리프를 뺀다. 글자가 빠질 위험과 OFL 개조본 이름 조건을 먼저 본다(PD-293)
-- [ ] D2Coding 둘(3.46 MB)과 미사용 가중치를 필요할 때 내려받기. 오프라인 우선 원칙과 어긋나 QA 결정이 필요하다(PD-293)
-- [ ] `rhwp_bg.wasm`에 `wasm-opt -Oz`(brotli에서 한 자리 %). 고정 산출물의 해시·출처가 바뀐다(PD-293)
-- [ ] PDF 글꼴 TTF(2.52 MB)를 없애고 UI의 woff2를 읽어 쓰기(설치본 약 -1 MB). woff2 해독 의존이 늘어난다(PD-293)
-- [ ] UI 껍데기 크레이트에만 `opt-level = "s"`(약 -0.6 MB). 이득이 작아 PD-276의 측정 원칙을 다시 열어야 한다(PD-293)
-- [ ] Windows·Linux 실행 파일의 심볼 제거 폭을 재지 못했다(PD-293)
+- [ ] D2Coding 둘(3.46 MB)과 미사용 가중치를 필요할 때 내려받기. 오프라인 우선 원칙과 어긋나 QA 결정이 필요하다(PD-293). 글꼴 부분 집합화는 예약 글꼴 이름 때문에 하지 않는다(PD-397)
+- [ ] Actions에서 `Executable size probe`(수동 실행)를 돌려 Windows·Linux 심볼 제거 폭을 `docs/performance.md` 8.4절에 옮긴다(PD-397)
 
 ## PDF·미리보기
-- [ ] 검색 가능한 PDF: Linux·Windows 설치본에서 번들 글꼴 확인(PD-131)
+- [ ] 검색 가능한 PDF: Linux·Windows 설치본에서 번들 글꼴 확인(PD-131). 글꼴은 이제 편집기 woff2를 해독한 것이라 스모크 실행의 PDF 단계가 같이 본다(PD-397)
 - [ ] 엔진 PDF 읽기를 크레이트로 바꿀지 QA 결정: 그대로 두기, 워커 프로세스로 옮기기, 읽기 크레이트를 포크해 해제 상한 넣기(PD-269 12항)
 - [ ] 엔진 HWP·HWPX 읽기를 rhwp 파서로 바꿀지: 파서를 워커 프로세스로 격리하고 편집기 모델 ↔ `RichDocument` 변환을 새로 짜야 한다(PD-269 13항)
 - [ ] 엔진·셸 PDF 상한 표 통합 여부(객체 65,536 대 1,000,000, 쪽 트리 노드 4,096 대 100,000, PD-269 11항)
