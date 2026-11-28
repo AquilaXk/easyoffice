@@ -3,9 +3,9 @@
 ## 지금
 - [ ] 설치본 실기기 점검(아래; 현재 공개판은 `v0.2.3`)
 - [ ] `docs/office-parity.md`의 없음·일부 항목을 중요도 순으로 구현(상세는 표, PD-393)
-- [ ] 슬라이드: 슬라이드 크기 사용자 지정(`SlideAspect`가 열거형이라 읽기·쓰기·JS 무대 크기를 함께 바꿔야 함), 표 셀 병합(`gridSpan`·`rowSpan`·`hMerge`·`vMerge`), 개요 보기, 타이밍 연습, ODP 글꼴·쇼 반복·색 구성표(PD-398)
+- [ ] 슬라이드: 오디오·비디오 삽입(`a:videoFile`·`a:audioFile`·`p14:media`, ODP `draw:plugin`; `ElementFx.media`와 `slide_image_table.rs` 고유 표, `p:timing`의 `p:video`, `<video>`·`<audio>` 재생, mp4·m4a·mp3·wav 허용과 크기 상한, python-pptx `new_video_pic` 규약), 개요 보기, 타이밍 연습, ODP 글꼴·쇼 반복·색 구성표(PD-398), 슬라이드 크기를 바꿀 때 개체 맞춤 묻기(`최대화`·`맞춤 확인`)·병합 없는 칸 나누기·ODP 안내선과 자르기(PD-402)
 - [ ] 슬라이드: 전환 이름 덮기·벗기기·무작위 선·확대/축소(검색으로 확인하지 못함)와 효과 옵션 가로·세로를 한국어판 화면에서 확인(PD-398, QA 필요)
-- [ ] 시트: `데이터 통합`(허용 라이선스 원본 없음, 찾아야 함), 차트 종류 확장(`ChartKind`를 슬라이드와 함께 넓히고 `c:doughnutChart`·`c:bubbleChart`·`c:stockChart` 왕복), 스파크라인(`x14:sparklineGroups` 왕복과 셀 안 미니 차트), 새 셀 스타일과 XLSX `cellStyles` 왕복(`StyleKey`에 이름 번호 필드, PD-400)
+- [ ] 시트: `데이터 통합`(허용 라이선스 원본 없음, 찾아야 함), 스파크라인(`x14:sparklineGroups` 왕복과 셀 안 미니 차트), 새 셀 스타일과 XLSX `cellStyles` 왕복(`StyleKey`에 이름 번호 필드, PD-400)
 - [ ] 시트 QA 확인: 셀 스타일 묶음 제목(`제목 및 표제`·`데이터 및 모델`·`주제 셀 스타일`·`숫자 서식`)과 스타일 이름, 문서 창 `대/소문자 바꾸기` 항목 이름(지원 문서는 `문장 대/소문자`·`각 Word 대문자로 표시`), `목표값 찾기 상태` 대화상자 문구(PD-400)
 - [ ] 문서 창: 그림의 임의 위치(`wp:positionH`·`V` 오프셋)와 표 칸 안 그림의 배치·자르기·회전(PD-395)
 - [ ] 문서 창: 새 메뉴 항목의 macOS 네이티브 메뉴 항목. `native_menu/items.rs`와 `layout/bars.rs`가 줄 수 상한이라 한글 창처럼(`items_hwp.rs`·`layout/hwp.rs`, PD-396) 표를 나누고 `scripts/test-support/word-web-only.mjs`를 비운다(PD-395)
