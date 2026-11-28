@@ -123,10 +123,15 @@ pub(super) fn read_page_frame_with_targets(
         return Ok((frame, warnings));
     }
     let mut other_sections = false;
-    let load = |chosen: Option<&str>, warnings: &mut Vec<String>| match chosen
+    let mut watermark: Option<String> = None;
+    let mut load = |chosen: Option<&str>, warnings: &mut Vec<String>| match chosen
         .and_then(|part| checked_part(parts, part))
     {
-        Some(xml) => read_frame_part(xml, resolver, media, warnings),
+        Some(xml) => {
+            let (mark, clean) = super::word::split_watermark(xml);
+            watermark = watermark.take().or(mark);
+            read_frame_part(&clean, resolver, media, warnings)
+        }
         None => Ok(Vec::new()),
     };
     for header in [true, false] {
@@ -172,6 +177,7 @@ pub(super) fn read_page_frame_with_targets(
     if other_sections {
         warnings.push("구역마다 다른 머리말·꼬리말은 첫 구역의 것만 가져왔습니다.".to_string());
     }
+    frame.watermark = watermark;
     Ok((frame, warnings))
 }
 

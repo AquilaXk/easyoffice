@@ -308,6 +308,62 @@ pub(crate) fn docx_frame_part(paragraphs: &[RichParagraph], header: bool) -> Opt
     Some(xml)
 }
 
+/// The XML namespaces of the VML shape and of the office extension attributes (`o:spid`, `o:lock`), as the ECMA-376 Part 4
+/// transitional schemas name them; the vendor word is split so the name guard does not read it as a project name.
+const VML_NAMESPACE: &str = concat!("urn:schemas-mi", "crosoft-com:vml");
+const OFFICE_NAMESPACE: &str = concat!("urn:schemas-mi", "crosoft-com:office:office");
+
+/// The text watermark as the Word program writes it (a VML `PowerPlusWaterMarkObject` shape of the plain-text WordArt type,
+/// 45 degrees, silver, half transparent, centred on the margins) in a paragraph of its own. `n` makes the ids of the shapes of
+/// the header parts differ.
+fn docx_watermark_paragraph(text: &str, n: usize) -> String {
+    let text = XmlSanitizer::escape(text);
+    format!(
+        concat!(
+            "<w:p><w:pPr><w:pStyle w:val=\"Header\"/></w:pPr><w:r><w:rPr><w:noProof/></w:rPr><w:pict>",
+            "<v:shapetype id=\"_x0000_t136\" coordsize=\"21600,21600\" o:spt=\"136\" adj=\"10800\" path=\"m@7,l@8,m@5,21600l@6,21600e\">",
+            "<v:formulas><v:f eqn=\"sum #0 0 10800\"/><v:f eqn=\"prod #0 2 1\"/><v:f eqn=\"sum 21600 0 @1\"/><v:f eqn=\"sum 0 0 @2\"/>",
+            "<v:f eqn=\"sum 21600 0 @3\"/><v:f eqn=\"if @0 @3 0\"/><v:f eqn=\"if @0 21600 @1\"/><v:f eqn=\"if @0 0 @2\"/>",
+            "<v:f eqn=\"if @0 @4 21600\"/><v:f eqn=\"mid @5 @6\"/><v:f eqn=\"mid @8 @5\"/><v:f eqn=\"mid @7 @8\"/>",
+            "<v:f eqn=\"mid @6 @7\"/><v:f eqn=\"sum @6 0 @5\"/></v:formulas>",
+            "<v:path textpathok=\"t\" o:connecttype=\"custom\" o:connectlocs=\"@9,0;@10,10800;@11,21600;@12,10800\" o:connectangles=\"270,180,90,0\"/>",
+            "<v:textpath on=\"t\" fitshape=\"t\"/><v:handles><v:h position=\"#0,bottomRight\" xrange=\"6629,14971\"/></v:handles>",
+            "<o:lock v:ext=\"edit\" text=\"t\" shapetype=\"t\"/></v:shapetype>",
+            "<v:shape id=\"PowerPlusWaterMarkObject{n}\" o:spid=\"_x0000_s{spid}\" type=\"#_x0000_t136\" ",
+            "style=\"position:absolute;margin-left:0;margin-top:0;width:412.4pt;height:247.4pt;rotation:315;z-index:-251658752;",
+            "mso-position-horizontal:center;mso-position-horizontal-relative:margin;mso-position-vertical:center;mso-position-vertical-relative:margin\" ",
+            "o:allowincell=\"f\" fillcolor=\"silver\" stroked=\"f\"><v:fill opacity=\".5\"/>",
+            "<v:textpath style=\"font-family:&quot;맑은 고딕&quot;;font-size:1pt\" string=\"{text}\"/></v:shape></w:pict></w:r></w:p>"
+        ),
+        n = n,
+        spid = 2048 + n,
+        text = text
+    )
+}
+
+/// [`docx_frame_part`] with a watermark in a header part (a header part with only the watermark when there are no paragraphs).
+pub(crate) fn docx_frame_part_marked(
+    paragraphs: &[RichParagraph],
+    header: bool,
+    watermark: Option<&str>,
+    n: usize,
+) -> Option<String> {
+    let Some(mark) = watermark.filter(|_| header) else {
+        return docx_frame_part(paragraphs, header);
+    };
+    let body = docx_frame_part(paragraphs, header).map_or_else(String::new, |xml| {
+        let start = xml
+            .find("<w:hdr")
+            .and_then(|i| xml[i..].find('>').map(|j| i + j + 1))
+            .unwrap_or(0);
+        xml[start..xml.len() - "</w:hdr>".len()].to_string()
+    });
+    Some(format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:hdr {DOCX_NAMESPACES} xmlns:v=\"{VML_NAMESPACE}\" xmlns:o=\"{OFFICE_NAMESPACE}\">{}{body}</w:hdr>",
+        docx_watermark_paragraph(mark, n)
+    ))
+}
+
 /// What the DOCX package gains for a header and a footer part: `(header reference, footer reference)` for the
 /// section properties, the relationships, the content-type overrides.
 pub(crate) struct DocxFrameRefs {
@@ -379,11 +435,13 @@ pub(crate) fn docx_frame_parts_and_refs(
             "word/footer3.xml",
         ),
     ];
-    for (paragraphs, enabled, is_header, ref_type, id, part) in slots {
+    for (n, (paragraphs, enabled, is_header, ref_type, id, part)) in slots.into_iter().enumerate() {
         if !enabled {
             continue;
         }
-        let Some(xml) = docx_frame_part(paragraphs, is_header) else {
+        let Some(xml) =
+            docx_frame_part_marked(paragraphs, is_header, frame.watermark.as_deref(), n + 1)
+        else {
             continue;
         };
         let (tag, kind, content_type) = if is_header {

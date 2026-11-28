@@ -292,6 +292,6 @@
     return { bind, run, recalculate, autoSum, sortTableAt, handles, syncMenu, selectionAt };
   }
 
-  host.__EASYOFFICE_DOC_TABLE__ = { DEFAULT_ROWS, DEFAULT_COLUMNS, insertTable };
+  host.__EASYOFFICE_DOC_TABLE__ = { DEFAULT_ROWS, DEFAULT_COLUMNS, insertTable, buildTable };
   host.__EASYOFFICE_CREATE_DOC_TABLE__ = createDocTable;
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

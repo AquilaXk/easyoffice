@@ -78,9 +78,13 @@
     return Object.keys(packed).length > 0 ? JSON.stringify(packed) : "";
   }
 
-  // The settings of an opened file: the open answer's `properties`, `lineNumbers` and `watermark`.
-  function wordMetaOfOpen(res) {
-    return packWordMeta({ props: res?.properties, lineNumbers: res?.lineNumbers, watermark: res?.watermark });
+  // The settings of an opened file: the open answer's `properties`, `lineNumbers` and `watermark`. The title is a property of its own
+  // only when it is not the file's name (a file is titled by its name unless its title says otherwise).
+  function wordMetaOfOpen(res, fileName) {
+    const stem = String(fileName ?? "").replace(/\.[^.\\/]+$/, "").trim();
+    const title = String(res?.title ?? "").trim();
+    const own = title && title !== stem && title !== "문서" ? { title } : {};
+    return packWordMeta({ props: { ...res?.properties, ...own }, lineNumbers: res?.lineNumbers, watermark: res?.watermark });
   }
 
   function collectDocAnnotations(root) {

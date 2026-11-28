@@ -378,6 +378,77 @@ fn line_numbers_round_trip_and_a_hostile_value_is_dropped() {
     );
 }
 
+// ---- watermark
+
+#[test]
+fn a_watermark_is_a_shape_in_the_header_and_reads_back_without_a_blank_header() {
+    let mut doc = doc_of(vec![paragraph("본문")]);
+    doc.page_frame.watermark = Some("대외비 & <기밀>".to_string());
+    let bytes = encode(&doc, DocumentFormat::Docx);
+    let header = part(&bytes, "word/header1.xml");
+    assert!(
+        header.contains("PowerPlusWaterMarkObject1")
+            && header.contains("string=\"대외비 &amp; &lt;기밀&gt;\""),
+        "{header}"
+    );
+    assert!(part(&bytes, "word/document.xml").contains("w:headerReference"));
+    let result = UniversalFormatConverter::decode_rich(&bytes, Some("w.docx")).expect("decode");
+    let DecodedContent::Document(back) = result.content else {
+        panic!("document")
+    };
+    assert_eq!(
+        back.page_frame.watermark.as_deref(),
+        Some("대외비 & <기밀>")
+    );
+    assert!(
+        back.page_frame.header.is_empty(),
+        "the watermark's paragraph is not a header line"
+    );
+    assert!(
+        result.warnings.iter().all(|w| !w.contains("개체")),
+        "{:?}",
+        result.warnings
+    );
+}
+
+#[test]
+fn a_watermark_goes_into_the_header_that_has_text_and_into_the_first_page_header() {
+    let mut doc = doc_of(vec![paragraph("본문")]);
+    doc.page_frame.watermark = Some("초안".to_string());
+    doc.page_frame.header = vec![RichParagraph {
+        runs: vec![run("머리글")],
+        ..RichParagraph::default()
+    }];
+    doc.page_frame.first_page_different = true;
+    let bytes = encode(&doc, DocumentFormat::Docx);
+    for name in ["word/header1.xml", "word/header2.xml"] {
+        assert!(
+            part(&bytes, name).contains("PowerPlusWaterMarkObject"),
+            "{name}"
+        );
+    }
+    let back = decode(&bytes, "w.docx");
+    assert_eq!(back.page_frame.watermark.as_deref(), Some("초안"));
+    assert_eq!(back.page_frame.header.len(), 1);
+    assert_eq!(back.page_frame.header[0].plain_text(), "머리글");
+}
+
+#[test]
+fn a_hostile_watermark_text_is_cut_and_a_header_without_one_is_untouched() {
+    let long = "가".repeat(200);
+    let mut doc = doc_of(vec![paragraph("본문")]);
+    doc.page_frame.watermark = Some(long);
+    let back = round_trip(&doc, DocumentFormat::Docx, "w.docx");
+    assert_eq!(
+        back.page_frame.watermark.map(|t| t.chars().count()),
+        Some(easyoffice_formats::rich_word_features::MAX_WATERMARK_CHARS)
+    );
+    let plain = doc_of(vec![paragraph("본문")]);
+    let bytes = encode(&plain, DocumentFormat::Docx);
+    assert!(!String::from_utf8_lossy(&bytes).contains("word/header1.xml"));
+    assert_eq!(decode(&bytes, "p.docx").page_frame.watermark, None);
+}
+
 // ---- header rows of a table
 
 fn table_of(rows: usize, header_rows: u32) -> RichBlock {

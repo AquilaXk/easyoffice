@@ -143,6 +143,18 @@
   tab-size: 53.33px;
 }
 #doc-editor[data-show-para-marks="true"] p::after { content: " ↵"; color: var(--accent-light); font-size: 0.82em; }
+/* Word-style features (PD-395): the caption style, the bookmark brackets and the section break line show with the format marks. */
+#doc-editor .eo-caption { font-size: 0.9em; font-style: italic; }
+#doc-editor .eo-bookmark-start, #doc-editor .eo-bookmark-end { display: none; }
+#doc-editor[data-show-ctrl-marks="true"] .eo-bookmark-start, #doc-editor[data-show-ctrl-marks="true"] .eo-bookmark-end { display: inline; color: var(--accent-light); }
+#doc-editor[data-show-ctrl-marks="true"] .eo-bookmark-start::before { content: "["; }
+#doc-editor[data-show-ctrl-marks="true"] .eo-bookmark-end::before { content: "]"; }
+#doc-editor[data-show-ctrl-marks="true"] [data-eo-section-break]::after { display: block; color: var(--accent-light); font-size: 0.75em; border-top: 1px dashed var(--accent-light); }
+#doc-editor[data-show-ctrl-marks="true"] [data-eo-section-break="nextPage"]::after { content: "구역 나누기(다음 페이지)"; }
+#doc-editor[data-show-ctrl-marks="true"] [data-eo-section-break="continuous"]::after { content: "구역 나누기(연속)"; }
+#doc-editor[data-show-ctrl-marks="true"] [data-eo-section-break="evenPage"]::after { content: "구역 나누기(짝수 페이지)"; }
+#doc-editor[data-show-ctrl-marks="true"] [data-eo-section-break="oddPage"]::after { content: "구역 나누기(홀수 페이지)"; }
+#doc-editor[data-eo-watermark-text]::before { content: attr(data-eo-watermark-text); position: absolute; top: 40%; left: 0; right: 0; text-align: center; font-size: 5em; color: var(--ui-border); opacity: 0.5; transform: rotate(-45deg); pointer-events: none; }
 #doc-editor[data-show-ctrl-marks="true"] h1::after,
 #doc-editor[data-show-ctrl-marks="true"] h2::after { content: " ¶"; color: var(--accent-light); font-size: 0.75em; }
 #doc-editor:not(.manuscript-grid),

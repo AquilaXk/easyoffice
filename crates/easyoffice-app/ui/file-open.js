@@ -676,7 +676,8 @@
             eoEvenOdd: res.evenOddDifferent ? "true" : "",
             eoTrackChanges: res.trackChanges === true ? "true" : "",
             eoDefaults: host.__EASYOFFICE_SAVE_PAYLOAD__.packDocDefaults(res.docDefaults),
-            eoWordMeta: host.__EASYOFFICE_SAVE_DOC_META__.wordMetaOfOpen(res),
+            eoWordMeta: host.__EASYOFFICE_SAVE_DOC_META__.wordMetaOfOpen(res, name),
+            eoWatermarkText: String(res.watermark || "").slice(0, 64),
             ...host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.layoutFields(host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.fromDecoded(res.pageSetup, mod)),
           },
         };

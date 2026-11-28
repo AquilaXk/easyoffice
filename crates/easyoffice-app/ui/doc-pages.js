@@ -24,7 +24,9 @@
   const SPLIT_DISPLAYS = new Set(["block", "list-item", "flow-root"]);
   const MAX_VERIFY_ROUNDS = 3;
   const VERIFY_TOLERANCE_PX = 0.5;
-  const WATCHED_ATTRS = ["style", "class", "data-eo-break", "hidden", "data-paper-size", "data-eo-page"];
+  const WATCHED_ATTRS = ["style", "class", "data-eo-break", "data-eo-section-break", "hidden", "data-paper-size", "data-eo-page"];
+  // A block that follows a section break which starts a page (the continuous one starts none) begins a page, as after a page break.
+  const startsPage = (el) => el.dataset.eoBreak === "page" || ["nextPage", "evenPage", "oddPage"].includes(el.previousElementSibling?.dataset?.eoSectionBreak);
   const DEFAULT_LINE_FACTOR = 1.2;
 
   function createDocPages(deps) {
@@ -202,7 +204,7 @@
           recs.set(el, rec);
         }
         if (Math.abs(rec.h - h) > 0.01 || Math.abs(rec.gap - gap) > 0.01) changed = true;
-        Object.assign(rec, { h, gap, lines: info.lines, lh: info.lh, keep: info.keep, brk: el.dataset.eoBreak === "page", hAct: 0, actSig: "" });
+        Object.assign(rec, { h, gap, lines: info.lines, lh: info.lh, keep: info.keep, brk: startsPage(el), hAct: 0, actSig: "" });
       }
       return changed;
     }
@@ -220,7 +222,7 @@
         const r = el.getBoundingClientRect();
         const info = styleInfo(el);
         const rec = { flags: "", mt: 0, sig: "", h: r.height / scale, gap: (r.top - prevBottom) / scale, hAct: 0, actSig: "",
-          lines: info.lines, lh: info.lh, keep: info.keep, brk: el.dataset.eoBreak === "page" };
+          lines: info.lines, lh: info.lh, keep: info.keep, brk: startsPage(el) };
         recs.set(el, rec);
         prevBottom = r.bottom;
       }
@@ -500,11 +502,12 @@
       if (block?.dataset.eoFrameCopy) delete block.dataset.eoFrameCopy;
       if (ev.inputType !== "insertParagraph") return;
       if (block?.dataset.eoBreak && block.previousElementSibling?.dataset.eoBreak) delete block.dataset.eoBreak;
+      if (block?.dataset.eoSectionBreak && block.previousElementSibling?.dataset.eoSectionBreak) delete block.dataset.eoSectionBreak;
     }
 
     // Splits the block at the caret and starts the page with the second half. The split is done on
     // the range, not by `execCommand`, so it is one undo step and fires no `input` event of its own.
-    function splitAtCaret() {
+    function splitAtCaret(mark = (_first, next) => { next.dataset.eoBreak = "page"; }) {
       const sel = env.getSelection();
       const block = caretBlock();
       if (!sel?.rangeCount || !block || !TEXT_BLOCK_RE.test(block.tagName)) return { changed: false };
@@ -517,7 +520,7 @@
       next.removeAttribute("id");
       next.append(tail.extractContents());
       for (const part of [block, next]) if (!part.hasChildNodes()) part.append(document.createElement("br"));
-      next.dataset.eoBreak = "page";
+      mark(block, next);
       block.after(next);
       const caret = document.createRange();
       caret.setStart(next, 0);
@@ -530,6 +533,15 @@
     function insertPageBreak() {
       if (!editor || !caretBlock()) return false;
       const res = deps.withUndo ? deps.withUndo(splitAtCaret) : splitAtCaret();
+      schedule();
+      return res.changed;
+    }
+
+    // 구역 나누기: the block is split at the caret and its first half ends the section (`eoSectionBreak` is how the next one begins).
+    function insertSectionBreak(kind) {
+      if (!editor || !caretBlock()) return false;
+      const split = () => splitAtCaret((first) => { first.dataset.eoSectionBreak = kind; });
+      const res = deps.withUndo ? deps.withUndo(split) : split();
       schedule();
       return res.changed;
     }
@@ -596,7 +608,7 @@
       attach, detach, layoutNow, schedule,
       pageCount: () => lastCount,
       currentPage: () => lastCurrent,
-      pageOf, headingPages, blockPages, printPlan, insertPageBreak,
+      pageOf, headingPages, blockPages, printPlan, insertPageBreak, insertSectionBreak,
       geometry: () => geo,
       isActive: () => active,
       onChange(fn) {

@@ -29,6 +29,36 @@ pub(super) fn read_properties(core: Option<&str>) -> RichProperties {
     .bounded()
 }
 
+/// The text of the watermark in a header part (the `string` of the `v:textpath` of a `PowerPlusWaterMarkObject` shape), and the
+/// part without the paragraph that holds the shape, so the paragraph is not a blank header line and the shape is not reported
+/// as an unsupported object. Anything else in the part stays as it was.
+pub(super) fn split_watermark(xml: &str) -> (Option<String>, Cow<'_, str>) {
+    const MARK: &str = "PowerPlusWaterMarkObject";
+    const PICT_END: &str = "</w:pict>";
+    let Some(at) = xml.find(MARK) else {
+        return (None, Cow::Borrowed(xml));
+    };
+    let (Some(pict), Some(end)) = (xml[..at].rfind("<w:pict"), xml[at..].find(PICT_END)) else {
+        return (None, Cow::Borrowed(xml));
+    };
+    let pict_end = at + end + PICT_END.len();
+    let text = xml[at..pict_end].find(" string=\"").and_then(|i| {
+        let from = at + i + " string=\"".len();
+        xml[from..].find('"').map(|len| &xml[from..from + len])
+    });
+    let text = text
+        .map(XmlSanitizer::unescape)
+        .and_then(|t| crate::rich_word_features::safe_watermark_text(&t));
+    let para_start = xml[..pict].rfind("<w:p>").max(xml[..pict].rfind("<w:p "));
+    let para_end = xml[pict_end..]
+        .find("</w:p>")
+        .map(|i| pict_end + i + "</w:p>".len());
+    match (para_start, para_end) {
+        (Some(s), Some(e)) => (text, Cow::Owned(format!("{}{}", &xml[..s], &xml[e..]))),
+        _ => (text, Cow::Borrowed(xml)),
+    }
+}
+
 impl DocxWalker {
     /// `w:bookmarkStart`: the name is kept when the Word program would accept it ([`safe_bookmark_name`]) and the document has
     /// room for it; the next run of text carries the start.
