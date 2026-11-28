@@ -63,6 +63,7 @@ pub(crate) fn write_run_word(out: &mut String, r: &RichRun) {
             push_json_str(out, v);
         }
     }
+    super::convert_structured_blocks::write_run_math(out, r);
 }
 
 /// `"caption"` and `"sectionBreak"` of a paragraph.
@@ -90,6 +91,11 @@ pub(crate) fn write_paragraph_word(out: &mut String, p: &RichParagraph) {
     if let Some(kind) = p.section_break {
         let _ = write!(out, ",\"sectionBreak\":\"{}\"", kind.wire_name());
     }
+    super::convert_structured_blocks::write_paragraph_blocks(
+        out,
+        p,
+        crate::convert_open::write_paragraph,
+    );
 }
 
 fn properties(entries: &JsonObject) -> Result<RichProperties, EasyOfficeError> {
@@ -191,4 +197,5 @@ pub(crate) fn write_doc_word(out: &mut String, doc: &RichDocument) {
         out.push_str(",\"watermark\":");
         push_json_str(out, text);
     }
+    super::convert_structured_blocks::write_doc_blocks(out, doc);
 }

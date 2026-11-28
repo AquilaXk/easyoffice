@@ -9,6 +9,7 @@ use crate::rich_document::{
     RichPaper, RichParagraph,
 };
 use crate::rich_run_writers::docx_run_properties;
+use crate::rich_word_blocks::{RichColumnLook, RichNarrowColumn};
 use crate::XmlSanitizer;
 
 pub(crate) const DOC_DEFAULT_FONT: &str = "맑은 고딕";
@@ -104,6 +105,7 @@ pub(crate) fn docx_page_margins(margins: Option<&RichPageMargins>, binding: Rich
 /// `w:cols` for the section properties; single-column uses the default column gap (`425` twips).
 pub(crate) fn docx_cols_xml(
     columns: Option<RichColumns>,
+    look: Option<RichColumnLook>,
     paper: Option<&RichPaper>,
     margins: Option<&RichPageMargins>,
 ) -> String {
@@ -112,8 +114,15 @@ pub(crate) fn docx_cols_xml(
     };
     let count = cols.count.min(16);
     let gap = cols.gap_twips;
-    if cols.equal {
-        return format!("<w:cols w:num=\"{count}\" w:space=\"{gap}\"/>");
+    let look = look.unwrap_or_default();
+    let sep = if look.separator { " w:sep=\"1\"" } else { "" };
+    // An unequal layout with no side named is the one with the narrow first column (what the reader of old files assumed).
+    let narrow = match look.narrow {
+        RichNarrowColumn::None if !cols.equal => RichNarrowColumn::First,
+        other => other,
+    };
+    if narrow == RichNarrowColumn::None {
+        return format!("<w:cols w:num=\"{count}\" w:space=\"{gap}\"{sep}/>");
     }
     let page_w = paper.copied().unwrap_or(RichPaper::A4).width;
     let side = margins.map_or(2880, |m| m.left.saturating_add(m.right));
@@ -121,11 +130,13 @@ pub(crate) fn docx_cols_xml(
         .saturating_sub(side)
         .saturating_sub(u32::from(gap) * u32::from(count - 1))
         .max(u32::from(count) * 144);
-    let first_w = (usable / 3).max(144);
-    let rest_w = usable.saturating_sub(first_w) / u32::from(count - 1);
-    let mut xml = format!("<w:cols w:num=\"{count}\" w:space=\"{gap}\" w:equalWidth=\"0\">");
+    let narrow_w = (usable / 3).max(144);
+    let other_w = (usable.saturating_sub(narrow_w) / u32::from(count - 1)).max(144);
+    let mut xml = format!("<w:cols w:num=\"{count}\" w:space=\"{gap}\" w:equalWidth=\"0\"{sep}>");
     for i in 0..count {
-        let w = if i == 0 { first_w } else { rest_w.max(144) };
+        let is_narrow =
+            (i == 0) == (narrow == RichNarrowColumn::First) && (i == 0 || i + 1 == count);
+        let w = if is_narrow { narrow_w } else { other_w };
         if i + 1 < count {
             xml.push_str(&format!("<w:col w:w=\"{w}\" w:space=\"{gap}\"/>"));
         } else {

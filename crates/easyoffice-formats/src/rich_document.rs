@@ -189,6 +189,9 @@ pub struct RichRun {
     pub bookmark_start: Option<String>,
     /// The bookmark of that name ends after this run's text.
     pub bookmark_end: Option<String>,
+    /// An equation: the checked OMML (`<m:oMath>` or `<m:oMathPara>`) that DOCX keeps as it was written; `text` is its
+    /// linear text for the formats that have no equations (PD-401).
+    pub math: Option<String>,
 }
 
 /// A value the page fills in at each page it is drawn on.
@@ -449,6 +452,8 @@ pub struct RichParagraph {
     pub caption: bool,
     /// A section break follows this paragraph and the next section begins as [`RichSectionBreak`] says.
     pub section_break: Option<RichSectionBreak>,
+    /// Tab stops, borders, shading, drop cap, column look, text boxes and the style of the user (PD-401).
+    pub word: crate::rich_word_blocks::RichParagraphWord,
 }
 
 impl RichParagraph {
@@ -491,6 +496,8 @@ pub struct RichDocument {
     pub defaults: Option<crate::RichDefaults>,
     /// Author, subject, keywords and comments of the document (the title is `title`).
     pub properties: RichProperties,
+    /// The styles the user made (PD-401); a paragraph names one in `word.style_name`.
+    pub styles: Vec<crate::rich_word_blocks::RichStyleDef>,
 }
 
 /// The headings of the header and footer appendix, and the prefixes it puts before first-page and even-page text.

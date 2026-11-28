@@ -265,6 +265,7 @@ pub(crate) fn push_docx_paragraph_runs(out: &mut String, p: &RichParagraph, link
             || r.comment_id.is_some()
             || r.bookmark_start.is_some()
             || r.bookmark_end.is_some()
+            || r.math.is_some()
     }) {
         let want_comment = run.comment_id;
         let want_rev = run.revision.as_ref();
@@ -353,6 +354,9 @@ pub(crate) fn push_docx_paragraph_runs(out: &mut String, p: &RichParagraph, link
             );
         } else if let Some(field) = run.field {
             out.push_str(&docx_field_run(field, &docx_run_properties(run)));
+        } else if let Some(math) = &run.math {
+            // The equation as the file wrote it (checked when it was read or saved), in place of the run.
+            out.push_str(math);
         } else if !run.text.is_empty() {
             let properties = docx_run_properties(run);
             out.push_str("<w:r>");

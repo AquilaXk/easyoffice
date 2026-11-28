@@ -14,6 +14,9 @@ pub struct DocSaveLoss {
     /// bookmarks, the section breaks, the line numbers, the watermark, the repeated table header rows and the wrap, crop or
     /// rotation of a picture.
     pub word_features: usize,
+    /// The paragraph and block features of PD-401 that only DOCX writes: tab stops, paragraph borders and shading, drop
+    /// caps, column separators and breaks, text boxes, equations (their text stays) and the styles of the user.
+    pub word_blocks: usize,
 }
 
 impl DocSaveLoss {
@@ -41,8 +44,35 @@ impl DocSaveLoss {
                 self.word_features
             ));
         }
+        if self.word_blocks > 0 {
+            out.push(format!(
+                "{label} 저장에서 빠진 탭 정지·문단 테두리와 음영·첫 글자 장식·단 구분선과 단 나누기·텍스트 상자·수식·사용자 스타일 {}곳",
+                self.word_blocks
+            ));
+        }
         out
     }
+}
+
+/// How many of the paragraph and block items of PD-401 a document holds.
+fn word_blocks(doc: &RichDocument) -> usize {
+    let in_text: usize = doc
+        .blocks
+        .iter()
+        .map(|block| match block {
+            RichBlock::Paragraph(p) => {
+                let w = &p.word;
+                usize::from(!w.tab_stops.is_empty())
+                    + usize::from(w.borders.is_some() || w.shading.is_some())
+                    + usize::from(w.drop_cap.is_some())
+                    + usize::from(w.column_break_before || w.column_look.is_some())
+                    + w.text_boxes.len()
+                    + p.runs.iter().filter(|r| r.math.is_some()).count()
+            }
+            _ => 0,
+        })
+        .sum();
+    in_text + doc.styles.len()
 }
 
 /// How many of the Word-style items of PD-395 a document holds.
@@ -80,17 +110,18 @@ pub fn doc_save_loss(doc: &RichDocument, format: DocumentFormat) -> DocSaveLoss 
             | DocumentFormat::Pdf
     );
     // DOCX and the formats that are not documents keep or never had them; every other document format writes none of them.
-    let word_features = if matches!(
+    let (word_features, word_blocks) = if matches!(
         format,
         DocumentFormat::Docx | DocumentFormat::Xlsx | DocumentFormat::Pptx
     ) {
-        0
+        (0, 0)
     } else {
-        word_features(doc)
+        (word_features(doc), word_blocks(doc))
     };
     if !marks_lost {
         return DocSaveLoss {
             word_features,
+            word_blocks,
             ..DocSaveLoss::default()
         };
     }
@@ -116,5 +147,6 @@ pub fn doc_save_loss(doc: &RichDocument, format: DocumentFormat) -> DocSaveLoss 
         revisions,
         first_page_frames,
         word_features,
+        word_blocks,
     }
 }

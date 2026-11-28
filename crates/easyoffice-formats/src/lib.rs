@@ -112,6 +112,7 @@ mod rich_table_cells;
 mod rich_table_style;
 mod rich_table_writers;
 mod rich_toc_writers;
+pub mod rich_word_blocks;
 pub mod rich_word_features;
 mod rich_writers;
 mod rich_xml;

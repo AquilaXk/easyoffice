@@ -205,6 +205,7 @@ pub(crate) fn push_marked_run(
     }
     if let Some(last) = runs.last_mut() {
         if last.field.is_none()
+            && last.math.is_none()
             && last.note_ref.is_none()
             && last.comment_id == comment_id
             && last.revision.as_ref() == revision
@@ -241,6 +242,7 @@ pub(crate) fn push_marked_run(
         note_ref: None,
         comment_id,
         revision: revision.cloned(),
+        math: None,
     });
 }
 

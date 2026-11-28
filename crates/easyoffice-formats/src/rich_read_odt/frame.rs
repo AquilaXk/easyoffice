@@ -454,6 +454,7 @@ pub(super) fn finalize_odt_document(
             track_changes: odt_notes.track_changes,
             defaults: Some(super::defaults::read_odt_defaults(styles_xml)?),
             properties: Default::default(),
+            styles: Vec::new(),
         },
         warnings,
     ))

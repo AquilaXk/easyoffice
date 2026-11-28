@@ -40,6 +40,10 @@ use crate::rich_toc_writers::{
     docx_field_edges_cached, docx_toc_page, docx_toc_style_id, docx_toc_styles_xml, docx_toc_tabs,
     is_toc_block, odt_toc_page, odt_toc_paragraph_style, TocScope,
 };
+use crate::rich_word_blocks::{
+    docx_borders_xml, docx_custom_style_id, docx_custom_styles_xml, docx_frame_pr_xml,
+    docx_tab_stops_xml, docx_text_box_run, RichColumnLook, RichStyleDef,
+};
 use crate::rich_word_features::RichSectionBreak;
 use crate::{
     EasyOfficeError, PdfDocumentModel, PdfPageModel, PdfSerializer, XmlSanitizer, ZipArchiveCodec,
@@ -91,7 +95,7 @@ fn docx_default_paragraph(defaults: &RichDefaults) -> String {
 /// The built-in caption style the captions of pictures, tables and figures use (9 pt italic, as the Word program's).
 const DOCX_CAPTION_STYLE_XML: &str = "<w:style w:type=\"paragraph\" w:styleId=\"Caption\"><w:name w:val=\"caption\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:qFormat/><w:pPr><w:spacing w:after=\"200\" w:line=\"240\" w:lineRule=\"auto\"/></w:pPr><w:rPr><w:i/><w:iCs/><w:sz w:val=\"18\"/><w:szCs w:val=\"18\"/></w:rPr></w:style>";
 
-fn docx_styles_xml(has_toc: bool, defaults: &RichDefaults) -> String {
+fn docx_styles_xml(has_toc: bool, defaults: &RichDefaults, custom: &[RichStyleDef]) -> String {
     let mut xml = format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
@@ -126,6 +130,7 @@ fn docx_styles_xml(has_toc: bool, defaults: &RichDefaults) -> String {
     }
     xml.push_str(DOCX_CAPTION_STYLE_XML);
     xml.push_str(DOCX_LINK_STYLE_XML);
+    xml.push_str(&docx_custom_styles_xml(custom));
     if has_toc {
         xml.push_str(&docx_toc_styles_xml());
     }
@@ -203,6 +208,7 @@ fn push_docx_paragraph(
     links: &mut DocxLinks,
     field: &(String, &str),
     sect_pr: Option<&str>,
+    styles: &[RichStyleDef],
 ) {
     out.push_str("<w:p>");
     let list_kind = list_kind_of(p);
@@ -213,6 +219,13 @@ fn push_docx_paragraph(
         Some(format!("Heading{}", p.heading_level))
     } else if p.caption {
         Some("Caption".to_string())
+    } else if let Some(id) = p
+        .word
+        .style_name
+        .as_deref()
+        .and_then(|n| docx_custom_style_id(styles, n))
+    {
+        Some(id)
     } else {
         list_kind.and_then(|kind| match kind {
             RichListKind::Bullet => Some("ListBullet".to_string()),
@@ -231,13 +244,21 @@ fn push_docx_paragraph(
         let left = 720 * (u32::from(p.list_level.min(8)) + 1);
         layout.push_str(&format!("<w:ind w:left=\"{left}\" w:hanging=\"360\"/>"));
     }
-    let tabs = docx_toc_tabs(p);
+    let tabs = if p.toc.is_some() {
+        docx_toc_tabs(p)
+    } else {
+        docx_tab_stops_xml(&p.word.tab_stops)
+    };
+    let frame_pr = docx_frame_pr_xml(p.word.drop_cap);
+    let borders = docx_borders_xml(&p.word);
     let num_run = run.filter(|_| !is_task);
     if style.is_some()
         || num_run.is_some()
         || jc.is_some()
         || !layout.is_empty()
         || !tabs.is_empty()
+        || !frame_pr.is_empty()
+        || !borders.is_empty()
         || p.page_break_before
         || sect_pr.is_some()
     {
@@ -248,9 +269,11 @@ fn push_docx_paragraph(
         if p.page_break_before {
             out.push_str("<w:pageBreakBefore/>");
         }
+        out.push_str(&frame_pr);
         if let Some(run) = num_run {
             out.push_str(&docx_num_pr(run, p));
         }
+        out.push_str(&borders);
         out.push_str(&tabs);
         out.push_str(&layout);
         if let Some(j) = jc {
@@ -262,6 +285,9 @@ fn push_docx_paragraph(
         out.push_str("</w:pPr>");
     }
     out.push_str(&field.0);
+    if p.word.column_break_before {
+        out.push_str("<w:r><w:br w:type=\"column\"/></w:r>");
+    }
     if let Some(number) = p.bookmark {
         out.push_str(&format!(
             "<w:bookmarkStart w:id=\"{number}\" w:name=\"{TOC_BOOKMARK_PREFIX}{number}\"/>"
@@ -286,6 +312,25 @@ fn push_docx_paragraph(
         ));
     }
     push_docx_paragraph_runs(out, p, links);
+    for text_box in &p.word.text_boxes {
+        let index = links.next_text_box();
+        let mut body = String::new();
+        for inner in &text_box.paragraphs {
+            push_docx_paragraph(
+                &mut body,
+                inner,
+                None,
+                links,
+                &(String::new(), ""),
+                None,
+                styles,
+            );
+        }
+        if text_box.paragraphs.is_empty() {
+            body.push_str("<w:p/>");
+        }
+        out.push_str(&docx_text_box_run(index, text_box, &body));
+    }
     out.push_str(&docx_toc_page(p));
     if let Some(number) = p.bookmark {
         out.push_str(&format!("<w:bookmarkEnd w:id=\"{number}\"/>"));
@@ -316,13 +361,13 @@ pub(crate) fn docx_rich_entries(
     );
     let core_xml = crate::ooxml_shared_parts::document_properties_xml(doc);
     let defaults = RichDefaults::of(doc);
-    let styles = docx_styles_xml(doc.blocks.iter().any(is_toc_block), &defaults);
+    let styles = docx_styles_xml(doc.blocks.iter().any(is_toc_block), &defaults, &doc.styles);
     let lists = plan_lists(&doc.blocks);
 
     let mut body = String::with_capacity(1024);
     body.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
     body.push_str(
-        "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\"",
+        "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\" xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"",
     );
     body.push_str(DOCX_PICTURE_NAMESPACES);
     body.push_str("><w:body>");
@@ -333,24 +378,27 @@ pub(crate) fn docx_rich_entries(
     let mut toc_field_cache = None;
     let pg_sz = docx_paper(doc.page_frame.paper.as_ref());
     let pg_mar = docx_page_margins(doc.page_frame.margins.as_ref(), doc.page_frame.binding);
-    let mut section_end_cols: Vec<Option<Option<RichColumns>>> = vec![None; doc.blocks.len()];
-    let mut seen_later_para: Option<Option<RichColumns>> = None;
-    let mut last_para_cols: Option<RichColumns> = None;
+    // The column layout of a paragraph: the columns and their look (a change of either ends a section).
+    type ColumnKey = (Option<RichColumns>, Option<RichColumnLook>);
+    let column_key = |p: &RichParagraph| -> ColumnKey { (p.columns, p.word.column_look) };
+    let mut section_end_cols: Vec<Option<ColumnKey>> = vec![None; doc.blocks.len()];
+    let mut seen_later_para: Option<ColumnKey> = None;
+    let mut last_para_cols: ColumnKey = (None, None);
     for (idx, block) in doc.blocks.iter().enumerate().rev() {
         if let RichBlock::Paragraph(p) = block {
             if seen_later_para.is_none() {
-                last_para_cols = p.columns;
-            } else if seen_later_para != Some(p.columns) {
-                section_end_cols[idx] = Some(p.columns);
+                last_para_cols = column_key(p);
+            } else if seen_later_para != Some(column_key(p)) {
+                section_end_cols[idx] = Some(column_key(p));
             }
-            seen_later_para = Some(p.columns);
+            seen_later_para = Some(column_key(p));
         }
     }
     // A section break ends a section at its paragraph, as a change of columns does.
     for (idx, block) in doc.blocks.iter().enumerate() {
         if let RichBlock::Paragraph(p) = block {
             if p.section_break.is_some() && section_end_cols[idx].is_none() {
-                section_end_cols[idx] = Some(p.columns);
+                section_end_cols[idx] = Some(column_key(p));
             }
         }
     }
@@ -367,9 +415,10 @@ pub(crate) fn docx_rich_entries(
         match block {
             RichBlock::Paragraph(p) => {
                 let edges = docx_field_edges_cached(&doc.blocks, index, &mut toc_field_cache);
-                let inline_sect = section_end_cols[index].map(|cols| {
+                let inline_sect = section_end_cols[index].map(|(cols, look)| {
                     let cols_xml = docx_cols_xml(
                         cols,
+                        look,
                         doc.page_frame.paper.as_ref(),
                         doc.page_frame.margins.as_ref(),
                     );
@@ -394,6 +443,7 @@ pub(crate) fn docx_rich_entries(
                     &mut links,
                     &edges,
                     inline_sect.as_deref(),
+                    &doc.styles,
                 );
             }
             RichBlock::Image(img) => {
@@ -433,7 +483,8 @@ pub(crate) fn docx_rich_entries(
     frame.relationships.push_str(&settings.1);
     frame.content_types.push_str(&settings.2);
     let last_cols_xml = docx_cols_xml(
-        last_para_cols,
+        last_para_cols.0,
+        last_para_cols.1,
         doc.page_frame.paper.as_ref(),
         doc.page_frame.margins.as_ref(),
     );

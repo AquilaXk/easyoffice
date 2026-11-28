@@ -29,6 +29,8 @@ use easyoffice_formats::{
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
+#[path = "convert_structured_blocks.rs"]
+pub(crate) mod convert_structured_blocks;
 #[path = "convert_structured_defaults.rs"]
 pub(crate) mod convert_structured_defaults;
 #[path = "convert_structured_notes.rs"]
@@ -187,6 +189,10 @@ pub(crate) fn as_object<'a>(
 pub(crate) struct Budget {
     items: usize,
     pub(super) revisions: usize,
+    /// Text boxes and equations so far, and whether a text box is open (PD-401).
+    text_boxes: usize,
+    maths: usize,
+    in_text_box: bool,
 }
 
 impl Budget {
@@ -213,6 +219,7 @@ pub(crate) fn parse_structured_content(
     if let Some(v) = field(entries, "blocks") {
         let mut warnings = Vec::new();
         let mut blocks = parse_blocks(as_array(v, "blocks")?, &mut budget, &mut warnings)?;
+        let doc_look = convert_structured_blocks::parse_doc_column_look(entries)?;
         if let Some(doc_cols) = opt_bounded(entries, "docColumns", 0, 16)?
             .filter(|&c| c >= 2)
             .map(|c| RichColumns {
@@ -225,6 +232,7 @@ pub(crate) fn parse_structured_content(
                 if let RichBlock::Paragraph(p) = block {
                     if p.columns.is_none() {
                         p.columns = Some(doc_cols);
+                        p.word.column_look = doc_look;
                     }
                 }
             }
@@ -249,6 +257,7 @@ pub(crate) fn parse_structured_content(
             // The defaults of an opened file come back with the save (PD-363); a new document sends
             // none and is written with the Korean defaults.
             defaults: convert_structured_defaults::parse_doc_defaults(entries)?,
+            styles: convert_structured_blocks::parse_doc_styles(entries)?,
         };
         check_document_images(&doc)?;
         let content = StructuredContent::Document(doc, parse_pdf_options(entries)?);
@@ -415,6 +424,7 @@ pub(crate) fn parse_runs(
                 note_ref,
                 comment_id,
                 revision,
+                math: convert_structured_blocks::parse_run_math(run, budget)?,
             });
         }
     }
@@ -548,6 +558,7 @@ fn parse_paragraph(
         frame_copy: opt_frame_copy(obj)?,
         caption,
         section_break,
+        word: convert_structured_blocks::parse_paragraph_blocks(obj, budget)?,
     })
 }
 

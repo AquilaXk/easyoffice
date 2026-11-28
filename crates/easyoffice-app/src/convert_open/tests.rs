@@ -978,5 +978,7 @@ fn merged_ranges_and_hidden_rows_and_columns_reach_the_page() {
     );
 }
 
+#[path = "word_blocks_tests.rs"]
+mod word_blocks_tests;
 #[path = "word_features_tests.rs"]
 mod word_features_tests;

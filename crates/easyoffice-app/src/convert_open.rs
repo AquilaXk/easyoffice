@@ -113,7 +113,7 @@ pub(crate) fn write_runs_json(out: &mut String, runs: &[RichRun]) {
     }
 }
 
-fn write_paragraph(out: &mut String, p: &RichParagraph) {
+pub(crate) fn write_paragraph(out: &mut String, p: &RichParagraph) {
     out.push_str("{\"type\":\"paragraph\",\"runs\":[");
     write_runs_json(out, &p.runs);
     out.push(']');

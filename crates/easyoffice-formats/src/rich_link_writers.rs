@@ -45,12 +45,20 @@ pub(crate) struct DocxLinks {
     index: HashMap<String, usize>,
     /// The ids of the bookmarks that started, by name (`w:bookmarkStart` and `w:bookmarkEnd` pair by id).
     bookmarks: HashMap<String, usize>,
+    /// The text boxes written so far (the shape ids of their `v:shape` differ).
+    text_boxes: usize,
 }
 
 /// Bookmark ids start here, above the ids of the table-of-contents bookmarks (their heading numbers).
 const DOCX_BOOKMARK_ID_BASE: usize = 100_000;
 
 impl DocxLinks {
+    /// The number of the next text box of the document.
+    pub(crate) fn next_text_box(&mut self) -> usize {
+        self.text_boxes += 1;
+        self.text_boxes
+    }
+
     /// The id of a bookmark that starts here: `None` for a name that already started (Word needs unique names) and
     /// past [`crate::rich_word_features::MAX_BOOKMARKS`].
     pub(crate) fn start_bookmark(&mut self, name: &str) -> Option<usize> {

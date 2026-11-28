@@ -35,6 +35,12 @@ pub(super) struct ParaState {
     pub(super) page_break_before: bool,
     pub(super) page_break_after: bool,
     pub(super) sect_end: Option<Option<RichColumns>>,
+    /// PD-401: the paragraph features read so far, the look of the columns of the section this paragraph ends, a column
+    /// break after the paragraph's text, and whether the paragraph mark's run properties are open.
+    pub(super) word: crate::rich_word_blocks::RichParagraphWord,
+    pub(super) sect_look: Option<crate::rich_word_blocks::RichColumnLook>,
+    pub(super) column_break_after: bool,
+    pub(super) in_mark_rpr: bool,
     /// The ordinal of the section a `w:sectPr` in this paragraph closed (the section break after it, PD-395).
     pub(super) section_ordinal: Option<usize>,
     pub(super) zones: Vec<(String, Vec<RichRun>)>,
@@ -185,7 +191,15 @@ impl Resolver<'_> {
             Some(RichToc::Entry(_)) => take_toc_page(&mut p.runs),
             _ => None,
         };
-        RichParagraph {
+        let custom = p
+            .style_id
+            .as_deref()
+            .and_then(|id| self.styles.get(id))
+            .and_then(|st| st.custom.as_ref())
+            .map(|(_, def)| def);
+        let word = super::word_blocks::finish_word(std::mem::take(&mut p.word), toc.is_some());
+        let mut paragraph = RichParagraph {
+            word,
             list_level,
             list_number,
             task_checked,
@@ -210,7 +224,11 @@ impl Resolver<'_> {
                     .as_deref()
                     .is_some_and(|id| self.is_caption_style(id)),
             ..RichParagraph::default()
+        };
+        if let Some(def) = custom.filter(|_| heading == 0 && toc.is_none()) {
+            super::word_blocks::apply_style_def(&mut paragraph, def);
         }
+        paragraph
     }
 
     /// Whether a style is the built-in caption style (`Caption`, or a style named `caption`).
@@ -280,6 +298,8 @@ pub(crate) struct DocxStyle {
     pub(crate) name: Option<String>,
     pub(crate) based_on: Option<String>,
     pub(crate) outline_lvl: Option<u8>,
+    /// The look of a paragraph style the user made (`w:customStyle`) and its place among the styles of the file.
+    pub(crate) custom: Option<(usize, crate::rich_word_blocks::RichStyleDef)>,
 }
 
 /// styleId -> style metadata (`w:name`, `w:basedOn`, `w:outlineLvl`).
@@ -287,12 +307,31 @@ pub(crate) struct DocxStyle {
 pub(crate) fn read_styles(xml: &str) -> Result<HashMap<String, DocxStyle>, EasyOfficeError> {
     let mut out: HashMap<String, DocxStyle> = HashMap::new();
     let mut current: Option<String> = None;
+    let mut builder: Option<super::word_blocks::StyleBuilder> = None;
+    let mut seen = 0usize;
     for ev in XmlReader::new(xml) {
-        match ev? {
+        let ev = ev?;
+        match &ev {
+            XmlEvent::Start { name, attrs } => {
+                if let Some(b) = builder.as_mut() {
+                    b.on_start(name, attrs);
+                }
+            }
+            XmlEvent::End(name) => {
+                if let Some(b) = builder.as_mut() {
+                    b.on_end(name);
+                }
+            }
+            XmlEvent::Text(_) => {}
+        }
+        match ev {
             XmlEvent::Start {
                 name: "w:style",
                 attrs,
             } => {
+                seen += 1;
+                builder = super::word_blocks::StyleBuilder::start(&attrs)
+                    .filter(|_| seen <= crate::rich_word_blocks::MAX_CUSTOM_STYLES * 8);
                 if let Some(id) = attr(&attrs, "w:styleId") {
                     out.entry(id.to_string()).or_default();
                     current = Some(id.into_owned());
@@ -326,7 +365,14 @@ pub(crate) fn read_styles(xml: &str) -> Result<HashMap<String, DocxStyle>, EasyO
                     }
                 }
             }
-            XmlEvent::End("w:style") => current = None,
+            XmlEvent::End("w:style") => {
+                let def = builder
+                    .take()
+                    .and_then(super::word_blocks::StyleBuilder::finish);
+                if let (Some(id), Some(def)) = (current.take(), def) {
+                    out.entry(id).or_default().custom = Some((seen, def));
+                }
+            }
             _ => {}
         }
     }

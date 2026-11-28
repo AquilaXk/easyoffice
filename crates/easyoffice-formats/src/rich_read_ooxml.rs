@@ -46,10 +46,13 @@ mod styles;
 mod table;
 #[path = "rich_read_ooxml/word.rs"]
 mod word;
+#[path = "rich_read_ooxml/word_blocks.rs"]
+mod word_blocks;
 use frame::*;
 use notes::{read_docx_comments, read_docx_notes};
 use styles::*;
 use table::{grid_span, DocxTableState, VMerge};
+pub(crate) use word_blocks::checked_omml;
 
 /// A `w:headerReference` or `w:footerReference` of a section.
 pub(super) struct FrameRef {
@@ -188,6 +191,12 @@ pub(super) struct DocxWalker {
     section_types: Vec<Option<RichSectionBreak>>,
     section_marks: Vec<(usize, usize)>,
     line_numbers: Option<RichLineNumbers>,
+    /// PD-401: the look of the open section's columns, the text boxes and equations read, and a column break the next
+    /// paragraph has to carry.
+    col_look: word_blocks::ColumnLookState,
+    text_box_total: usize,
+    math_total: usize,
+    pending_column_break: bool,
     /// `w:pgMar` and `w:pgSz` of the open section, and the page setup of the first section that gives margins.
     section_margins: Option<RichPageMargins>,
     section_paper: Option<RichPaper>,
@@ -259,6 +268,7 @@ impl DocxWalker {
             if self.in_ppr {
                 Self::apply_para_property(top, name, attr(attrs, "w:val").as_deref());
                 apply_para_layout(top, name, attrs);
+                word_blocks::apply_ppr(top, name, attrs);
             }
         }
         if self.in_run && self.in_rpr {
@@ -349,7 +359,11 @@ impl DocxWalker {
                 self.section_gutter = page_gutter(attrs);
             }
             "w:pgSz" => self.section_paper = page_paper(attrs),
-            "w:cols" => self.section_cols = parse_docx_cols(attrs),
+            "w:cols" => {
+                self.section_cols = parse_docx_cols(attrs);
+                self.col_look.begin(attrs);
+            }
+            "w:col" if self.in_sect_pr => self.col_look.push_width(attrs),
             "w:headerReference" | "w:footerReference" => {
                 if let Some(rel_id) = attr(attrs, "r:id") {
                     self.frame_refs.push(FrameRef {
@@ -468,7 +482,11 @@ impl DocxWalker {
                 self.note_page_break();
                 None
             }
-            "w:br" if attr(attrs, "w:type").as_deref() != Some("column") => Some('\n'),
+            "w:br" if attr(attrs, "w:type").as_deref() == Some("column") => {
+                self.note_column_break();
+                None
+            }
+            "w:br" => Some('\n'),
             "w:cr" => Some('\n'),
             "w:noBreakHyphen" => Some('-'),
             _ => None,
@@ -561,14 +579,21 @@ impl DocxWalker {
                 }
                 self.cur_section += 1;
                 let cols = self.section_cols.take();
+                let look = self.col_look.finish().filter(|_| cols.is_some());
                 if let Some(top) = self.paras.last_mut() {
                     top.sect_end = Some(cols);
+                    top.sect_look = look;
                     top.section_ordinal = Some(ordinal);
                 } else {
-                    self.apply_section_cols(cols);
+                    self.apply_section_cols(cols, look);
                 }
             }
-            "w:rPr" => self.in_rpr = false,
+            "w:rPr" => {
+                self.in_rpr = false;
+                if let Some(top) = self.paras.last_mut().filter(|_| self.in_ppr) {
+                    word_blocks::end_ppr_child(top, name);
+                }
+            }
             "w:pPr" => self.in_ppr = false,
             "w:r" => {
                 if let Some((field, written)) = self.simple_field {
@@ -711,11 +736,16 @@ impl DocxWalker {
         }
     }
 
-    fn apply_section_cols(&mut self, cols: Option<RichColumns>) {
+    fn apply_section_cols(
+        &mut self,
+        cols: Option<RichColumns>,
+        look: Option<crate::rich_word_blocks::RichColumnLook>,
+    ) {
         if cols.is_some() {
             for block in &mut self.blocks[self.sect_block_start..] {
                 if let RichBlock::Paragraph(p) = block {
                     p.columns = cols;
+                    p.word.column_look = look;
                 }
             }
         }
@@ -727,6 +757,7 @@ impl DocxWalker {
             return Ok(());
         };
         let sect_end = p.sect_end.take();
+        let sect_look = p.sect_look.take();
         let section_ordinal = p.section_ordinal.take();
         let images = std::mem::take(&mut p.images);
         if self.tbl_depth > 0 {
@@ -758,15 +789,19 @@ impl DocxWalker {
         } else {
             let carried = p.page_break_before;
             let after = p.page_break_after;
+            let (col_carried, col_after) = (p.word.column_break_before, p.column_break_after);
             let mut kept = false;
-            if p.runs.iter().any(run_keeps_paragraph) {
+            if p.runs.iter().any(run_keeps_paragraph) || !p.word.text_boxes.is_empty() {
                 self.text_budget.charge_block(0, "DOCX 문단")?;
                 let mut paragraph = resolver.finish(p);
                 paragraph.page_break_before |= std::mem::take(&mut self.pending_page_break);
+                paragraph.word.column_break_before |=
+                    std::mem::take(&mut self.pending_column_break);
                 self.blocks.push(RichBlock::Paragraph(paragraph));
                 kept = true;
             }
             self.pending_page_break |= (carried && !kept) || after;
+            self.pending_column_break |= (col_carried && !kept) || col_after;
             self.blocks.extend(images.into_iter().map(RichBlock::Image));
             if let Some(ordinal) =
                 section_ordinal.filter(|_| self.section_marks.len() < MAX_SECTION_BREAKS)
@@ -774,7 +809,7 @@ impl DocxWalker {
                 self.section_marks.push((self.blocks.len(), ordinal));
             }
             if let Some(cols) = sect_end {
-                self.apply_section_cols(cols);
+                self.apply_section_cols(cols, sect_look);
             }
         }
         Ok(())
@@ -785,6 +820,7 @@ impl DocxWalker {
 /// bookmark (a paragraph dropped with the end of a bookmark would leave the start without its end).
 fn run_keeps_paragraph(r: &RichRun) -> bool {
     r.field.is_some()
+        || r.math.is_some()
         || r.note_ref.is_some()
         || r.comment_id.is_some()
         || r.revision.is_some()
@@ -803,9 +839,23 @@ fn walk_part(
     let mut reader = XmlReader::new(xml);
     while let Some(event) = reader.next_event()? {
         match event {
-            XmlEvent::Start { name, .. } if name == DRAWING_ELEMENT && !walker.frame_mode => {
-                let drawing = reader.collect_subtree(event)?;
-                walker.on_drawing(&drawing, media)?;
+            XmlEvent::Start { name, .. }
+                if (name == DRAWING_ELEMENT || name == "w:pict") && !walker.frame_mode =>
+            {
+                let object = reader.collect_subtree(event)?;
+                if word_blocks::has_text_box(&object) {
+                    walker.on_text_box(&object, resolver)?;
+                } else if name == DRAWING_ELEMENT {
+                    walker.on_drawing(&object, media)?;
+                } else {
+                    walker.warn_once(UNSUPPORTED_OBJECT_NOTE.to_string());
+                }
+            }
+            XmlEvent::Start { name, .. }
+                if (name == "m:oMath" || name == "m:oMathPara") && !walker.frame_mode =>
+            {
+                let math = reader.collect_subtree(event)?;
+                walker.on_math(&math)?;
             }
             XmlEvent::Start { name, ref attrs } => {
                 if walker.on_start(name, attrs)? {
@@ -929,6 +979,7 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
             track_changes: settings.track_revisions,
             defaults: Some(defaults),
             properties,
+            styles: word_blocks::custom_styles(&styles),
         },
         warnings,
     ))
