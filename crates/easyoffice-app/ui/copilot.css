@@ -8,8 +8,9 @@
    `ui/base/popover.tsx` 20-52, `ui/base/command.tsx` 143-157(항목)·114-130(그룹)·131-142(구분선) 값이다. 모드 목록의 동작(현재 값을 보이는 단추와 체크가 있는 선택지)은 Continue(Apache-2.0)
    `gui/src/components/ModeSelect/ModeSelect.tsx` 89-172에서 옮겼다. 메뉴가 화면 밖으로 넘칠 때 뒤집는 계산(`placeMenu`)은 floating-ui(MIT) `packages/core/src/middleware/flip.ts`·`shift.ts`에서 옮겼다.
    참조 구현: LibreChat (MIT) 커밋 4700c44e `packages/chat/src/components/messages/Feedback.tsx`, `packages/client/src/components/Button.tsx`(popover-option) = 싫어요 이유 목록(`.eo-copilot-feedback-popover`, `-reason-option`).
-   인사말과 제안 줄은 assistant-ui Welcome·Suggestion(thread.aui.tsx 159-201)이고, 부제는 원본에 없다. 머리글(제목·더보기·닫기)과 + 메뉴(예시 질문)는 같은 구성을 가진 저장소 소스를 못 찾아
-   이 앱의 구조에 단추·메뉴 값만 위 원본 부품의 것을 썼다. 사용자 메시지 아래 시간·복사·다시 보내기 줄과 답변 아래 복사·좋아요·싫어요·시간 줄은 QA 목표 화면의 배치다. */
+   인사말과 제안 줄은 assistant-ui Welcome·Suggestion(thread.aui.tsx 159-201)이고, 부제는 원본에 없다. 머리글은 같은 저장소의 AssistantModalHeader(`elements/assistant-modal.aui.tsx` 126-166),
+   더보기·+ 메뉴는 LibreChat(MIT) 커밋 4700c44e `packages/client/src/components/DropdownPopup.tsx` 120-215와 `Dropdown.css` 1-63(.popover-ui)의 값이다.
+   사용자 메시지 아래 시간·복사·다시 보내기 줄과 답변 아래 복사·좋아요·싫어요·시간 줄은 QA 목표 화면의 배치다. */
 
 .workspace-stage-row {
   display: flex;
@@ -125,16 +126,17 @@
   display: none;
 }
 
-/* 머리글은 이 앱의 구조(제목·더보기·닫기)를 두고 간격·글자만 원본 값이다: 아이콘 단추(size-6) + 위아래 py-2, 제목 text-sm font-medium. */
+/* 머리글: 기준 저장소 AssistantModalHeader(assistant-modal.aui.tsx 126-166)의 값이다. 줄 `flex h-11 shrink-0 items-center gap-2 border-b border-foreground/10 ps-3.5 pe-2`,
+   제목 `min-w-0 flex-1 truncate text-[13px] font-medium`(대화 제목이 없으면 "New Chat" = 새 대화), 단추 묶음 `gap-0.5`, 단추 `size-7 rounded-md p-0 text-muted-foreground hover:text-foreground`, 아이콘 `size-3.5`. */
 .eo-copilot-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--copilot-u-2);
   box-sizing: border-box;
-  padding: var(--copilot-u-2) var(--copilot-u-2) var(--copilot-u-2) var(--copilot-u-4);
+  height: var(--copilot-u-11);
+  padding: 0 var(--copilot-u-2) 0 var(--copilot-u-3_5);
   background: var(--copilot-background);
-  border-bottom: 1px solid var(--copilot-border);
+  border-bottom: 1px solid var(--copilot-composer-border);
   flex-shrink: 0;
 }
 
@@ -144,17 +146,43 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--copilot-font-sm);
+  font-size: var(--copilot-font-header);
   line-height: var(--copilot-leading-sm);
   font-weight: 500;
   color: var(--copilot-foreground);
 }
 
 .eo-copilot-head-actions {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: var(--copilot-u-1);
+  gap: var(--copilot-u-0_5);
   flex-shrink: 0;
+}
+
+.eo-copilot-head-actions .eo-copilot-icon-btn {
+  width: var(--copilot-u-7);
+  height: var(--copilot-u-7);
+  padding: 0;
+  border-radius: var(--copilot-radius-md);
+}
+
+.eo-copilot-head-actions .eo-copilot-icon-btn:hover:not(:disabled),
+.eo-copilot-head-actions .eo-copilot-icon-btn[aria-expanded="true"] {
+  background: transparent;
+}
+
+.eo-copilot-head-actions .eo-copilot-icon-btn:hover:not(:disabled) {
+  color: var(--copilot-foreground);
+}
+
+.eo-copilot-head-actions .eo-copilot-icon-btn[aria-expanded="true"] {
+  background: var(--copilot-muted);
+  color: var(--copilot-foreground);
+}
+
+.eo-copilot-head-actions .eo-icon {
+  width: var(--copilot-u-3_5);
+  height: var(--copilot-u-3_5);
 }
 
 /* ── 아이콘 단추(원본 TooltipIconButton: ghost, size-6 p-1, rounded-lg, active:scale-90) ── */
@@ -204,8 +232,9 @@
   color: var(--copilot-foreground);
 }
 
-/* ── 메뉴(원본 ActionBarMore Content/Item: rounded-xl border p-1.5 shadow-lg backdrop-blur-sm, 항목 rounded-lg px-2.5 py-1.5 text-sm) ──
-   더보기·+ 메뉴는 단추 옆에 고정 위치로 뜬다(`copilot-popup-menu.js`). */
+/* ── 메뉴: 더보기·+ 메뉴는 LibreChat DropdownPopup(`packages/client/src/components/DropdownPopup.tsx` 120-215, `Dropdown.css` 1-63)의 값이다.
+   상자 `.popover-ui`: padding 0.5rem, border 1px, 모서리 0.7rem(--theme-menu-radius), shadow-lg, 150ms `scale(0.95) translateY(-0.5rem)`에서 올라옴.
+   항목 `flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm hover:bg-surface-hover`, 아이콘 `size-theme-icon(1rem) me-2`. 단추 옆에 고정 위치로 뜬다(`copilot-popup-menu.js`). ── */
 .eo-copilot-popup,
 .eo-copilot-model-menu {
   --copilot-pop-dy: calc(-1 * var(--copilot-enter-rise-2));
@@ -214,14 +243,12 @@
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  padding: var(--copilot-u-1_5);
-  background: var(--copilot-menu-bg);
+  padding: var(--copilot-u-2);
+  background: var(--copilot-popover);
   color: var(--copilot-foreground);
   border: 1px solid var(--copilot-border);
-  border-radius: var(--copilot-radius-xl);
+  border-radius: var(--copilot-radius-menu);
   box-shadow: var(--copilot-menu-shadow);
-  -webkit-backdrop-filter: blur(var(--copilot-menu-blur));
-  backdrop-filter: blur(var(--copilot-menu-blur));
   font-size: var(--copilot-font-sm);
   line-height: var(--copilot-leading-sm);
   animation: eo-copilot-pop-in var(--copilot-duration) var(--copilot-ease);
@@ -244,14 +271,6 @@
   display: none;
 }
 
-.eo-copilot-popup-heading {
-  padding: var(--copilot-u-1_5) var(--copilot-u-2_5);
-  font-size: var(--copilot-font-xs);
-  line-height: var(--copilot-leading-xs);
-  font-weight: 500;
-  color: var(--copilot-muted-foreground);
-}
-
 /* CommandGroup 머리글: `px-2 py-1.5 text-xs font-medium text-muted-foreground` */
 .eo-copilot-menu-heading {
   padding: var(--copilot-u-1_5) var(--copilot-u-2);
@@ -266,7 +285,7 @@
   align-items: center;
   gap: var(--copilot-u-2);
   width: 100%;
-  padding: var(--copilot-u-1_5) var(--copilot-u-2_5);
+  padding: var(--copilot-u-2) var(--copilot-u-2_5);
   font-family: var(--font-family-ui);
   font-size: var(--copilot-font-sm);
   font-weight: 400;
@@ -275,8 +294,15 @@
   color: var(--copilot-foreground);
   background: transparent;
   border: 0;
-  border-radius: var(--copilot-radius-lg);
+  border-radius: var(--copilot-radius-md);
   cursor: pointer;
+}
+
+/* 항목 아이콘: `size-theme-icon me-2`(16px + 오른쪽 8px) */
+.eo-copilot-popup-icon {
+  display: inline-flex;
+  flex: none;
+  margin-inline-end: var(--copilot-u-2);
 }
 
 .eo-copilot-popup-item:hover:not(:disabled),
@@ -792,7 +818,7 @@
   font-weight: 500;
   line-height: var(--copilot-leading-sm);
   white-space: nowrap;
-  color: var(--ui-text-secondary);
+  color: var(--copilot-muted-foreground);
   background: transparent;
   border: 0;
   border-radius: var(--copilot-radius-control);
@@ -808,7 +834,7 @@
 .eo-copilot-reason-option:focus-visible,
 .eo-copilot-reason-option[aria-pressed="true"] {
   outline: none;
-  background: var(--ui-hover);
+  background: var(--copilot-accent);
   color: var(--copilot-foreground);
 }
 
@@ -964,11 +990,6 @@
   box-shadow: var(--copilot-focus-shadow);
 }
 
-.eo-copilot-pill-btn .eo-chevron {
-  width: var(--copilot-u-4);
-  height: var(--copilot-u-4);
-  opacity: var(--copilot-chevron-opacity);
-}
 
 .eo-copilot-pill-btn:disabled {
   opacity: var(--copilot-disabled-opacity);
@@ -981,8 +1002,11 @@
   white-space: nowrap;
 }
 
+/* 쉐브론: 원본 `ChevronDownIcon className="size-4 opacity-50"`(lucide 16px, 선 2). 앱의 `.eo-chevron` 마스크는 10px용으로 잘린 그림이라 쓰지 않는다. */
 .eo-copilot-caret {
+  display: inline-flex;
   flex: none;
+  opacity: var(--copilot-chevron-opacity);
 }
 
 /* 전송·중지 단추(원본 aui-composer-send/cancel: size-7 rounded-full, Button default = bg-primary hover:bg-primary/80) */

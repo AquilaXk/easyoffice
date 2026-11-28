@@ -15,7 +15,7 @@ const declarations = (css, property) => [...stripComments(css).matchAll(new RegE
 const RADIUS_OF = {
   "base.css": ["0", "var(--radius-sm)"],
   "board.css": ["0"],
-  "copilot.css": ["0", "var(--radius-sm)", "var(--radius-md)", "var(--copilot-radius-sm)", "var(--copilot-radius-md)", "var(--copilot-radius-lg)", "var(--copilot-radius-xl)", "var(--copilot-radius-2xl)", "var(--copilot-radius-control)", "var(--copilot-composer-radius)", "var(--copilot-pill-radius)"],
+  "copilot.css": ["0", "var(--radius-sm)", "var(--radius-md)", "var(--copilot-radius-sm)", "var(--copilot-radius-md)", "var(--copilot-radius-lg)", "var(--copilot-radius-xl)", "var(--copilot-radius-2xl)", "var(--copilot-radius-menu)","var(--copilot-radius-control)", "var(--copilot-composer-radius)", "var(--copilot-pill-radius)"],
 };
 // The one gradient of the panel is the shimmer of the waiting line (a moving band of light text over muted text, PD-388).
 const SHIMMER_RULE = /\.eo-copilot-shimmer\s*\{[^}]*\}/;

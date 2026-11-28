@@ -323,13 +323,18 @@
     function buildPlusMenu() {
       const menu = byId("copilot-plus-menu");
       const items = examplesFor(getActiveModule()).map((ex) => {
-        const btn = mkEl("button", "eo-copilot-popup-item", ex.label);
+        const btn = mkEl("button", "eo-copilot-popup-item");
         btn.type = "button";
         btn.setAttribute("role", "menuitem");
+        const icon = mkEl("span", "eo-copilot-popup-icon");
+        icon.setAttribute("aria-hidden", "true");
+        icons.setIcon(document, icon, "message-square");
+        btn.appendChild(icon);
+        btn.appendChild(mkEl("span", undefined, ex.label));
         btn.addEventListener("click", () => useExample(ex));
         return btn;
       });
-      menu.replaceChildren(mkEl("div", "eo-copilot-popup-heading", "예시 질문"), ...items);
+      menu.replaceChildren(...items);
     }
 
     // 머리글 제목은 첫 질문(한 줄로 줄여서), 대화가 없으면 "새 대화".
@@ -867,8 +872,9 @@
       byId("btn-copilot-close")?.addEventListener("click", () => setOpen(false));
       scrollControl.bind();
       const { createPopupMenu } = host.__EASYOFFICE_COPILOT_POPUP__;
-      moreMenu = createPopupMenu({ document, trigger: byId("btn-copilot-more"), menu: byId("copilot-more-menu"), align: "end" });
-      plusMenu = createPopupMenu({ document, trigger: byId("btn-copilot-plus"), menu: byId("copilot-plus-menu"), placement: "up", align: "start", onOpen: buildPlusMenu });
+      // 더보기·+ 메뉴는 LibreChat DropdownPopup 값(단추와 4px 간격, `.popover-ui`의 margin-top)이다.
+      moreMenu = createPopupMenu({ document, trigger: byId("btn-copilot-more"), menu: byId("copilot-more-menu"), align: "end", gap: 4 });
+      plusMenu = createPopupMenu({ document, trigger: byId("btn-copilot-plus"), menu: byId("copilot-plus-menu"), placement: "up", align: "start", gap: 4, onOpen: buildPlusMenu });
       byId("btn-copilot-new")?.addEventListener("click", () => {
         // 연출 중이면 쓰던 부분도 적용하지 않고 버린다.
         copilotActions.abortPerformance();

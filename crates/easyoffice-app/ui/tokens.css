@@ -227,6 +227,9 @@
   --copilot-u-7_5: 30px;
   --copilot-u-8: 32px;
   --copilot-u-10: 40px;
+  --copilot-u-11: 44px;                           /* 머리글 높이(원본 h-11) */
+  --copilot-font-header: 13px;                    /* 머리글 제목(원본 text-[13px]) */
+  --copilot-radius-menu: 11.2px;                  /* LibreChat `--theme-menu-radius: 0.7rem` (더보기·+ 메뉴) */
   --copilot-u-9: 36px;
   --copilot-u-12: 48px;
   --copilot-u-14: 56px;
@@ -264,7 +267,6 @@
   --copilot-disabled-opacity: 0.5;
   --copilot-step-blur: 2px;
   --copilot-pop-scale: 0.95;                      /* zoom-in-95 (메뉴가 열릴 때) */
-  --copilot-menu-blur: 4px;                       /* backdrop-blur-sm */
   --copilot-spin-duration: 0.6s;                  /* 도구 줄의 진행 아이콘 */
   --copilot-icon-stroke: 2;                       /* lucide 기본 선 굵기(앱 아이콘은 1.75) */
   /* 모델·모드 선택은 기준 저장소의 ModelSelector(`packages/ui/.../model-selector.tsx`)와 Popover·Command(`ui/base/popover.tsx`, `command.tsx`) 값이다:
@@ -284,18 +286,19 @@
   --copilot-popover-scale: 0.94;
   --copilot-shimmer-duration: 1.8s;
   --copilot-shimmer-width: 220%;                  /* 반짝임 띠가 글자 폭에 대해 갖는 너비 */
-  /* 색: 원본의 의미(background, muted, foreground, border, primary)를 앱 색 토큰에 매핑한다. 라이트·다크는 앱 토큰이 따라간다. */
-  --copilot-background: var(--ui-surface);
-  --copilot-foreground: var(--ui-text);
-  --copilot-muted: var(--ui-bg-light);
-  --copilot-muted-foreground: var(--ui-text-muted);
-  --copilot-accent: var(--ui-hover);
-  --copilot-border: var(--ui-border-light);
-  --copilot-primary: var(--accent-strong);
-  --copilot-primary-foreground: var(--ui-text-on-accent);
-  --copilot-destructive: var(--ui-danger);
-  --copilot-ring: var(--focus-ring);
-  --copilot-popover: var(--ui-surface-raised);
+  /* 색: 기준 저장소 `templates/minimal/app/globals.css` 69-94의 :root 값을 그대로 쓴다(oklch). 앱 색 토큰에 매핑하면 다크에서 배경과 말풍선의 명도 차가 사라져 원본 값으로 바꿨다(QA 2026-11-28).
+     다크 값은 아래 `:root[data-theme-effective="dark"]` 블록(원본 `.dark`, globals.css 96-121). */
+  --copilot-background: oklch(1 0 0);
+  --copilot-foreground: oklch(0.141 0.005 285.823);
+  --copilot-muted: oklch(0.967 0.001 286.375);
+  --copilot-muted-foreground: oklch(0.552 0.016 285.938);
+  --copilot-accent: oklch(0.967 0.001 286.375);
+  --copilot-border: oklch(0.92 0.004 286.32);
+  --copilot-primary: oklch(0.21 0.006 285.885);
+  --copilot-primary-foreground: oklch(0.985 0 0);
+  --copilot-destructive: oklch(0.577 0.245 27.325);
+  --copilot-ring: oklch(0.705 0.015 286.067);
+  --copilot-popover: oklch(1 0 0);
   --copilot-composer-bg: color-mix(in srgb, var(--copilot-muted) 30%, transparent);
   --copilot-composer-border: color-mix(in srgb, var(--copilot-foreground) 10%, transparent);
   --copilot-composer-border-focus: color-mix(in srgb, var(--copilot-foreground) 25%, transparent);
@@ -311,7 +314,6 @@
   --copilot-tool-pre-bg: color-mix(in srgb, var(--copilot-muted) 50%, transparent);
   --copilot-rule: color-mix(in srgb, var(--copilot-muted-foreground) 20%, transparent);
   --copilot-quote-rule: color-mix(in srgb, var(--copilot-muted-foreground) 30%, transparent);
-  --copilot-menu-bg: color-mix(in srgb, var(--copilot-popover) 95%, transparent);
   --copilot-menu-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);  /* shadow-lg */
   --copilot-focus-shadow: 0 0 0 1px color-mix(in srgb, var(--copilot-ring) 50%, transparent); /* ring-1 ring-ring/50 */
   --copilot-error-bg: color-mix(in srgb, var(--copilot-destructive) 10%, transparent);
@@ -397,8 +399,18 @@
   --shadow-light: 2px 2px 8px rgba(0, 0, 0, 0.32);
   --overlay-bg: rgba(0, 0, 0, 0.45);
 
-  /* 코파일럿 패널: 원본의 dark: 변형(outline 단추 배경 muted/50, ghost 호버 muted/50) */
-  --copilot-primary-foreground: var(--ui-bg);
+  /* 코파일럿 패널: 원본 `.dark` 값(globals.css 96-121)과 dark: 변형(outline 단추 배경 muted/50, ghost 호버 muted/50) */
+  --copilot-background: oklch(0.141 0.005 285.823);
+  --copilot-foreground: oklch(0.985 0 0);
+  --copilot-muted: oklch(0.274 0.006 286.033);
+  --copilot-muted-foreground: oklch(0.705 0.015 286.067);
+  --copilot-accent: oklch(0.274 0.006 286.033);
+  --copilot-border: oklch(1 0 0 / 10%);
+  --copilot-primary: oklch(0.92 0.004 286.32);
+  --copilot-primary-foreground: oklch(0.21 0.006 285.885);
+  --copilot-destructive: oklch(0.704 0.191 22.216);
+  --copilot-ring: oklch(0.552 0.016 285.938);
+  --copilot-popover: oklch(0.21 0.006 285.885);
   --copilot-outline-bg: color-mix(in srgb, var(--copilot-muted) 50%, transparent);
   --copilot-ghost-hover: color-mix(in srgb, var(--copilot-muted) 50%, transparent);
   --copilot-add-hover: color-mix(in srgb, var(--copilot-muted-foreground) 30%, transparent);

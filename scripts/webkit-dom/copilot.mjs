@@ -141,7 +141,31 @@ const seedParagraphs = (page) => page.evaluate((texts) => {
   document.getElementById("doc-editor").innerHTML = texts.map((t) => `<p>${t}</p>`).join("");
 }, PARAGRAPHS);
 
+// The panel draws its icons at the sizes of the chat UI it comes from: lucide icons 16px (size-4), the header buttons 14px (size-3.5),
+// the chevrons of the model and mode buttons 16px at half opacity (`size-4 opacity-50`). A cropped mask once drew them 14px wide and dark.
+const ICON_BOXES = [
+  ["#btn-copilot-more .eo-icon", 14], ["#btn-copilot-close .eo-icon", 14], ["#btn-copilot-plus .eo-icon", 16], ["#btn-copilot-send .eo-icon", 16],
+  ["#btn-copilot-model .eo-copilot-caret .eo-icon", 16], ["#btn-copilot-mode .eo-copilot-caret .eo-icon", 16],
+  ["#copilot-thread .eo-copilot-meta-btn .eo-icon", 16],
+];
+
 export const copilotDocSteps = [
+  ["the panel's icons are drawn at the sizes of their source: 16px, 14px in the header, half-opacity thin chevrons", async (page) => {
+    await seedParagraphs(page);
+    await askCopilot(page, "둘째 문단을 다시 써 주세요", [[{ op: "doc.replace_paragraphs", replacements: [{ index: 1, text: "다시 쓴 둘째 문단" }] }]]);
+    for (const [selector, size] of ICON_BOXES) {
+      const boxes = await page.$$eval(selector, (els) => els.map((el) => { const r = el.getBoundingClientRect(); return { w: r.width, h: r.height }; }));
+      assert.ok(boxes.length > 0, `${selector} is on screen`);
+      for (const box of boxes) assert.deepEqual(box, { w: size, h: size }, `${selector} is ${size}px`);
+    }
+    for (const selector of ["#btn-copilot-model .eo-copilot-caret", "#btn-copilot-mode .eo-copilot-caret"]) {
+      assert.equal(await page.$eval(selector, (el) => getComputedStyle(el).opacity), "0.5", `${selector} is half opaque`);
+    }
+    // A thin stroke: the chevron's drawn extent is 8px wide (the path `m6 9 6 6 6-6` of the 24 grid at 16px), not the box.
+    const chevron = await page.$eval("#btn-copilot-model .eo-copilot-caret svg path", (path) => { const r = path.getBoundingClientRect(); return r.width; });
+    assert.ok(chevron > 7 && chevron < 10, `chevron path ${chevron}px wide`);
+  }],
+
   ["an edit of what is there waits as 바꾸기 / 아래에 삽입 / 버리기, and 아래에 삽입 keeps the original paragraph", async (page) => {
     await seedParagraphs(page);
     await askCopilot(page, "둘째 문단을 다시 써 주세요", [[{ op: "doc.replace_paragraphs", replacements: [{ index: 1, text: "다시 쓴 둘째 문단" }] }]]);

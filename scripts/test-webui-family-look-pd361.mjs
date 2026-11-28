@@ -209,9 +209,11 @@ test("PD-361: SHEET uses spreadsheet labels, BOARD omits duplicate zoom chrome, 
   const stylesCss = readUi("styles.css");
   assert.doesNotMatch(stylesCss, /\.slide-thumb-snippet\s*\{[^}]*opacity:/);
   assert.doesNotMatch(stylesCss, /\.slide-thumb-title\.is-empty\s*\{[^}]*opacity:/);
-  // The send button is primary on primary-foreground; in the dark theme the foreground is the dark background token (PD-388).
+  // The send button is primary on primary-foreground; the dark theme swaps both to the values of the chat UI it ports (PD-388).
   assert.match(copilotCss, /\.eo-copilot-send-btn\s*\{[^}]*background:\s*var\(--copilot-primary\);[^}]*color:\s*var\(--copilot-primary-foreground\)/s);
-  assert.match(readUi("tokens.css").slice(readUi("tokens.css").lastIndexOf(':root[data-theme-effective="dark"]')), /--copilot-primary-foreground:\s*var\(--ui-bg\)/);
+  const darkTokens = readUi("tokens.css").slice(readUi("tokens.css").lastIndexOf(':root[data-theme-effective="dark"]'));
+  assert.match(darkTokens, /--copilot-primary:\s*oklch\(0\.92 /);
+  assert.match(darkTokens, /--copilot-primary-foreground:\s*oklch\(0\.21 /);
   assert.match(contentCss, /#doc-editor\[data-eo-doc-flavor="pages"\]\[data-eo-hf-edit\] > section\[data-eo-hf="header"\]::after/);
   const menuBarCss = readUi("menu-bar.css");
   assert.match(menuBarCss, /\.md-sub\[hidden\]\s*\{\s*display:\s*none;\s*\}/);

@@ -33,13 +33,13 @@
     menu.dataset.side = side === "down" ? "bottom" : "top";
   }
 
-  function createPopupMenu({ document, trigger, menu, placement = "down", align = "end", onOpen }) {
+  function createPopupMenu({ document, trigger, menu, placement = "down", align = "end", gap = GAP_PX, onOpen }) {
     const view = document.defaultView || host;
     let open = false;
 
     const items = () => Array.from(menu.querySelectorAll("button")).filter((btn) => !btn.disabled && !btn.hidden);
 
-    const position = () => placeMenu({ view, menu, box: trigger.getBoundingClientRect(), preferred: placement, align });
+    const position = () => placeMenu({ view, menu, box: trigger.getBoundingClientRect(), preferred: placement, gap, align });
 
     function close(restoreFocus = false) {
       if (!open) return;
