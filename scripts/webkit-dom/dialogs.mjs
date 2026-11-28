@@ -26,6 +26,23 @@ async function typeColumn(page) {
   await page.click('#pane-sheet td[data-cell="A1"]');
 }
 
+const wait = (selector) => (page) => page.waitForSelector(selector);
+/** A real pointer click, for the buttons that a script `click()` does not reach (the table tab's). */
+const press = (selector) => (page) => page.click(selector);
+/** The filter panel of A1 (a column with a header), then its "조건 필터…" row. */
+const CUSTOM_FILTER = [typeColumn, click('[data-sheet-act="filter-toggle"]'), (page) => page.keyboard.press("Alt+ArrowDown"), wait("[data-filter-act=custom]"), click("[data-filter-act=custom]")];
+/** A table over A1:A3 (the create dialog confirmed), so the table tab and its slicer and style dialogs exist. */
+const MAKE_TABLE = [typeColumn, click('[data-studio-menu-cmd="insert-table"]'), wait("#sheet-table-dialog[open]"), click("#btn-sheet-table-ok")];
+/** A 1x1 picture in the sheet, opened for its size and alternative text. */
+async function openPicture(page) {
+  await page.evaluate(async () => {
+    const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+    const media = window.__EASYOFFICE_SHEET_MEDIA__;
+    const res = await media.insertPictureFromBytes(png, "image/png");
+    media.openImageDialog(res.id ?? res.image?.id ?? media.getSelectedImageId());
+  });
+}
+
 const CELL_FORMAT = click('[data-sheet-numfmt="dialog"]');
 const PAGE_SETUP = click('[data-sheet-act="page-setup"]');
 
@@ -58,6 +75,14 @@ const SHEET_DIALOGS = [
   ["차트", "sheet-chart-dialog", [typeColumn, click('[data-studio-menu-cmd="insert-chart"]')]],
   ["하이퍼링크", "sheet-link-dialog", [click('[data-studio-menu-cmd="insert-link"]')]],
   ["메모", "sheet-note-dialog", [click('[data-sheet-act="note-insert"]')]],
+  ["이름 정의", "sheet-name-edit-dialog", [click('[data-sheet-act="name-define"]')]],
+  ["선택 영역에서 이름 만들기", "sheet-name-create-dialog", [typeColumn, (page) => page.click('#pane-sheet td[data-cell="A3"]', { modifiers: ["Shift"] }), click('[data-sheet-act="name-create"]')]],
+  ["시트 이동/복사", "sheet-tab-move-dialog", [click('[data-sheet-act="tab-move-copy"]')]],
+  ["조건 필터", "sheet-filter-dialog", CUSTOM_FILTER],
+  ["표 만들기", "sheet-table-dialog", [typeColumn, click('[data-studio-menu-cmd="insert-table"]')]],
+  ["슬라이서", "sheet-slicer-dialog", [...MAKE_TABLE, press('[data-table-act="slicer"]')]],
+  ["새 표 스타일", "sheet-table-style-dialog", [...MAKE_TABLE, press("#btn-table-style"), press("[data-table-style-new]")]],
+  ["그림", "sheet-image-dialog", [openPicture]],
 ];
 
 /** Some text with a selection in the document, so the font dialog opens on a run. */

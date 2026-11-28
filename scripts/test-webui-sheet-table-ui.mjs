@@ -223,7 +223,7 @@ test("the gallery lists the 60 styles in three groups, picks one and clears it",
   assert.deepEqual([...h.document.querySelectorAll("#sheet-table-gallery .sheet-table-gallery-title")].map((t) => t.textContent), ["밝게", "보통", "어둡게"]);
   assert.equal(swatches.find((s) => s.dataset.tableStyle === "TableStyleMedium2").classList.contains("selected"), true);
   assert.equal(swatches.find((s) => s.dataset.tableStyle === "TableStyleDark3").title, "표 스타일 어둡게 3");
-  assert.equal(swatches[0].querySelectorAll(".sheet-table-swatch-cell").length, 25);
+  assert.equal(swatches[0].querySelectorAll(".sheet-table-sample-cell").length, 25);
   h.userClick(swatches.find((s) => s.dataset.tableStyle === "TableStyleDark3"));
   await flushAsyncTurns(12);
   assert.equal(tables(h)[0].style, "TableStyleDark3");

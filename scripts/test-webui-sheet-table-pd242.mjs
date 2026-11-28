@@ -169,7 +169,7 @@ test("새 표 스타일 creates a custom style with element formatting, updates 
 
   assert.equal($(h, "sheet-table-style-dialog").open, true);
   assert.equal($(h, "sheet-ts-name").value, "표 스타일 1");
-  assert.equal(h.document.querySelectorAll("#sheet-ts-preview .sheet-table-swatch-cell").length, 25);
+  assert.equal(h.document.querySelectorAll("#sheet-ts-preview .sheet-table-sample-cell").length, 25);
 
   // Refuses empty name and built-in name.
   $(h, "sheet-ts-name").value = "";

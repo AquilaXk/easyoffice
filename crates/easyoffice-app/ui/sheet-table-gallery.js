@@ -45,12 +45,12 @@
       for (const row of cells || []) {
         for (const look of row) {
           const cell = document.createElement("span");
-          cell.className = "sheet-table-swatch-cell";
+          cell.className = "sheet-table-sample-cell";
           if (look.fill) cell.style.backgroundColor = "#" + look.fill;
           const shadows = style.shadowsOf(look);
           if (shadows.length > 0) cell.style.boxShadow = shadows.join(", ");
           const bar = document.createElement("span");
-          bar.className = "sheet-table-swatch-text";
+          bar.className = "sheet-table-sample-bar";
           const ink = look.color && !(look.color === "000000" && !look.fill) ? "#" + look.color : look.fill ? "#" + style.autoTextColor(look.fill) : "var(--color-text)";
           bar.style.backgroundColor = ink;
           cell.appendChild(bar);

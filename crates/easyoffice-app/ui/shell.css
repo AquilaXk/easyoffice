@@ -593,9 +593,9 @@
 .sheet-table-swatch { display: grid; grid-template-columns: repeat(5, 1fr); grid-template-rows: repeat(5, 1fr); width: 54px; height: 44px; padding: 1px; background: var(--color-surface); outline: 1px solid var(--ui-border-strong); outline-offset: 0; }
 .sheet-table-swatch:hover { outline-color: var(--color-text); }
 .sheet-table-swatch.selected { outline: 2px solid var(--accent-strong); }
-.sheet-table-swatch-cell { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
-.sheet-table-swatch-text { width: 70%; height: 2px; opacity: 0.7; }
-.sheet-table-swatch-text.bold { height: 3px; opacity: 0.92; }
+.sheet-table-sample-cell { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
+.sheet-table-sample-bar { width: 70%; height: 2px; opacity: 0.7; }
+.sheet-table-sample-bar.bold { height: 3px; opacity: 0.92; }
 
 /* New table style, remove duplicates and table slicers (PD-242): tokenized with rhwp-studio chrome tokens only. */
 #sheet-table-style-dialog { width: min(460px, calc(100vw - 32px)); overflow: visible; }
