@@ -27,6 +27,9 @@ export const EMBED_CAPABILITIES = [
   // EasyOffice extension: getSaveProtection and clearSaveProtection RPCs (a document opened with a
   // password is saved without it; the shell asks before it writes such a copy, PD-120).
   'save-protection-v1',
+  // EasyOffice extension: exportHwpProtected, exportHwpxProtected and verifyProtectedBytes RPCs (보안 ▸ 문서 암호 설정:
+  // the editor holds the password it asked for and writes and checks the bytes with it, PD-396).
+  'save-password-v1',
   // EasyOffice extension: enableHostFonts and hostFontsReply RPCs (the machine's fonts reach the editor through the
   // shell, which alone may read them; the editor asks over the port, PD-128).
   'host-fonts-v1',

@@ -670,7 +670,7 @@ test("the shortcut table marks which combos the HWP editor forwards", async () =
   const { host } = await openWindow("?module=DOC&win=w-keys");
   const bindings = host.__EASYOFFICE_RIBBON_CATALOG__.WORKSPACE_SHORTCUT_BINDINGS;
   const forwarded = bindings.filter((b) => b.forwardFromEditor).map((b) => b.keys).sort((a, b) => a.localeCompare(b));
-  assert.deepEqual(forwarded, ["Ctrl+Alt+O", "Ctrl+E", "Ctrl+N", "Ctrl+O", "Ctrl+P", "Ctrl+Q", "Ctrl+S", "Ctrl+Shift+S", "Ctrl+W"]);
+  assert.deepEqual(forwarded, ["Ctrl+Alt+O", "Ctrl+N", "Ctrl+O", "Ctrl+P", "Ctrl+Q", "Ctrl+S", "Ctrl+Shift+S", "Ctrl+W"]);
   for (const b of bindings.filter((x) => ["Ctrl+N", "Ctrl+W", "Ctrl+Q"].includes(x.keys))) assert.equal(b.desktopOnly, true);
   assert.ok(forwarded.every((k) => k.startsWith("Ctrl+")), "plain typing is never forwarded");
 });
@@ -707,15 +707,11 @@ test("a forwarded combo runs the same action as the keyboard; unknown or plain k
   assert.equal(ran.length, 4);
 });
 
-// The reference app binds PDF export to ⌘E through its macOS menu only and leaves Ctrl+E to the editor's
-// delete on Windows and Linux (its tests pin that). The table says so with `macOnly`.
-test("Ctrl+E exports the PDF on macOS only, in the Hangul module of the desktop shell", async () => {
+// PDF export has no key: the official Ctrl+E is the editor's 지우기 on every OS, so the shell neither binds nor forwards it (PD-396).
+test("Ctrl+E is the editor's 지우기 everywhere: the shell does not bind or forward it for the PDF export", async () => {
   const entry = (await openWindow("?module=DOC&win=w-e")).host.__EASYOFFICE_RIBBON_CATALOG__.WORKSPACE_SHORTCUT_BINDINGS.find((b) => b.keys === "Ctrl+E");
-  assert.deepEqual(
-    { action: entry.action, module: entry.module, desktopOnly: entry.desktopOnly, macOnly: entry.macOnly, forward: entry.forwardFromEditor },
-    { action: "hwp-export-pdf", module: "HWP", desktopOnly: true, macOnly: true, forward: true },
-  );
-  for (const [platform, expected] of [["MacIntel", true], ["Win32", false], ["Linux x86_64", false]]) {
+  assert.equal(entry, undefined);
+  for (const [platform, mac] of [["MacIntel", true], ["Win32", false], ["Linux x86_64", false]]) {
     const { host } = await openWindow("?module=HWP&win=w-e-" + platform.slice(0, 3), {}, { harness: { platform } });
     const session = host.__EASYOFFICE_CREATE_WORKSPACE_SESSION__({
       document: { getElementById: () => null, querySelectorAll: () => [], activeElement: null, addEventListener() {} },
@@ -725,14 +721,14 @@ test("Ctrl+E exports the PDF on macOS only, in the Hangul module of the desktop 
       getWorkspacePanels: () => null, getSheetController: () => null, isDesktopShell: () => true,
     });
     const ran = [];
-    assert.equal(session.runForwardedShortcut("Ctrl+E", { "hwp-export-pdf": () => ran.push("pdf") }), expected, platform);
-    assert.equal(session.isMacClient(), expected, platform);
-    // The key list the editor frame is told to forward follows the same rule.
+    assert.equal(session.runForwardedShortcut("Ctrl+E", { "hwp-export-pdf": () => ran.push("pdf") }), false, platform);
+    assert.equal(session.isMacClient(), mac, platform);
+    // The key list the editor frame is told to forward has no Ctrl+E either.
     const keys = session.forwardedKeys();
-    assert.equal(keys.includes("Ctrl+E"), expected, platform);
+    assert.ok(!keys.includes("Ctrl+E"), platform);
     assert.ok(["Ctrl+P", "Ctrl+S", "Ctrl+Q"].every((k) => keys.includes(k)), platform);
     assert.ok(keys.length <= 16, "the editor takes at most 16 combos");
-    assert.deepEqual(ran, expected ? ["pdf"] : [], platform);
+    assert.deepEqual(ran, [], platform);
   }
 });
 

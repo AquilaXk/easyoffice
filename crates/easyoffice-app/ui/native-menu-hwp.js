@@ -51,6 +51,7 @@
     "table:block-product": "table:block-product", "table:thousand-sep": "table:thousand-sep",
     "table:decimal-add": "table:decimal-add", "table:decimal-remove": "table:decimal-remove",
     "tool:options": "tool:options", "tool:review-history": "edit:document-history",
+    "file:set-password": "file:set-password",
   });
 
   // The ids that exist only for the editor (no other window has them): their page action is `hwp-editor`.
@@ -68,7 +69,7 @@
     "page:page-border", "page:new-number", "page:hide-current", "page:column-break", "page:section-settings",
     "table:insert-row-col", "table:delete-row-col", "table:border-one", "table:row-equal", "table:transpose-copy",
     "table:transpose-paste", "table:block-formula", "table:block-avg", "table:block-product", "table:thousand-sep",
-    "table:decimal-add", "table:decimal-remove", "tool:options", "tool:review-history",
+    "table:decimal-add", "table:decimal-remove", "tool:options", "tool:review-history", "file:set-password",
   ]);
 
   host.__EASYOFFICE_NATIVE_MENU_HWP__ = Object.freeze({

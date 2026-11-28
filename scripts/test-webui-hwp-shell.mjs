@@ -330,7 +330,7 @@ test("the PDF item is in the overlay 파일 menu, hidden until the shell says it
   assert.ok(item, "the 파일 menu has the export-pdf item");
   assert.match(item[1], /\bhidden\b/, "hidden by default");
   assert.ok(!/data-shell-/.test(item[1].replace(/hidden/, "")), "no extra arguments travel with it");
-  assert.match(item[2], /<span class="md-shortcut">Ctrl\+E<\/span>/, "carries Ctrl+E shortcut");
+  assert.ok(!item[2].includes("md-shortcut"), "no key of its own: the official Ctrl+E is 지우기 (PD-396)");
   assert.match(read("src/eo-overrides.css", OVERLAY), /\.md-item\[hidden\]\s*\{\s*display:\s*none/);
   const ts = read("src/embed/shell-menu.ts", OVERLAY);
   assert.match(ts, /pdfExport = typeof params\.pdfExport === 'boolean'/, "only a boolean flag is accepted from the shell");

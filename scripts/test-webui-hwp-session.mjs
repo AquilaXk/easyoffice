@@ -60,9 +60,9 @@ function createFakeHost({ status = "ready", capabilities = ["verify-bytes-v1", "
     whenSettled: async () => state.status,
     reconnect: async () => { state.reconnects += 1; setStatus("ready"); },
     useLegacyEditor: () => { state.legacyUsed += 1; setStatus("legacy"); },
-    exportBytes: async (format) => {
-      calls.push({ method: format === "hwpx" ? "exportHwpx" : "exportHwp" });
-      if (state.handlers.exportBytes) return state.handlers.exportBytes(format);
+    exportBytes: async (format, protectedBytes = false) => {
+      calls.push({ method: (format === "hwpx" ? "exportHwpx" : "exportHwp") + (protectedBytes ? "Protected" : "") });
+      if (state.handlers.exportBytes) return state.handlers.exportBytes(format, protectedBytes);
       return state.exports[format];
     },
     call: async (method, params, options) => {
@@ -70,7 +70,7 @@ function createFakeHost({ status = "ready", capabilities = ["verify-bytes-v1", "
       const handler = state.handlers[method];
       if (handler) return handler(params, options);
       if (method === "loadFile") return { pageCount: 3 };
-      if (method === "verifyBytes") return { ok: true, pageCount: 2, format: "hwp" };
+      if (method === "verifyBytes" || method === "verifyProtectedBytes") return { ok: true, pageCount: 2, format: "hwp" };
       if (method === "getSaveProtection") return { passwordProtected: false };
       return null;
     },
@@ -592,6 +592,67 @@ test("password document: autosave never writes a plain copy, removes an old reco
   assert.equal(ctx.env.indexedDB.stores.records.size, 0);
   assert.equal(methodsOf(ctx).some((m) => m === "exportHwp" || m === "exportHwpx"), false);
   assert.match(feedbackOf(ctx), /암호 문서는 자동 저장하지 않습니다/);
+});
+
+// ---- 보안 ▸ 문서 암호 설정 (PD-396) ------------------------------------------------------------
+// The password is typed in the editor and stays there: the shell learns `passwordSet`, asks for the protected bytes and
+// the protected check, and never sees or sends a password.
+
+const PASSWORD_CAPABILITIES = ["verify-bytes-v1", "save-protection-v1", "save-password-v1"];
+
+function loadWithPasswordSet(options = {}) {
+  const ctx = load({ ...options, host: { capabilities: PASSWORD_CAPABILITIES } });
+  ctx.fake.state.handlers.getSaveProtection = async () => ({ passwordProtected: options.opened === true, passwordSet: true });
+  return ctx;
+}
+
+test("password set in the editor: save writes the editor's protected bytes, checks them with the protected check, asks nothing and clears nothing", async () => {
+  const { deliver, deliveries } = recordingDeliver();
+  const ctx = loadWithPasswordSet({ deliver });
+  const res = await ctx.session.save({ deliver, baseName: "x" });
+  assert.equal(res.ok, true);
+  assert.equal(deliveries.length, 1);
+  const methods = methodsOf(ctx);
+  assert.ok(methods.includes("exportHwpProtected"), "the protected export");
+  assert.ok(methods.includes("verifyProtectedBytes"), "the protected check");
+  assert.ok(!methods.includes("exportHwp") && !methods.includes("verifyBytes") && !methods.includes("clearSaveProtection"));
+  assert.equal(ctx.confirms.length, 0, "no password-free question: the file keeps a password");
+  for (const call of ctx.fake.calls) assert.ok(!/password/i.test(JSON.stringify(call.params ?? {})), "no call carries a password");
+});
+
+test("password set in the editor: HWPX uses the protected HWPX export, and an in-place save is allowed even for a document opened with a password", async () => {
+  const inPlace = recordingDeliver();
+  const ctx = loadWithPasswordSet({ deliver: inPlace.deliver, opened: true });
+  const res = await ctx.session.save({ deliver: inPlace.deliver, inPlace: true, baseName: "x", format: "hwpx" });
+  assert.equal(res.ok, true);
+  assert.equal(inPlace.deliveries.length, 1);
+  assert.ok(methodsOf(ctx).includes("exportHwpxProtected"));
+  assert.equal(ctx.confirms.length, 0);
+});
+
+test("password set in the editor: a failing protected check refuses the file and a protected error never echoes anything but its own message", async () => {
+  const { deliver, deliveries } = recordingDeliver();
+  const ctx = loadWithPasswordSet({ deliver });
+  ctx.fake.state.handlers.verifyProtectedBytes = async () => { throw new Error("암호 문서를 다시 열지 못했습니다."); };
+  const res = await ctx.session.save({ deliver, baseName: "x" });
+  assert.equal(res.ok, false);
+  assert.match(res.message, /저장 전 검증에 실패했습니다/);
+  assert.equal(deliveries.length, 0);
+});
+
+test("password set in the editor: autosave keeps no plain copy, and an editor that sets a password without the capability fails the save closed", async () => {
+  const ctx = loadWithPasswordSet();
+  ctx.env.indexedDB.stores.records.set("tab-A", { tabId: "tab-A" });
+  ctx.fake.emit({ reason: "dirty_changed", dirty: true });
+  ctx.fake.emit({ reason: "edited" });
+  await delay(100);
+  assert.equal(ctx.env.indexedDB.stores.records.size, 0);
+  assert.equal(methodsOf(ctx).some((m) => m === "exportHwp" || m === "exportHwpx"), false);
+  const { deliver, deliveries } = recordingDeliver();
+  const missing = load({ deliver, host: { capabilities: ["verify-bytes-v1", "save-protection-v1"] } });
+  missing.fake.state.handlers.getSaveProtection = async () => ({ passwordProtected: false, passwordSet: true });
+  assert.match((await missing.session.save({ deliver, baseName: "x" })).message, /문서 암호 저장 기능을 사용할 수 없습니다/);
+  assert.equal(deliveries.length, 0);
 });
 
 test("password document: after a save-as that dropped the password, autosave works again", async () => {

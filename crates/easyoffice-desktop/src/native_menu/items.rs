@@ -108,12 +108,7 @@ pub const BASE_ITEMS: &[MenuItemSpec] = &[
         None,
         "studio-cmd:layout-paper",
     ),
-    item(
-        "file:export-pdf",
-        "PDF로 저장하기",
-        Some("CmdOrCtrl+E"),
-        "hwp-export-pdf",
-    ),
+    item("file:export-pdf", "PDF로 저장하기", None, "hwp-export-pdf"),
     item("file:exp-docx", "DOCX 문서 (.docx)", None, "export:docx"),
     item("file:exp-odt", "ODF 텍스트 (.odt)", None, "export:odt"),
     item("file:exp-rtf", "RTF 문서 (.rtf)", None, "export:rtf"),

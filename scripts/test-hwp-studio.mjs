@@ -641,9 +641,9 @@ test("the editor tells the shell whether the document was opened with a password
   const router = readText(path.join(REPO, "apps/hwp-studio/src/embed/rpc-router.ts"));
   assert.match(router, /case 'getSaveProtection':\s+assertEmptyParams\(params, 'getSaveProtection params'\);\s+return handlers\.getSaveProtection\(\);/);
   assert.match(router, /case 'clearSaveProtection':\s+assertEmptyParams\(params, 'clearSaveProtection params'\);\s+return handlers\.clearSaveProtection\(\);/);
-  assert.match(router, /getSaveProtection\(\): Promise<\{ passwordProtected: boolean \}>;/);
+  assert.match(router, /getSaveProtection\(\): Promise<\{ passwordProtected: boolean; passwordSet: boolean \}>;/);
   const main = readText(path.join(REPO, "apps/hwp-studio/src/main.ts"));
-  assert.match(main, /async getSaveProtection\(\) \{\s+await initPromise;\s+return \{ passwordProtected: wasm\.requiresPasswordForSave \};/);
+  assert.match(main, /async getSaveProtection\(\) \{\s+await initPromise;\s+return \{ passwordProtected: wasm\.requiresPasswordForSave, passwordSet: savePassword\.isSet\(\) \};/);
   assert.match(main, /async clearSaveProtection\(\) \{\s+await initPromise;\s+wasm\.requiresPasswordForSave = false;/);
   const { EMBED_CAPABILITIES } = await import("../apps/hwp-studio/src/embed/protocol.ts");
   assert.ok(EMBED_CAPABILITIES.includes("save-protection-v1"));
@@ -763,6 +763,86 @@ test("official keys: 문자표 is Ctrl+F10, 줄/칸 추가하기 is Alt+Insert, 
   );
   // A command the build does not register is skipped, not invented.
   applyOfficialShortcuts([], { get: () => undefined, register: () => assert.fail("no registration") });
+});
+
+test("문서 암호 설정: the dialog's password is kept in the editor, used for the protected export and check, and never leaves or shows in an error (PD-396)", async () => {
+  const { createSavePassword, SET_DOCUMENT_PASSWORD_COMMAND_ID } = await import("../apps/hwp-studio/src/embed/save-password.ts");
+  const SECRET = "비밀-암호-12345";
+  const asked = [];
+  let answer = SECRET;
+  const savePassword = createSavePassword(async (fileName) => { asked.push(fileName); return answer; });
+  assert.equal(savePassword.command.id, SET_DOCUMENT_PASSWORD_COMMAND_ID);
+  assert.equal(savePassword.command.label, "문서 암호 설정…");
+  assert.equal(savePassword.command.canExecute({ hasDocument: true }), true);
+  assert.equal(savePassword.command.canExecute({ hasDocument: false }), false);
+  const dirty = [];
+  const services = { wasm: { fileName: "보고서.hwp" }, documentState: { markDirty: (why) => dirty.push(why) } };
+  const wasm = {
+    exportHwpWithPassword: (password) => new Uint8Array([1, password.length]),
+    exportHwpxWithPassword: (password) => new Uint8Array([2, password.length]),
+  };
+
+  // Not set: nothing is exported or checked, and the error does not mention a password value.
+  assert.equal(savePassword.isSet(), false);
+  assert.throws(() => savePassword.exportBytes(wasm, "hwp"), /암호가 설정되어 있지 않습니다/);
+  assert.throws(() => savePassword.verifyBytes(new Uint8Array(1), () => assert.fail("no open")), /암호가 설정되어 있지 않습니다/);
+
+  // A closed dialog sets nothing and marks nothing.
+  answer = null;
+  await savePassword.command.execute(services);
+  assert.equal(savePassword.isSet(), false);
+  assert.deepEqual(dirty, []);
+
+  answer = SECRET;
+  await savePassword.command.execute(services);
+  assert.deepEqual(asked, ["보고서.hwp", "보고서.hwp"]);
+  assert.equal(savePassword.isSet(), true);
+  assert.deepEqual(dirty, ["document-password"], "the file written next differs from the one on disk");
+  assert.deepEqual([...savePassword.exportBytes(wasm, "hwp")], [1, SECRET.length]);
+  assert.deepEqual([...savePassword.exportBytes(wasm, "hwpx")], [2, SECRET.length]);
+
+  // The check opens the bytes with the held password and frees the probe, also when reading a page count fails.
+  const opened = [];
+  const probe = (state) => ({ pageCount: () => { if (state.fail) throw new Error(`broken ${SECRET}`); return 3; }, getSourceFormat: () => "hwp", free: () => { state.freed = true; } });
+  const good = {};
+  assert.deepEqual(savePassword.verifyBytes(new Uint8Array(2), (data, password) => { opened.push(password); return probe(good); }), { ok: true, pageCount: 3, format: "hwp" });
+  assert.deepEqual(opened, [SECRET]);
+  assert.equal(good.freed, true);
+  const bad = { fail: true };
+  assert.throws(() => savePassword.verifyBytes(new Uint8Array(2), () => probe(bad)), (err) => !String(err.message).includes(SECRET));
+  assert.equal(bad.freed, true);
+
+  // An engine error that repeats what it was given never reaches the caller.
+  const leaky = { exportHwpWithPassword: (password) => { throw new Error(`bad password ${password}`); } };
+  assert.throws(() => savePassword.exportBytes(leaky, "hwp"), (err) => err.message === "암호 문서를 만들지 못했습니다." && !err.message.includes(SECRET));
+  assert.throws(() => savePassword.verifyBytes(new Uint8Array(2), (data, password) => { throw new Error(`cannot open with ${password}`); }), (err) => err.message === "암호 문서를 다시 열지 못했습니다.");
+
+  savePassword.clear();
+  assert.equal(savePassword.isSet(), false, "a replaced document drops it");
+  assert.throws(() => savePassword.exportBytes(wasm, "hwp"), /암호가 설정되어 있지 않습니다/);
+});
+
+test("문서 암호 설정: the source never logs, stores or sends the password, and the port methods take no password", async () => {
+  const source = readText(path.join(REPO, "apps/hwp-studio/src/embed/save-password.ts"));
+  const code = source.split("\n").filter((line) => !line.trim().startsWith("//")).join("\n");
+  assert.doesNotMatch(code, /console\.|localStorage|sessionStorage|addRecentDoc|autosave|postMessage|emit\(|JSON\.stringify|\.cssText/);
+  assert.doesNotMatch(code, /new Error\([^)]*\$\{/, "no error message is built from a value");
+  const router = readText(path.join(REPO, "apps/hwp-studio/src/embed/rpc-router.ts"));
+  for (const method of ["exportHwpProtected", "exportHwpxProtected"]) {
+    assert.match(router, new RegExp(`case '${method}':\\s*assertEmptyParams\\(params, '${method} params'\\);`), `${method} takes no params`);
+  }
+  assert.doesNotMatch(router, /params\.password/);
+  const main = readText(path.join(REPO, "apps/hwp-studio/src/main.ts"));
+  assert.match(main, /passwordSet: savePassword\.isSet\(\)/, "the shell is told only whether a password is set");
+  assert.ok(main.includes("eventBus.on('document-swapped', () => savePassword.clear());"));
+  assert.ok(main.includes("createSavePassword(showHwpSavePasswordDialog)"), "the reference editor's own dialog");
+  for (const rel of ["crates/easyoffice-app/ui/hwp-host.js", "crates/easyoffice-app/ui/hwp-session.js", "apps/hwp-studio/src/embed/protocol.ts"]) {
+    assert.doesNotMatch(readText(path.join(REPO, rel)), /password\s*[:=]\s*["'`\w]|\.password\b/, rel);
+  }
+  const { EMBED_CAPABILITIES } = await import("../apps/hwp-studio/src/embed/protocol.ts");
+  assert.ok(EMBED_CAPABILITIES.includes("save-password-v1"));
+  const html = readText(path.join(REPO, "apps/hwp-studio/index.html"));
+  assert.match(html, /data-menu="security"[\s\S]*?data-cmd="file:set-password"[\s\S]*?문서 암호 설정…/);
 });
 
 test("the native menu hides the editor's own menu row only when the shell says so (macOS desktop, PD-396)", async () => {

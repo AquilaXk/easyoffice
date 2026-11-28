@@ -181,7 +181,7 @@ test("the native file menu has PDF export and print with the reference keys, run
   const rust = new Map(rustItems().map((r) => [r.id, r]));
   assert.deepEqual(
     ["file:export-pdf", "file:print"].map((id) => [rust.get(id).label, rust.get(id).accelerator, rust.get(id).action]),
-    [["PDF로 저장하기", "CmdOrCtrl+E", "hwp-export-pdf"], ["인쇄…", "CmdOrCtrl+P", "print"]],
+    [["PDF로 저장하기", null, "hwp-export-pdf"], ["인쇄…", "CmdOrCtrl+P", "print"]],
   );
   const { NATIVE_MENU_ACTIONS, EMBED_ONLY_ACTIONS } = chromeTable();
   assert.equal(NATIVE_MENU_ACTIONS["file:export-pdf"], "hwp-export-pdf");

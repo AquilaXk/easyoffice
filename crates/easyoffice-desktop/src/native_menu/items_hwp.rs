@@ -95,6 +95,7 @@ pub const HWP_ITEMS: &[MenuItemSpec] = &[
     editor("table:thousand-sep", "1,000 단위 구분 쉼표"),
     editor("table:decimal-add", "자릿점 넣기"),
     editor("table:decimal-remove", "자릿점 빼기"),
+    editor("file:set-password", "문서 암호 설정…"),
     editor("tool:options", "환경 설정"),
     editor("tool:review-history", "문서 이력 관리"),
 ];

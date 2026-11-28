@@ -81,7 +81,14 @@ fn the_hangul_bar_follows_the_official_menu_order_and_names() {
     let header_footer =
         layout::hwp_submenu("@hwp-header-footer").expect("the 머리말/꼬리말 submenu");
     assert_eq!(header_footer.title, "머리말/꼬리말");
-    assert_eq!(hwp_ids("보안"), ["tool:scrub-pii", "tool:review-verify"]);
+    assert_eq!(
+        hwp_ids("보안"),
+        ["file:set-password", "tool:scrub-pii", "tool:review-verify"]
+    );
+    assert_eq!(
+        label_for(MenuKind::Hwp, spec("file:set-password")),
+        "문서 암호 설정…"
+    );
     let review = hwp_ids("검토");
     assert!(review.contains(&"tool:review-track") && review.contains(&"tool:review-history"));
     let tool = hwp_ids("도구");
@@ -111,14 +118,14 @@ fn the_hangul_bar_follows_the_official_menu_order_and_names() {
 /// actions are the ones its keyboard shortcuts and its own 파일 menu already run. Only that
 /// window's bar has the export; the other windows' bars have no item that is grayed out there.
 /// The official 한글 file menu names the export 'PDF로 저장하기' and lists it before 편집 용지, then 인쇄;
-/// the reference keys stay. 미리 보기 and 문서 정보 are not in the bar: the editor has no such command and
+/// PDF has no key (the official Ctrl+E is 지우기), print keeps the reference key. 미리 보기 and 문서 정보 are not in the bar: the editor has no such command and
 /// the page's preview pane does not read the editor's pages yet.
 #[test]
 fn the_hangul_file_menu_has_pdf_export_and_print_in_the_official_order() {
     let export = spec("file:export-pdf");
     assert_eq!(
         (export.label, export.accelerator, export.action),
-        ("PDF로 저장하기", Some("CmdOrCtrl+E"), "hwp-export-pdf")
+        ("PDF로 저장하기", None, "hwp-export-pdf")
     );
     let print = spec("file:print");
     assert_eq!(

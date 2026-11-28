@@ -23,7 +23,7 @@
   const CAPABILITIES = [
     "transferable-array-buffer", "document-state-v1", "document-change-events-v1", "notify-saved-v1", "target-navigation-v1",
   ];
-  const LONG_METHODS = new Set(["ready", "loadFile", "createBlankDocument", "exportHwp", "exportHwpx", "verifyBytes"]);
+  const LONG_METHODS = new Set(["ready", "loadFile", "createBlankDocument", "exportHwp", "exportHwpx", "exportHwpProtected", "exportHwpxProtected", "verifyBytes", "verifyProtectedBytes"]);
   const SHORT_TIMEOUT_MS = 15000;
   const LONG_TIMEOUT_MS = 60000;
   const CONNECT_TIMEOUT_MS = 60000;
@@ -629,8 +629,10 @@
       notify(MSG_UNAVAILABLE);
     }
 
-    async function exportBytes(format) {
-      const method = format === "hwpx" ? "exportHwpx" : "exportHwp";
+    // `protectedBytes`: the bytes written with the password that 문서 암호 설정 asked for in the editor (PD-396). The
+    // password stays in the editor; only the finished bytes come over the port.
+    async function exportBytes(format, protectedBytes = false) {
+      const method = (format === "hwpx" ? "exportHwpx" : "exportHwp") + (protectedBytes ? "Protected" : "");
       const bytes = await call(method);
       if (bytes instanceof Uint8Array) return bytes;
       if (bytes instanceof env.ArrayBuffer) return new Uint8Array(bytes);

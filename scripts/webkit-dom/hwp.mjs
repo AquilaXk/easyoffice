@@ -43,7 +43,7 @@ function keepEditorPort() {
   });
 }
 
-const editorCall = (page, method, params) => page.evaluate(([name, args]) => window.__eoCall(name, args), [method, params]);
+export const editorCall = (page, method, params) => page.evaluate(([name, args]) => window.__eoCall(name, args), [method, params]);
 
 /** What the editor reports of the document: every paragraph's text and whether it holds a control. */
 async function documentOf(page) {

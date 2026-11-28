@@ -32,6 +32,7 @@
   // A document opened with a password is exported without it (PD-120). The editor says so over the
   // port (a flag, never the password); the shell refuses an overwrite and asks before a new copy.
   const PROTECTION_CAPABILITY = "save-protection-v1";
+  const PASSWORD_CAPABILITY = "save-password-v1";
   // The first page goes to the shell next to the saved bytes, which draws it small and stores it as the
   // file's preview picture (PD-132). The page is the print profile SVG the PDF export uses; whatever
   // goes wrong here leaves the save as it was.
@@ -443,13 +444,14 @@
     // ---- save --------------------------------------------------------------------------
 
     // Export, then re-parse the exact bytes with the editor's own WASM before they are delivered.
-    async function exportVerified(format) {
-      const bytes = await hwpHost.exportBytes(format);
+    async function exportVerified(format, withPassword = false) {
+      const bytes = await hwpHost.exportBytes(format, withPassword);
       if (bytes.length === 0) return { error: "내보낸 파일이 비어 있습니다" };
       if (!hwpHost.getCapabilities().includes("verify-bytes-v1")) return { error: "저장 검증 기능을 사용할 수 없습니다" };
       const copy = copyBuffer(bytes);
       try {
-        const verdict = await hwpHost.call("verifyBytes", { data: copy }, { transfer: [copy] });
+        // The editor reads password bytes back with the password it holds; the answer is the same pages-and-format verdict.
+        const verdict = await hwpHost.call(withPassword ? "verifyProtectedBytes" : "verifyBytes", { data: copy }, { transfer: [copy] });
         const hasPages = verdict?.pageCount > 0;
         if (verdict?.ok !== true || !hasPages) return { error: "저장 전 검증에 실패했습니다" };
       } catch (err) {
@@ -471,12 +473,12 @@
       }
     }
 
-    async function exportForSave(format) {
+    async function exportForSave(format, withPassword) {
       let fmt = format;
       for (;;) {
         let outcome;
         try {
-          outcome = await exportVerified(fmt);
+          outcome = await exportVerified(fmt, withPassword);
         } catch (err) {
           outcome = { error: describeError(err) };
         }
@@ -490,21 +492,34 @@
 
     // Whether the editor opened the document with a password. Fails closed: without the answer the
     // shell cannot tell a protected document from a plain one.
-    async function readPasswordProtected() {
+    // `opened`: the document was opened with a password. `set`: 보안 ▸ 문서 암호 설정 asked for one (PD-396): the
+    // editor then writes and checks the bytes with it (`save-password-v1`) and the password never reaches the shell.
+    async function readSaveProtection() {
       if (!hwpHost.getCapabilities().includes(PROTECTION_CAPABILITY)) throw new Error("암호 문서 확인 기능을 사용할 수 없습니다");
       const state = await hwpHost.call("getSaveProtection");
       if (typeof state?.passwordProtected !== "boolean") throw new Error("암호 문서 확인 결과를 받지 못했습니다");
-      return state.passwordProtected;
+      const set = state.passwordSet === true;
+      if (set && !hwpHost.getCapabilities().includes(PASSWORD_CAPABILITY)) throw new Error("문서 암호 저장 기능을 사용할 수 없습니다");
+      return { opened: state.passwordProtected, set };
+    }
+
+    // Whether a copy kept outside the editor (the autosave) would carry the text without the password.
+    async function readPasswordProtected() {
+      const state = await readSaveProtection();
+      return state.opened || state.set;
     }
 
     // A protected document is never overwritten by an unprotected copy: "save" is refused (closing
     // the window or quitting turns it into a save-as), and every save-as asks first. `deliver` is
     // what writes the bytes; `protectedDoc` makes the shell clear the editor's flag after delivery.
     async function passwordGate(options, format) {
-      if (!(await readPasswordProtected())) return { deliver: options.deliver, protectedDoc: false };
+      const state = await readSaveProtection();
+      // A password the user set is the file's own: it is written with it, so nothing is lost and nothing is asked.
+      if (state.set) return { deliver: options.deliver, protectedDoc: false, withPassword: true };
+      if (!state.opened) return { deliver: options.deliver, protectedDoc: false, withPassword: false };
       if (options.inPlace && !options.closing) return { failure: failure(format, MSG_PASSWORD_NO_OVERWRITE) };
       if ((await ask("password-free-save")) !== true) return { failure: failure(format, "", true, MSG_PASSWORD_DECLINED) };
-      return { deliver: options.inPlace ? deps.deliverSavedFile : options.deliver, protectedDoc: true };
+      return { deliver: options.inPlace ? deps.deliverSavedFile : options.deliver, protectedDoc: true, withPassword: false };
     }
 
     async function afterDelivery(delivery, exported, baseTitle, startSeq, protectedDoc) {
@@ -545,7 +560,7 @@
       try {
         const gate = await passwordGate(options, wanted);
         if (gate.failure) return gate.failure;
-        const exported = await exportForSave(wanted);
+        const exported = await exportForSave(wanted, gate.withPassword);
         if (!exported.bytes) return failure(exported.format, exported.error);
         const base64 = host.__EASYOFFICE_SHEET_UTILS__.bytesToBase64(exported.bytes, (s) => env.btoa(s));
         const thumbnailSvg = await readThumbnailSvg();

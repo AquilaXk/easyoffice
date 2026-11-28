@@ -79,6 +79,8 @@ import {
 import { createShellFontBridge } from './embed/host-fonts.ts';
 import { initToolbarLabels, onToolbarLabelsToggle, setToolbarLabels, toolbarLabelsCommand } from './ui/toolbar-labels.ts';
 import { cellSelectionEnterCommand } from './command/cell-selection.ts';
+import { createSavePassword } from './embed/save-password.ts';
+import { showHwpSavePasswordDialog } from '@/ui/hwp-password-dialog';
 import { safeCopyCommand, safeCutCommand } from './command/safe-cut.ts';
 import type { EmbedRendererRuntimeRequestV1 } from '@/embed/rpc-router';
 import { enrichFontDecisionTrace } from '@/core/font-decision-trace';
@@ -282,6 +284,10 @@ registry.registerAll(formatCommands);
 registry.registerAll(insertCommands);
 registry.registerAll(tableCommands);
 registry.register(cellSelectionEnterCommand);
+// 보안 ▸ 문서 암호 설정: the password stays in this closure; a replaced document drops it (PD-396).
+const savePassword = createSavePassword(showHwpSavePasswordDialog);
+registry.register(savePassword.command);
+eventBus.on('document-swapped', () => savePassword.clear());
 registry.registerAll(pageCommands);
 registry.registerAll(toolCommands);
 // 공식 메뉴의 키: 문자표 Ctrl+F10, 줄/칸 추가하기 Alt+Insert(줄/칸 지우기는 Alt+Delete), chord 표기는 Ctrl+K,H 꼴.
@@ -716,7 +722,21 @@ installEmbedRuntime({
     // was opened with a password would be saved without it. Only this flag crosses the port.
     async getSaveProtection() {
       await initPromise;
-      return { passwordProtected: wasm.requiresPasswordForSave };
+      return { passwordProtected: wasm.requiresPasswordForSave, passwordSet: savePassword.isSet() };
+    },
+    // EasyOffice extension (save-password-v1): bytes written with the password set by 문서 암호 설정, and the check
+    // that reads them back with it. The password itself never crosses the port.
+    async exportHwpProtected() {
+      await initPromise;
+      return savePassword.exportBytes(wasm, 'hwp');
+    },
+    async exportHwpxProtected() {
+      await initPromise;
+      return savePassword.exportBytes(wasm, 'hwpx');
+    },
+    async verifyProtectedBytes(data) {
+      await initPromise;
+      return savePassword.verifyBytes(data, (bytes, password) => HwpDocument.openWithPassword(bytes, password));
     },
     async clearSaveProtection() {
       await initPromise;
@@ -867,6 +887,7 @@ installEmbedRuntime({
         throw new Error('문서 열기가 취소되었습니다.');
       }
       await createNewDocument();
+      savePassword.clear();
       return { pageCount: wasm.pageCount };
     },
     // EasyOffice extension (verify-bytes-v1): parse exported bytes in a throw-away document so the

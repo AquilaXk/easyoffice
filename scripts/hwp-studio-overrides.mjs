@@ -48,6 +48,8 @@ const OVERLAY_NON_OVERRIDE = new Set([
   "src/command/cell-selection.ts",
   // EasyOffice-only module: the keys and key labels of the official 한글 menu pages (PD-396).
   "src/command/official-shortcuts.ts",
+  // EasyOffice-only module (the reference editor's save-password dialog and WASM export): 보안 ▸ 문서 암호 설정 (PD-396).
+  "src/embed/save-password.ts",
   // EasyOffice-only module: the shell's edit commands go to a focused dialog text field, never the document.
   "src/embed/text-field-edit.ts",
   // EasyOffice-only module (참조 앱 port): macOS shortcut labels and the chrome context-menu guard.

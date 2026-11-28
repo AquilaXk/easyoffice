@@ -212,7 +212,15 @@ const PAGE_HWP: MenuSpec = menu(
         HWP_MANUSCRIPT,
     ],
 );
-const SECURITY_HWP: MenuSpec = menu("보안", &["tool:scrub-pii", "tool:review-verify"]);
+const SECURITY_HWP: MenuSpec = menu(
+    "보안",
+    &[
+        "file:set-password",
+        S,
+        "tool:scrub-pii",
+        "tool:review-verify",
+    ],
+);
 const REVIEW_HWP: MenuSpec = menu(
     "검토",
     &[

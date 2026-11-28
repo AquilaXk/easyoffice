@@ -331,8 +331,8 @@
   // must never be listed here, except the commands marked `desktopOnly` (new and close window, the table of a
   // sheet): they are bound only inside the desktop shell, which owns its windows (PD-088). `forwardFromEditor` marks the
   // combos the embedded HWP editor forwards to the shell over the embed port (the editor sends the
-  // combo string only, never typed text). `macOnly` binds the combo on macOS alone: the reference
-  // app gives PDF export ⌘E through its macOS menu and leaves Ctrl+E to the editor's delete everywhere else.
+  // combo string only, never typed text). `macOnly` binds the combo on macOS alone.
+  // PDF export has no key: the official Ctrl+E is the editor's 지우기 on every OS (PD-396).
   const WORKSPACE_SHORTCUT_BINDINGS = Object.freeze([
     { keys: "Ctrl+O", action: "file-open", forwardFromEditor: true },
     { keys: "Ctrl+N", action: "file-new", desktopOnly: true, forwardFromEditor: true },
@@ -345,7 +345,6 @@
     { keys: "Ctrl+Shift+Z", action: "studio-redo" },
     { keys: "Ctrl+Alt+O", action: "recent-dialog", forwardFromEditor: true },
     { keys: "Ctrl+P", action: "print", desktopOnly: true, forwardFromEditor: true },
-    { keys: "Ctrl+E", action: "hwp-export-pdf", module: "HWP", desktopOnly: true, macOnly: true, forwardFromEditor: true },
     // The command search is Ctrl+/ as in the reference editor (`engine/input-handler-keyboard.ts` `handleCtrlKey`); the Hangul
     // window keeps the editor's own key, so it is not forwarded. Ctrl+K is the hyperlink of the Office programs: the
     // document, spreadsheet and slide windows open their hyperlink dialog with one press (PD-218); the Hangul editor keeps

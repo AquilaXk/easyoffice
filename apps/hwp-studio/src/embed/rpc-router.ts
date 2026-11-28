@@ -1,5 +1,5 @@
 // EasyOffice fork of rhwp-studio/src/embed/rpc-router.ts: plugin.* methods are removed and
-// createBlankDocument, verifyBytes, setShellContext, getPrintPages, getSaveProtection, clearSaveProtection, enableHostFonts, hostFontsReply, setDragOver, readParagraphRange and applyCopilotEdits are added. See config/rhwp-studio-overrides.json.
+// createBlankDocument, verifyBytes, setShellContext, getPrintPages, getSaveProtection, clearSaveProtection, exportHwpProtected, exportHwpxProtected, verifyProtectedBytes, enableHostFonts, hostFontsReply, setDragOver, readParagraphRange and applyCopilotEdits are added. See config/rhwp-studio-overrides.json.
 import { parsePrintBatchRange, type PrintBatchResult } from './print-batch.ts';
 import {
   parseApplyCopilotEditsParams,
@@ -57,7 +57,12 @@ export interface EmbedRpcHandlers {
   /** EasyOffice extension (print-pages-v1): a batch of print-profile page SVGs with paper sizes. */
   getPrintPages(from: number, count: number): Promise<PrintBatchResult>;
   /** EasyOffice extension (save-protection-v1): whether the document was opened with a password. Never the password itself. */
-  getSaveProtection(): Promise<{ passwordProtected: boolean }>;
+  getSaveProtection(): Promise<{ passwordProtected: boolean; passwordSet: boolean }>;
+  /** EasyOffice extension (save-password-v1): the bytes with the password set by 문서 암호 설정. The password never crosses the port. */
+  exportHwpProtected(): Promise<Uint8Array>;
+  exportHwpxProtected(): Promise<Uint8Array>;
+  /** EasyOffice extension (save-password-v1): read bytes back with that password; rejects when they cannot be read. */
+  verifyProtectedBytes(data: Uint8Array): Promise<{ ok: true; pageCount: number; format: string }>;
   /** EasyOffice extension (save-protection-v1): the shell wrote an unprotected copy, so the flag no longer applies. */
   clearSaveProtection(): Promise<{ cleared: true }>;
   /** EasyOffice extension (host-fonts-v1): use the fonts the shell lists as the host font catalog. */
@@ -211,6 +216,13 @@ export async function routeEmbedRequest(
     case 'clearSaveProtection':
       assertEmptyParams(params, 'clearSaveProtection params');
       return handlers.clearSaveProtection();
+    case 'exportHwpProtected':
+      assertEmptyParams(params, 'exportHwpProtected params');
+      return handlers.exportHwpProtected();
+    case 'exportHwpxProtected':
+      assertEmptyParams(params, 'exportHwpxProtected params');
+      return handlers.exportHwpxProtected();
+    case 'verifyProtectedBytes': return handlers.verifyProtectedBytes(asBytes(params.data, allowLegacyArray));
     case 'enableHostFonts':
       assertEmptyParams(params, 'enableHostFonts params');
       return handlers.enableHostFonts();
