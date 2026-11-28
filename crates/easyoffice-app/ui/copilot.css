@@ -117,36 +117,16 @@
   flex-shrink: 0;
 }
 
-.eo-copilot-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-width: 0;
-}
-
-.eo-copilot-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 0;
-  background: var(--ui-accent-bg);
-  color: var(--accent-ink);
-  border: 1px solid var(--ui-border-light);
-  flex-shrink: 0;
-}
-
-:root[data-theme-effective="dark"] .eo-copilot-badge {
-  color: var(--accent-strong);
-}
-
 .eo-copilot-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--font-size-md);
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--ui-text);
-  white-space: nowrap;
 }
 
 .eo-copilot-head-actions {
@@ -156,27 +136,86 @@
   flex-shrink: 0;
 }
 
-.eo-copilot-head-btn {
+/* 머리글·입력 카드의 아이콘 단추(더보기, 닫기, +). 일반 단추와 같은 각진 모서리다. */
+.eo-copilot-icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: var(--control-height-sm);
-  padding: 0 var(--space-3);
-  font-family: var(--font-family-ui);
-  font-size: var(--font-size-base);
-  font-weight: 500;
+  width: var(--copilot-icon-size);
+  height: var(--copilot-icon-size);
+  padding: 0;
   color: var(--ui-text-secondary);
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   cursor: pointer;
-  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.eo-copilot-head-btn:hover {
+.eo-copilot-icon-btn:hover:not(:disabled) {
   background: var(--ui-hover);
   border-color: var(--ui-border-light);
   color: var(--ui-text);
+}
+
+.eo-copilot-icon-btn[aria-expanded="true"] {
+  background: var(--ui-hover);
+  color: var(--ui-text);
+}
+
+.eo-copilot-icon-btn:disabled {
+  color: var(--ui-text-disabled);
+  cursor: not-allowed;
+}
+
+/* 더보기·+ 팝업 메뉴: 단추 옆에 고정 위치로 뜬다(`copilot-popup-menu.js`). */
+.eo-copilot-popup {
+  position: fixed;
+  z-index: 320;
+  display: flex;
+  flex-direction: column;
+  width: var(--copilot-menu-width);
+  max-height: min(320px, calc(100vh - 24px));
+  overflow-y: auto;
+  padding: var(--space-2);
+  background: var(--ui-surface-raised);
+  color: var(--ui-text);
+  border: 1px solid var(--ui-border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-dropdown);
+}
+
+.eo-copilot-popup[hidden] {
+  display: none;
+}
+
+.eo-copilot-popup-heading {
+  padding: var(--space-2) var(--space-4) var(--space-1);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--ui-text-muted);
+}
+
+.eo-copilot-popup-item {
+  display: block;
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--font-family-ui);
+  font-size: var(--font-size-md);
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  color: var(--ui-text);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.eo-copilot-popup-item:hover:not(:disabled),
+.eo-copilot-popup-item:focus-visible {
+  background: var(--ui-hover);
+  outline: none;
 }
 
 .eo-copilot-body {
@@ -255,14 +294,130 @@
   min-width: 0;
 }
 
+/* 한 턴: 메시지 본문과 그 아래 작은 행(복사·평가·시간) */
+.eo-copilot-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.eo-copilot-row--user {
+  align-items: flex-end;
+}
+
+/* 사용자 메시지: 오른쪽 정렬 둥근 말풍선(PD-387) */
 .eo-copilot-msg--user {
-  align-self: flex-end;
   max-width: 92%;
-  padding: var(--space-4) var(--space-5);
+  padding: var(--copilot-bubble-padding);
   background: var(--ui-bg-light);
-  border: 1px solid var(--ui-border-light);
-  border-radius: 0;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--copilot-bubble-radius);
   color: var(--ui-text);
+}
+
+.eo-copilot-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--copilot-icon-size);
+  color: var(--ui-text-muted);
+}
+
+.eo-copilot-meta-time {
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--ui-text-muted);
+  white-space: nowrap;
+}
+
+.eo-copilot-meta-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  padding: 0;
+  color: var(--ui-text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.eo-copilot-meta-btn:hover:not(:disabled) {
+  background: var(--ui-hover);
+  color: var(--ui-text);
+}
+
+.eo-copilot-meta-btn[aria-pressed="true"] {
+  color: var(--accent-ink);
+}
+
+:root[data-theme-effective="dark"] .eo-copilot-meta-btn[aria-pressed="true"] {
+  color: var(--accent-strong);
+}
+
+.eo-copilot-meta-btn:disabled {
+  color: var(--ui-text-disabled);
+  cursor: not-allowed;
+}
+
+/* 진행 단계 접힘: "N초 동안 작업 ›" 한 줄, 펼치면 단계 목록 */
+.eo-copilot-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.eo-copilot-steps-toggle {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: var(--space-1);
+  padding: 0;
+  font-family: var(--font-family-ui);
+  font-size: var(--font-size-md);
+  color: var(--ui-text-secondary);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.eo-copilot-steps-toggle:hover {
+  color: var(--ui-text);
+}
+
+.eo-copilot-steps-caret {
+  display: inline-flex;
+  transition: transform 0.12s ease;
+}
+
+.eo-copilot-steps-toggle[aria-expanded="true"] .eo-copilot-steps-caret {
+  transform: rotate(90deg);
+}
+
+.eo-copilot-steps-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--ui-border-light);
+}
+
+.eo-copilot-steps-panel[hidden] {
+  display: none;
+}
+
+.eo-copilot-steps-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: var(--copilot-step-line-height);
+  color: var(--ui-text-secondary);
+  overflow-wrap: anywhere;
 }
 
 .eo-copilot-msg-author {
@@ -320,7 +475,7 @@
   color: var(--ui-text);
   background: var(--ui-bg-light);
   border: 1px solid var(--ui-border);
-  border-radius: 0;
+  border-radius: var(--copilot-chip-radius);
   cursor: pointer;
 }
 
@@ -342,7 +497,7 @@
   color: var(--ui-text-secondary);
   background: var(--ui-surface);
   border: 1px solid var(--ui-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--copilot-chip-radius);
   cursor: pointer;
 }
 
@@ -360,8 +515,6 @@
 }
 
 .eo-copilot-reasoning {
-  border-left: 2px solid var(--ui-border-light);
-  padding-left: var(--space-4);
   font-size: var(--font-size-md);
   font-weight: 400;
   line-height: 1.7;
@@ -389,6 +542,33 @@
   font-size: var(--font-size-md);
   font-weight: 400;
   color: var(--ui-text-secondary);
+}
+
+/* 대기 중 문구의 흐린 반짝임(참조: assistant-ui `tw-shimmer`, 흐린 글자 위로 밝은 띠가 한 번씩 지나간다) */
+.eo-copilot-shimmer {
+  color: transparent;
+  background: linear-gradient(90deg, var(--ui-text-muted) 40%, var(--ui-text) 50%, var(--ui-text-muted) 60%) 100% 0 / var(--copilot-shimmer-width) 100% no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: eo-copilot-shimmer var(--copilot-shimmer-duration) linear infinite;
+}
+
+@keyframes eo-copilot-shimmer {
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eo-copilot-shimmer {
+    color: var(--ui-text-muted);
+    background: none;
+    animation: none;
+  }
+
+  .eo-copilot-steps-caret {
+    transition: none;
+  }
 }
 
 .eo-copilot-composer {
@@ -432,7 +612,7 @@
   padding: var(--space-4);
   background: var(--ui-surface);
   border: 1px solid var(--ui-border);
-  border-radius: 0;
+  border-radius: var(--copilot-composer-radius);
 }
 
 .eo-copilot-input-card:focus-within {
@@ -490,7 +670,7 @@
   color: var(--ui-text-secondary);
   background: var(--ui-bg-light);
   border: 1px solid var(--ui-border-light);
-  border-radius: var(--radius-md);
+  border-radius: var(--copilot-chip-radius);
   cursor: pointer;
   overflow: hidden;
   white-space: nowrap;
@@ -757,11 +937,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--control-height-sm);
-  height: var(--control-height-sm);
+  width: var(--copilot-send-size);
+  height: var(--copilot-send-size);
   padding: 0;
   border: 1px solid var(--accent-strong);
-  border-radius: 0;
+  border-radius: var(--copilot-send-radius);
   background: var(--accent-strong);
   color: var(--ui-text-on-accent);
   cursor: pointer;
@@ -941,7 +1121,7 @@
 /* ── 적용 전 변경 목록과 문서 위 삭제·삽입 표시 (PD-268) ────────────────────────────────
    표시 색은 문서의 변경 추적 표시(`#doc-editor ins.eo-rev-ins`, `del.eo-rev-del`)와 같은 토큰이다. 참조 앱에 없는 부품이라 모서리는 직각이다. */
 .eo-copilot-review-btn {
-  border-radius: 0;
+  border-radius: var(--copilot-chip-radius);
 }
 .eo-copilot-changes {
   display: flex;

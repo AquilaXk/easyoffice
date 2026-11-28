@@ -525,6 +525,7 @@
         isCancelled,
         onStreamText,
         onActiveRequestId,
+        onToolStep,
       } = params;
 
       const streaming = Boolean(canStreamIpc?.());
@@ -604,9 +605,9 @@
         if (toolCalls.length > 0 && ops.length === 0 && turnIdx + 1 < MAX_TURNS) {
           const toolJson = await executeToolCalls(baseReq.module, toolCalls, compactor);
           if (isCancelled()) return null;
-          const calledNames = toolCalls
-            .map((tc) => `${String(tc?.name || "")}(${formatToolArgsSummary(tc)})`)
-            .join(", ");
+          const calledLabels = toolCalls.map((tc) => `${String(tc?.name || "")}(${formatToolArgsSummary(tc)})`);
+          for (const label of calledLabels) onToolStep?.(label);
+          const calledNames = calledLabels.join(", ");
           const stepAssistant = res?.reply
             ? `${String(res.reply).trim()}\n[조회 호출] ${calledNames}`
             : `[조회 호출] ${calledNames}`;

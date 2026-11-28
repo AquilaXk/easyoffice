@@ -1455,16 +1455,14 @@
           ></div>
           <div id="copilot-panel" class="eo-copilot-panel">
             <div class="eo-copilot-head">
-              <div class="eo-copilot-brand">
-                <span class="eo-copilot-badge" aria-hidden="true">
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2.5" y="4" width="11" height="8.5" rx="2.2" stroke="currentColor" stroke-width="1.4" /><path d="M8 1.8V4M5.8 7.8H5.81M10.2 7.8H10.21M6 10.2H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
-                </span>
-                <span class="eo-copilot-title">코파일럿</span>
-              </div>
+              <span id="copilot-title" class="eo-copilot-title">새 대화</span>
               <div class="eo-copilot-head-actions">
-                <button id="btn-copilot-new" type="button" class="eo-copilot-head-btn" title="새 대화">새 대화</button>
-                <button id="btn-copilot-settings" type="button" class="eo-copilot-head-btn" title="모델 설정">모델 설정</button>
-                <button id="btn-copilot-close" type="button" class="eo-copilot-head-btn" title="닫기">닫기</button>
+                <button id="btn-copilot-more" type="button" class="eo-copilot-icon-btn" data-icon="ellipsis-vertical" aria-haspopup="menu" aria-expanded="false" aria-controls="copilot-more-menu" aria-label="더보기" title="더보기"></button>
+                <div id="copilot-more-menu" class="eo-copilot-popup" role="menu" hidden>
+                  <button id="btn-copilot-new" type="button" class="eo-copilot-popup-item" role="menuitem">새 대화</button>
+                  <button id="btn-copilot-settings" type="button" class="eo-copilot-popup-item" role="menuitem">모델 설정</button>
+                </div>
+                <button id="btn-copilot-close" type="button" class="eo-copilot-icon-btn" data-icon="close" aria-label="닫기" title="닫기"></button>
               </div>
             </div>
             <div id="copilot-body" class="eo-copilot-body">
@@ -1488,6 +1486,8 @@
                 ></textarea>
                 <div class="eo-copilot-composer-bar">
                   <div class="eo-copilot-composer-tools">
+                    <button id="btn-copilot-plus" type="button" class="eo-copilot-icon-btn" data-icon="plus" aria-haspopup="menu" aria-expanded="false" aria-controls="copilot-plus-menu" aria-label="예시 질문" title="예시 질문"></button>
+                    <div id="copilot-plus-menu" class="eo-copilot-popup eo-copilot-popup--up" role="menu" hidden></div>
                     <button id="btn-copilot-mode" type="button" class="eo-copilot-pill-btn eo-copilot-mode-btn" data-mode="edit" title="현재 문서를 직접 편집">편집</button>
                     <button id="btn-copilot-ghost" type="button" class="eo-copilot-pill-btn eo-copilot-ghost-btn" aria-pressed="false" title="입력하는 동안 텍스트 예측 표시 (Tab 수락 / Esc 닫기)">텍스트 예측</button>
                     <button id="btn-copilot-model" type="button" class="eo-copilot-pill-btn eo-copilot-model-btn" aria-haspopup="menu" aria-expanded="false" title="모델 선택"><span id="copilot-model-btn-text" class="eo-copilot-model-btn-text">모델 선택</span><span class="eo-copilot-caret eo-chevron" aria-hidden="true"></span></button>
@@ -1495,9 +1495,7 @@
                       <div id="copilot-model-menu-group" focusgroup="menu nomemory" aria-labelledby="btn-copilot-model"></div>
                     </div>
                   </div>
-                  <button id="btn-copilot-send" type="button" class="eo-copilot-send-btn" aria-label="보내기" title="보내기" disabled>
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 12.5V3.8M4.5 7.2L8 3.6L11.5 7.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
-                  </button>
+                  <button id="btn-copilot-send" type="button" class="eo-copilot-send-btn" data-icon="arrow-up" aria-label="보내기" title="보내기" disabled></button>
                 </div>
               </div>
             </div>
@@ -3518,6 +3516,8 @@
     <script src="./copilot-agent-loop.js"></script>
     <script src="./copilot-ghost.js"></script>
     <script src="./copilot-model-ui.js"></script>
+    <script src="./copilot-popup-menu.js"></script>
+    <script src="./copilot-thread-view.js"></script>
     <script src="./copilot-ui.js"></script>
     <script src="./base-model.js"></script>
     <script src="./base-query-cache.js"></script>

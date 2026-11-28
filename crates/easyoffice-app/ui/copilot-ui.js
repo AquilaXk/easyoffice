@@ -78,9 +78,7 @@
     return svg;
   }
 
-  const buildSendGlyph = (d, running) => createSvgIcon(d, running
-    ? [{ tag: "rect", x: "4.5", y: "4.5", width: "7", height: "7", rx: "1.2", fill: "currentColor" }]
-    : [{ d: "M8 12.5V3.8M4.5 7.2L8 3.6L11.5 7.2", stroke: "currentColor", "stroke-width": "1.7", "stroke-linecap": "round", "stroke-linejoin": "round" }], 14);
+  const TITLE_MAX_CHARS = 40;
 
   function createCopilotUi(deps) {
     const {
@@ -93,6 +91,7 @@
     } = deps;
     const copilotActions = deps.copilotActions || host.__EASYOFFICE_CREATE_COPILOT_ACTIONS__(deps);
     const editMode = host.__EASYOFFICE_COPILOT_EDIT_MODE__;
+    const icons = host.__EASYOFFICE_ICONS__;
 
     const byId = (id) => document.getElementById(id);
     let isOpen = false;
@@ -105,6 +104,8 @@
     const streamApi = host.__EASYOFFICE_COPILOT_STREAM__;
     let turnCounter = 0;
     let dragState = null;
+    let moreMenu = null;
+    let plusMenu = null;
     const messages = [];
 
     const modelUi = host.__EASYOFFICE_CREATE_COPILOT_MODEL_UI__({
@@ -242,6 +243,7 @@
           btn.disabled = actionDisabled(btn.dataset.copilotAction, msg);
         }
       }
+      threadView.sync(threadEl);
     }
 
     function syncComposerControls() {
@@ -266,8 +268,10 @@
         const sendLabel = running ? "중지" : "보내기";
         sendBtn.setAttribute("aria-label", sendLabel);
         sendBtn.setAttribute("title", sendLabel);
-        sendBtn.replaceChildren(buildSendGlyph(document, running));
+        icons.setIcon(document, sendBtn, running ? "stop" : "arrow-up");
       }
+      const plusBtn = byId("btn-copilot-plus");
+      if (plusBtn) plusBtn.disabled = running || !isModuleSupported(mod);
       syncSelectionBadge();
     }
 
@@ -288,123 +292,61 @@
       const show = messages.length === 0 && !hasDraft && isModuleSupported(mod);
       welcome.hidden = !show;
       if (!show) return;
-      const examplesMap = host.__EASYOFFICE_COPILOT_SESSION_ANCHOR__?.MODULE_EXAMPLES || {};
-      const items = examplesMap[mod] || examplesMap.DOC || [];
-      const nodes = items.map((ex) => {
+      const nodes = examplesFor(mod).map((ex) => {
         const btn = mkEl("button", "eo-copilot-example-btn");
         btn.type = "button";
         btn.appendChild(mkEl("span", undefined, ex.label));
         btn.appendChild(buildExampleArrowIcon(document));
-        btn.addEventListener("click", () => {
-          if (!inputEl) return;
-          preferredMode = ASK_ONLY_MODULES.has(mod) ? "ask" : "edit";
-          inputEl.value = ex.prompt;
-          autoGrowTextarea(inputEl);
-          renderWelcome();
-          syncComposerControls();
-          inputEl.focus();
-        });
+        btn.addEventListener("click", () => useExample(ex));
         return btn;
       });
       examplesWrap.replaceChildren(...nodes);
     }
 
-    function renderAssistantNode(msg) {
-      const wrap = mkEl("div", "eo-copilot-msg eo-copilot-msg--assistant");
-      if (msg.reasoning) wrap.appendChild(mkEl("div", "eo-copilot-reasoning", msg.reasoning));
-      if (msg.updatedInPlace && !msg.undone) {
-        const statusRow = mkEl("div", "eo-copilot-inplace-row");
-        statusRow.appendChild(buildCheckIcon(document));
-        statusRow.appendChild(mkEl("span", undefined, "제자리에서 업데이트됨"));
-        wrap.appendChild(statusRow);
-      }
+    function examplesFor(mod) {
+      const examplesMap = host.__EASYOFFICE_COPILOT_SESSION_ANCHOR__?.MODULE_EXAMPLES || {};
+      return examplesMap[mod] || examplesMap.DOC || [];
+    }
 
-      const locs = Array.isArray(msg.locations) ? msg.locations : [];
-      const proposing = msg.change?.state === "pending";
-      const reviewButtons = editMode.reviewActions(msg.change);
-      const showUndo = !msg.undone && copilotActions.hasUndoEntry(msg.id) && msg.change?.state !== "draft";
-      const showRegenerate = !msg.pending && Boolean(msg.request) && messages.at(-1) === msg;
-      if (locs.length > 0 || showUndo || showRegenerate || reviewButtons.length > 0) {
-        const chipRow = mkEl("div", "eo-copilot-chip-row");
-        for (const [action, label] of reviewButtons) {
-          const btn = mkEl("button", "eo-copilot-chip-btn eo-copilot-review-btn", label);
-          btn.type = "button";
-          btn.dataset.turn = msg.id;
-          btn.dataset.copilotAction = action;
-          btn.disabled = actionDisabled(action, msg);
-          btn.addEventListener("click", () => void reviewHandlers[action](msg));
-          chipRow.appendChild(btn);
-        }
-        for (const loc of locs) {
-          const chip = mkEl("button", "eo-copilot-loc-chip");
-          chip.type = "button";
-          chip.appendChild(buildLocationIcon(document, loc.module));
-          chip.appendChild(mkEl("span", undefined, loc.label));
-          chip.addEventListener("click", () => {
-            void copilotActions.locateTarget(loc).then(() => syncSelectionBadge());
-          });
-          chipRow.appendChild(chip);
-        }
-        if (showUndo) {
-          const undoBtn = mkEl("button", "eo-copilot-undo-btn", "실행 취소");
-          undoBtn.type = "button";
-          undoBtn.dataset.turn = msg.id;
-          undoBtn.dataset.copilotAction = "undo";
-          undoBtn.disabled = actionDisabled("undo", msg);
-          undoBtn.addEventListener("click", () => {
-            void copilotActions.undoLastTurn(msg.id).then((restored) => {
-              if (!restored) return;
-              msg.undone = true;
-              renderThread();
-              setStatusFeedback?.("코파일럿 편집을 실행 취소했습니다");
-            });
-          });
-          chipRow.appendChild(undoBtn);
-        }
-        if (showRegenerate) {
-          const regenBtn = mkEl("button", "eo-copilot-chip-btn", "다시 생성");
-          regenBtn.type = "button";
-          regenBtn.dataset.turn = msg.id;
-          regenBtn.dataset.copilotAction = "regenerate";
-          regenBtn.disabled = actionDisabled("regenerate", msg);
-          regenBtn.addEventListener("click", () => void regenerateLast());
-          chipRow.appendChild(regenBtn);
-        }
-        wrap.appendChild(chipRow);
-      }
+    // 예시 질문은 입력칸에 채울 뿐 보내지 않는다.
+    function useExample(ex) {
+      const inputEl = byId("copilot-input");
+      if (!inputEl) return;
+      preferredMode = ASK_ONLY_MODULES.has(getActiveModule()) ? "ask" : "edit";
+      inputEl.value = ex.prompt;
+      autoGrowTextarea(inputEl);
+      renderWelcome();
+      syncComposerControls();
+      inputEl.focus();
+    }
 
-      if (proposing) {
-        wrap.appendChild(copilotActions.renderChangeList(msg.change.changes, (loc) => void copilotActions.locateTarget(loc).then(() => syncSelectionBadge())));
-      } else if (editMode.isDiscarded(msg.change)) {
-        wrap.appendChild(mkEl("div", "eo-copilot-inplace-row", editMode.DISCARDED_LABEL));
-      }
+    function buildPlusMenu() {
+      const menu = byId("copilot-plus-menu");
+      const items = examplesFor(getActiveModule()).map((ex) => {
+        const btn = mkEl("button", "eo-copilot-popup-item", ex.label);
+        btn.type = "button";
+        btn.setAttribute("role", "menuitem");
+        btn.addEventListener("click", () => useExample(ex));
+        return btn;
+      });
+      menu.replaceChildren(mkEl("div", "eo-copilot-popup-heading", "예시 질문"), ...items);
+    }
 
-      if (msg.reply) {
-        const replyEl = mkEl("div", "eo-copilot-reply" + (msg.error ? " eo-copilot-reply--error" : ""));
-        replyEl.dataset.turnReply = msg.id;
-        renderReplyContent(replyEl, msg.reply, msg.error);
-        wrap.appendChild(replyEl);
-      }
-      if (msg.pending) wrap.appendChild(mkEl("div", "eo-copilot-loading", "응답 생성 중…"));
-      return wrap;
+    // 머리글 제목은 첫 질문(한 줄로 줄여서), 대화가 없으면 "새 대화".
+    function syncTitle() {
+      const titleEl = byId("copilot-title");
+      if (!titleEl) return;
+      const first = messages.find((m) => m.role === "user");
+      const text = first ? first.text.replace(/\s+/g, " ").trim() : "";
+      titleEl.textContent = Array.from(text).slice(0, TITLE_MAX_CHARS).join("") || "새 대화";
+      titleEl.title = text;
     }
 
     function renderThread() {
       const threadEl = byId("copilot-thread");
       if (!threadEl) return;
-      const nodes = messages.map((msg) => {
-        if (msg.role === "user") {
-          const card = document.createElement("div");
-          card.className = "eo-copilot-msg eo-copilot-msg--user";
-          const body = document.createElement("div");
-          body.className = "eo-copilot-msg-text";
-          body.textContent = msg.text;
-          card.appendChild(body);
-          return card;
-        }
-        return renderAssistantNode(msg);
-      });
-      threadEl.replaceChildren(...nodes);
+      threadEl.replaceChildren(...messages.map((msg) => threadView.renderTurn(msg)));
+      syncTitle();
       renderWelcome();
       const bodyEl = byId("copilot-body");
       if (bodyEl) bodyEl.scrollTop = bodyEl.scrollHeight || 0;
@@ -416,7 +358,11 @@
       const topBtn = byId("btn-copilot-toggle");
       const supported = isModuleSupported();
       const visible = supported && isOpen;
-      if (!visible) modelUi.closeMenu(false);
+      if (!visible) {
+        modelUi.closeMenu(false);
+        moreMenu?.close();
+        plusMenu?.close();
+      }
       if (shell) shell.hidden = !visible;
       if (panel) panel.hidden = !visible;
       if (topBtn) {
@@ -506,10 +452,17 @@
       }
       turnCounter += 1;
       const turnId = "turn-" + turnCounter;
-      messages.push({ id: turnId + "-u", role: "user", text: request.prompt });
+      const startedAt = Date.now();
+      messages.push({ id: turnId + "-u", role: "user", text: request.prompt, at: startedAt });
       const assistantEntry = {
         id: turnId,
         role: "assistant",
+        at: startedAt,
+        startedAt,
+        durationMs: 0,
+        steps: [],
+        stepsOpen: false,
+        feedback: null,
         pending: true,
         reply: "",
         reasoning: "",
@@ -528,6 +481,12 @@
       renderThread();
       syncComposerControls();
       return { assistantEntry, turnId, mod, mode, selection, frozenSelection, context, history, token: activeRunToken, requestId: activeRequestId, request };
+    }
+
+    // 답이 끝난(또는 멈춘) 때를 적는다. 머리 접힘 줄의 "N초 동안 작업"과 아래 행의 상대 시간이 이 값을 쓴다.
+    function settleTurnClock(entry) {
+      entry.at = Date.now();
+      entry.durationMs = entry.at - entry.startedAt;
     }
 
     // 스트림으로 온 글이 늘 때마다 대기 중인 답글을 그 자리에서 고쳐 쓴다(조각마다 스레드를 다시 그리지 않는다).
@@ -623,6 +582,11 @@
           isCancelled: () => token !== activeRunToken,
           onStreamText: (text) => showStreamed(assistantEntry, text, token),
           onActiveRequestId: (id) => { activeRequestId = id; },
+          onToolStep: (label) => {
+            if (token !== activeRunToken) return;
+            assistantEntry.steps.push(label);
+            renderThread();
+          },
         };
         let res;
         try {
@@ -655,6 +619,7 @@
       } finally {
         if (token === activeRunToken) {
           running = false;
+          settleTurnClock(assistantEntry);
           renderThread();
           syncComposerControls();
         }
@@ -733,6 +698,36 @@
       discard: discardDraft,
     };
 
+    function undoTurn(msg) {
+      void copilotActions.undoLastTurn(msg.id).then((restored) => {
+        if (!restored) return;
+        msg.undone = true;
+        renderThread();
+        setStatusFeedback?.("코파일럿 편집을 실행 취소했습니다");
+      });
+    }
+
+    const threadView = host.__EASYOFFICE_COPILOT_THREAD_VIEW__.createThreadView({
+      document,
+      copilotActions,
+      editMode,
+      mkEl,
+      hooks: {
+        actionDisabled,
+        review: reviewHandlers,
+        regenerate: () => regenerateLast(),
+        undo: undoTurn,
+        locate: (loc) => void copilotActions.locateTarget(loc).then(() => syncSelectionBadge()),
+        locationIcon: (mod) => buildLocationIcon(document, mod),
+        checkIcon: () => buildCheckIcon(document),
+        renderReply: renderReplyContent,
+        isLastTurn: (msg) => messages.at(-1) === msg,
+        isBusy: () => running || regenerating,
+        resend: (msg) => void runTurn({ prompt: msg.text }),
+        notify: (text) => setStatusFeedback?.(text),
+      },
+    });
+
     function runTurn(request, options) {
       const turn = startTurn(request, options);
       return turn ? finishTurn(turn) : undefined;
@@ -797,6 +792,7 @@
       if (last?.pending) {
         last.pending = false;
         last.reply = "요청을 중지했습니다.";
+        settleTurnClock(last);
       }
       renderThread();
       syncComposerControls();
@@ -861,6 +857,9 @@
       modelUi.bind();
       byId("btn-copilot-toggle")?.addEventListener("click", () => toggle());
       byId("btn-copilot-close")?.addEventListener("click", () => setOpen(false));
+      const { createPopupMenu } = host.__EASYOFFICE_COPILOT_POPUP__;
+      moreMenu = createPopupMenu({ document, trigger: byId("btn-copilot-more"), menu: byId("copilot-more-menu"), align: "end" });
+      plusMenu = createPopupMenu({ document, trigger: byId("btn-copilot-plus"), menu: byId("copilot-plus-menu"), placement: "up", align: "start", onOpen: buildPlusMenu });
       byId("btn-copilot-new")?.addEventListener("click", () => {
         // 연출 중이면 쓰던 부분도 적용하지 않고 버린다.
         copilotActions.abortPerformance();

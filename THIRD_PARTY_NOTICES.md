@@ -764,6 +764,7 @@ SOFTWARE.
 
 Source: https://github.com/lucide-icons/lucide (`icons/chevron-down.svg`, `icons/chevron-up.svg`, Copyright (c) 2026 Lucide Icons and Contributors).
 Nothing is vendored or linked at runtime. The path data of the two chevrons (`m6 9 6 6 6-6`, `m18 15-6-6-6 6`, 24x24 grid, stroke 2, round caps and joins) is embedded as the mask images `--chevron-down-mask` and `--chevron-up-mask` in `crates/easyoffice-app/ui/toolbar.css` (PD-377) and draws every drop-down arrow and the stacked buttons of the number fields. Both icons are among the Lucide icons derived from Feather, so the MIT license below applies to them as well as the ISC license.
+The copilot panel (PD-387) adds the path data of `thumbs-up`, `thumbs-down`, `rotate-ccw`, `arrow-up` and the three dots of `ellipsis-vertical` (`icons/thumbs-up.svg`, `icons/thumbs-down.svg`, `icons/rotate-ccw.svg`, `icons/arrow-up.svg`, `icons/ellipsis-vertical.svg`) to the icon set `crates/easyoffice-app/ui/icons.js`, drawn as inline stroke SVG on the 24x24 grid. The `stop` square there is a plain shape of this app.
 
 ```
 ISC License
@@ -10731,6 +10732,35 @@ SOFTWARE.
 ```
 
 ---
+
+## Copilot panel chat screen (assistant-ui, MIT; `PD-387`)
+
+Source: https://github.com/assistant-ui/assistant-ui (`packages/tw-shimmer/src/index.css` lines 1-30, the `shimmer` utility and its `tw-shimmer` keyframes; Copyright (c) 2026 AgentbaseAI Inc.). Nothing is vendored or linked at runtime.
+What is taken is the pattern: waiting text drawn as a moving band of light text over muted text (a linear gradient clipped to the glyphs, its `background-position` animated). It is ported to the plain rule `.eo-copilot-shimmer` in `crates/easyoffice-app/ui/copilot.css` and noted in the header of `crates/easyoffice-app/ui/copilot-thread-view.js`. Changed to fit: no Tailwind utility, no `@property` angle or track math, the colors are the `--ui-text-muted` and `--ui-text` tokens, one duration token (`--copilot-shimmer-duration`), and the animation is off under `prefers-reduced-motion`. The bubble, the folded step line and the row under each message are written fresh as DOM and CSS of this app.
+
+```
+MIT License
+
+Copyright (c) 2026 AgentbaseAI Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ## Copilot token optimization open-source references (`PD-364`)
 
