@@ -687,7 +687,7 @@ test("real Chrome: command palette DOC formatting, BASE import icon/dialog UX, B
     }));
     const fileW = document.getElementById("base-import-file").getBoundingClientRect().width;
     const nameW = document.getElementById("base-import-table-name").getBoundingClientRect().width;
-    const selWrap = dlg.querySelector(".base-dlg-select.custom-select");
+    const selWrap = dlg.querySelector(".base-dlg-wide-pick.custom-select");
     const selCs = getComputedStyle(selWrap);
     const btnEls = Array.from(footer.querySelectorAll("button"));
     const btns = btnEls.map((b) => b.textContent);

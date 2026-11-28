@@ -170,12 +170,12 @@
         return appendAll(row, lbl, inputEl);
       };
 
-      const nameInput = mkInput("base-field-name", "text", "dialog-text-input base-dlg-input", "필드 이름");
-      const typeSelect = mkSel("sb-select base-dlg-select", "필드 유형", "base-field-type");
+      const nameInput = mkInput("base-field-name", "text", "dialog-text-input base-dlg-wide-text", "필드 이름");
+      const typeSelect = mkSel("base-dlg-wide-pick", "필드 유형", "base-field-type");
       for (const ft of M.FIELD_TYPES) addOpt(typeSelect, ft, M.FIELD_TYPE_LABELS[ft]);
-      const optsInput = mkInput("base-field-options", "text", "dialog-text-input base-dlg-input", "선택 옵션 (쉼표 구분)");
-      const relSelect = mkSel("sb-select base-dlg-select", "연결 테이블", "base-field-relation-table");
-      const formulaInput = mkInput("base-field-formula", "text", "dialog-text-input base-dlg-input", "수식");
+      const optsInput = mkInput("base-field-options", "text", "dialog-text-input base-dlg-wide-text", "선택 옵션 (쉼표 구분)");
+      const relSelect = mkSel("base-dlg-wide-pick", "연결 테이블", "base-field-relation-table");
+      const formulaInput = mkInput("base-field-formula", "text", "dialog-text-input base-dlg-wide-text", "수식");
 
       const reqCheck = mkInput("base-field-required", "checkbox", "", "필수 입력");
       const reqLabel = setAttr(el("label", "dialog-checkbox"), "for", "base-field-required");
@@ -213,7 +213,7 @@
       };
       typeSelect.addEventListener("change", syncTypeRows);
 
-      const btnDel = mkBtn("dialog-btn base-danger-btn", "필드 삭제", () => {
+      const btnDel = mkBtn("dialog-btn base-danger-action", "필드 삭제", () => {
         if (!editingFieldId) return;
         const res = deleteField(editingFieldId);
         if (!res.ok) statusNote.textContent = res.error; else closeDialog(dlg);

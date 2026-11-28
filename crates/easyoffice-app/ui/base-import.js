@@ -531,19 +531,19 @@
         return appendAll(row, lbl, inputEl);
       };
 
-      const fileInp = el("input", "dialog-text-input base-dlg-input");
+      const fileInp = el("input", "dialog-text-input base-dlg-wide-text");
       fileInp.id = "base-import-file";
       fileInp.type = "file";
       fileInp.accept = ".csv,.tsv,.xlsx";
       fileInp.addEventListener("change", (ev) => { void handleFileSelect(ev); });
 
-      const sheetSel = el("select", "sb-select sb-combo base-dlg-select");
+      const sheetSel = el("select", "sb-select sb-combo base-dlg-wide-pick");
       sheetSel.id = "base-import-sheet";
       sheetSel.addEventListener("change", updatePreview);
       const sheetRow = mkRow("시트 선택", sheetSel, "base-import-sheet-row");
       sheetRow.hidden = true;
 
-      const modeSel = el("select", "sb-select sb-combo base-dlg-select");
+      const modeSel = el("select", "sb-select sb-combo base-dlg-wide-pick");
       modeSel.id = "base-import-mode";
       for (const [val, txt] of [["new", "새 테이블로 가져오기"], ["append", "현재 테이블 끝에 추가"], ["replace", "현재 테이블 내용 바꾸기"]]) {
         const o = el("option", "", txt);
@@ -551,7 +551,7 @@
         modeSel.appendChild(o);
       }
 
-      const nameInp = el("input", "dialog-text-input base-dlg-input");
+      const nameInp = el("input", "dialog-text-input base-dlg-wide-text");
       nameInp.id = "base-import-table-name";
       nameInp.type = "text";
       const nameRow = mkRow("테이블 이름", nameInp, "base-import-name-row");
