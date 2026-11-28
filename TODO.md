@@ -4,7 +4,9 @@
 - [ ] 설치본 실기기 점검(아래; 현재 공개판은 `v0.2.3`)
 - [ ] `docs/office-parity.md`의 없음·일부 항목을 중요도 순으로 구현(상세는 표, PD-393)
 - [ ] 문서 창: 그림의 임의 위치(`wp:positionH`·`V` 오프셋)와 표 칸 안 그림의 배치·자르기·회전(PD-395)
-- [ ] 문서 창: 새 메뉴 항목의 macOS 네이티브 메뉴 항목. `native_menu/items.rs`와 `layout/bars.rs`가 줄 수 상한이라 표를 나누고 `scripts/test-support/word-web-only.mjs`를 비운다(PD-395)
+- [ ] 문서 창: 새 메뉴 항목의 macOS 네이티브 메뉴 항목. `native_menu/items.rs`와 `layout/bars.rs`가 줄 수 상한이라 한글 창처럼(`items_hwp.rs`·`layout/hwp.rs`, PD-396) 표를 나누고 `scripts/test-support/word-web-only.mjs`를 비운다(PD-395)
+- [ ] 한글 창: `파일 ▸ 미리 보기`(한글용 `buildPreview`를 `getPrintPages`로 만들어 미리 보기 창에 연결)와 `문서 정보`(원본 없음), `쪽 ▸ 쪽 번호 매기기`(고정 rhwp 커밋을 `setPageNumberPosition`이 있는 커밋으로 올리고 WASM을 다시 빌드한 뒤 대화상자), `구역 나누기`(WASM API 없음)(PD-396)
+- [ ] 한글 창 보안 메뉴: `문서 암호 설정`을 셸 저장 경로에 연결(`exportHwpWithPassword`, 저장 암호 대화상자), `배포용 문서 편집`(`convertToEditable`)(PD-396 Revisit)
 - [ ] 문서 창: 줄 번호를 화면 가장자리에 그리고, 워터마크를 쪽마다 그리며, ODT·HWPX에 필드·책갈피·표 머리글 행을 쓴다(PD-395 Trade-offs)
 - [ ] 코파일럿 포인터의 실제 조작을 내장 한글 편집기와 시트 서식·차트·정렬로 넓힘(PD-392 Revisit)
 
