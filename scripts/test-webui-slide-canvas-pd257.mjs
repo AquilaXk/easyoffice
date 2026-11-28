@@ -461,13 +461,16 @@ test("PD-257: 저장 페이로드 직렬화(그림 Base64 물질화 포함) → 
   assert.equal(s0.transition, "zoom");
   assert.equal(s0.elements.length, 5);
   const savedImg = s0.elements.find((e) => e.kind === "image");
-  assert.ok(savedImg && savedImg.data.length > 20, "image base64 data materialized on save");
-  assert.equal(savedImg.mime, "image/png");
+  assert.ok(savedImg?.imageRef, "the image points at the deck's picture table");
+  assert.equal(savedImg.data, undefined, "no inline copy of the picture");
+  const savedPicture = saved.images.find((p) => p.id === savedImg.imageRef);
+  assert.ok(savedPicture && savedPicture.dataBase64.length > 20, "image base64 data materialized once in the table");
+  assert.equal(savedPicture.mime, "image/png");
 
   // Reload into a fresh harness via file-open and verify 100% fidelity
   const h2 = await createWorkspaceHarness({ search: "?module=DOC&win=w-reopen-pd257" });
   await flushAsyncTurns(10);
-  await pickFile(h2.document, makeFixtureFile("복원검증.pptx", { aspect: saved.aspect, slides: saved.slides }));
+  await pickFile(h2.document, makeFixtureFile("복원검증.pptx", { aspect: saved.aspect, images: saved.images, slides: saved.slides }));
   await flushAsyncTurns(12);
 
   assert.equal($(h2.document, "app").dataset.module, "SLIDE");
@@ -496,22 +499,17 @@ test("PD-257: 저장 페이로드 직렬화(그림 Base64 물질화 포함) → 
       ...saved.slides[0],
       elements: saved.slides[0].elements.map((el) => {
         if (el.kind === "textbox") return { ...el, kind: "textBox" };
-        if (el.kind === "image") {
-          const { data, ...rest } = el;
-          return { ...rest, dataBase64: data };
-        }
         return el;
       }),
     },
-  ];
-  const h3 = await createWorkspaceHarness({ search: "?module=DOC&win=w-rust-decode-pd257" });
+  ];  const h3 = await createWorkspaceHarness({ search: "?module=DOC&win=w-rust-decode-pd257" });
   await flushAsyncTurns(10);
-  await pickFile(h3.document, makeFixtureFile("러스트디코드.pptx", { aspect: "4:3", slides: rustDecodeSlides }));
+  await pickFile(h3.document, makeFixtureFile("러스트디코드.pptx", { aspect: "4:3", images: saved.images, slides: rustDecodeSlides }));
   await flushAsyncTurns(12);
   const restoredRust = h3.host.__EASYOFFICE_SLIDE_CANVAS__.getElements();
   assert.equal(restoredRust.length, 5);
   assert.deepEqual(restoredRust.map((e) => e.kind), ["textbox", "shape", "image", "table", "chart"]);
-  assert.ok(restoredRust[2].imageId, "dataBase64 image from Rust decode registered into handle store");
+  assert.ok(restoredRust[2].imageId, "imageRef image from Rust decode registered into handle store");
 });
 
 test("PD-257: 코파일럿 SLIDE 컨텍스트(레이아웃·개체 요약) 및 좌표 개체 편집·실행 취소 연동", async () => {
