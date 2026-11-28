@@ -77,6 +77,11 @@ test("step labels name the read in Korean with numbers and ranges only, and fall
   assert.equal(describeToolCall({ name: "read_sheet_range", range: "a1:c10", sheet: "비밀 시트" }), "A1:C10 범위 읽음");
   assert.equal(describeToolCall({ name: "read_sheet_range", range: "주민번호 열" }), "시트 범위 읽음", "a range that is not cells is not echoed");
   assert.equal(describeToolCall({ name: "read_base_records", offset: 0, limit: 20 }), "레코드 1~20 읽음");
+  assert.equal(describeToolCall({ name: "read_slides", start: 2, count: 3 }), "슬라이드 3~5 읽음");
+  assert.equal(describeToolCall({ name: "read_slides", start: 6, count: 1 }), "슬라이드 7 읽음");
+  assert.equal(describeToolCall({ name: "read_slides", start: 0 }), "슬라이드 1~5 읽음", "no count reads the default five");
+  assert.equal(describeToolCall({ name: "read_slides", start: 0, count: 1e9 }), "슬라이드 1~20 읽음", "the label stops at what one read returns");
+  assert.equal(describeToolCall({ name: "read_slides", start: -4, count: "많이" }), "슬라이드 1~5 읽음", "a bad number is not echoed");
   const secret = describeToolCall({ name: "find_sheet_cells", query: "홍길동 010-1234-5678" });
   assert.equal(secret, "시트에서 셀 찾음");
   assert.equal(describeToolCall({ name: "search_pdf_pages", query: "계약서" }), "PDF 쪽 검색");

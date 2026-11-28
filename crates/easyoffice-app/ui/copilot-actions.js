@@ -9,7 +9,6 @@
   // A selection command on a later block is sent with empty entries up to it (the engine reads 2,048 at most).
   const MAX_COMMAND_BLOCK_INDEX = 2047;
   const SURROUNDING_PARAGRAPH_WINDOW = 16;
-  const MAX_CONTEXT_SLIDES = 64;
   const MAX_SLIDES = 256;
   const MAX_CONTEXT_TEXT_CHARS = 24000;
   // A paragraph a selection command works on is sent whole up to one code point past the engine's 24 KiB context
@@ -71,6 +70,7 @@
     const extOps = typeof host.__EASYOFFICE_CREATE_COPILOT_EXT_OPS__ === "function"
       ? host.__EASYOFFICE_CREATE_COPILOT_EXT_OPS__(deps)
       : createFallbackExtOps();
+    const slideRead = host.__EASYOFFICE_COPILOT_SLIDE_READ__.createSlideReader({ slideDeckState, getWorkspacePanels, getActiveSlideIndex });
     let lastUndoEntry = null;
     let activeRun = null;
     const idleWaiters = [];
@@ -296,36 +296,6 @@
       return null;
     }
 
-    function extractSlideContext() {
-      const panels = getWorkspacePanels();
-      panels?.syncActiveSlideDomStylesToDeck?.();
-      const slides = slideDeckState.slice(0, MAX_CONTEXT_SLIDES).map((s, index) => {
-        const rawBody = String(s?.lower || "");
-        const bullets = rawBody.split(/\n+/).map((t) => t.trim()).filter(Boolean);
-        const elements = (Array.isArray(s?.elements) ? s.elements : []).slice(0, 32).map((el) => ({
-          id: String(el.id || ""),
-          kind: String(el.kind || ""),
-          x: Number(el.x || 0),
-          y: Number(el.y || 0),
-          w: Number(el.w || 0),
-          h: Number(el.h || 0),
-          text: clipCodePoints(el.text || el.title || el.alt || "", 160),
-        }));
-        const item = {
-          index,
-          title: String(s?.title || ""),
-          bullets,
-        };
-        const notes = String(s?.notes || "");
-        if (notes.trim()) item.notes = notes;
-        const layout = String(s?.layout || "titleAndContent");
-        if (layout && layout !== "titleAndContent") item.layout = layout;
-        if (elements.length > 0) item.elements = elements;
-        return item;
-      });
-      return { activeIndex: getActiveSlideIndex(), aspect: String(slideDeckState[0]?.aspect || "16:9"), slides };
-    }
-
     function extractContext(mod = getActiveModule(), { target, frozenSelection } = {}) {
       const label = getSelectionLabel(mod);
       if (mod === "SHEET") {
@@ -339,7 +309,7 @@
         return { selection: sel ? { ...sel } : label ? { range: label } : {}, context: { doc: extractDocContext(span) } };
       }
       if (mod === "SLIDE") {
-        return { selection: target?.selection ? { ...target.selection } : { slideIndex: getActiveSlideIndex() }, context: { slide: extractSlideContext() } };
+        return { selection: target?.selection ? { ...target.selection } : { slideIndex: getActiveSlideIndex() }, context: { slide: slideRead.extractSlideContext() } };
       }
       if (mod === "BASE" || mod === "BOARD") return host.__EASYOFFICE_BASE_BOARD_HOST__?.extractCopilotContext?.(mod) || { selection: {}, context: {} };
       if (mod === "PDF") return { selection: {}, context: { pdf: extOps.extractPdfContext() } };
@@ -822,6 +792,7 @@
     async function executeReadTool(mod, toolName, args) {
       if (toolName === "read_doc_blocks") return extOps.readDocBlocksTool(mod, args, docBlocksOf);
       if (toolName === "read_base_records") return extOps.readBaseRecordsTool(args);
+      if (toolName === "read_slides") return slideRead.readSlidesTool(args);
       if (toolName === "read_sheet_range") return sheetOps.readSheetRangeTool(args, { sheetDataStore, getActiveSheetName, getSheetController });
       if (toolName === "find_sheet_cells") return sheetOps.findSheetCellsTool(args, { sheetDataStore, getActiveSheetName, getSheetController });
       if (toolName === "search_pdf_pages") return extOps.searchPdfPagesTool(args);

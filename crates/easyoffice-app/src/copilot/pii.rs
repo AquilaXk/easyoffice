@@ -269,7 +269,9 @@ impl PiiVault {
         }
         for tc in &mut resp.tool_calls {
             match tc {
-                CopilotToolCall::ReadDocBlocks { .. } | CopilotToolCall::ReadSheetRange { .. } => {}
+                CopilotToolCall::ReadDocBlocks { .. }
+                | CopilotToolCall::ReadSheetRange { .. }
+                | CopilotToolCall::ReadSlides { .. } => {}
                 CopilotToolCall::FindSheetCells { query, .. }
                 | CopilotToolCall::SearchPdfPages { query } => {
                     *query = self.restore_text(query);

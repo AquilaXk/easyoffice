@@ -24,6 +24,7 @@ const FIND_SHEET_SCHEMA: &str = r#"{"type":"object","properties":{"sheet":{"type
 const SEARCH_PDF_SCHEMA: &str =
     r#"{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}"#;
 const READ_BASE_SCHEMA: &str = r#"{"type":"object","properties":{"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":50},"query":{"type":"string"}},"required":["offset","limit"]}"#;
+const READ_SLIDES_SCHEMA: &str = r#"{"type":"object","properties":{"start":{"type":"integer","minimum":0},"count":{"type":"integer","minimum":1,"maximum":20}},"required":["start","count"]}"#;
 
 const DOC_BLOCK_ITEM_SCHEMA: &str = r#"{"type":"object","properties":{"heading":{"type":"integer","minimum":1},"text":{"type":"string"},"list":{"type":"string","enum":["bullet","ordered","task"]},"items":{"type":"array","items":{"type":"string"}},"table":{"type":"object","properties":{"headerRow":{"type":"boolean"},"rows":{"type":"array","items":{"type":"array","items":{"type":"string"}}}},"required":["rows"]}}}"#;
 const SLIDE_ELEMENT_SCHEMA: &str = r#"{"type":"object","properties":{"id":{"type":"string"},"kind":{"type":"string","enum":["textbox","shape","table","chart","image"]},"x":{"type":"number"},"y":{"type":"number"},"w":{"type":"number"},"h":{"type":"number"},"text":{"type":"string"},"role":{"type":"string","enum":["title","subtitle","body","none"]},"fontSizePt":{"type":"number"},"bold":{"type":"boolean"},"italic":{"type":"boolean"},"color":{"type":"string"},"fill":{"type":"string"},"align":{"type":"string","enum":["left","center","right","justify"]},"shapeType":{"type":"string"},"stroke":{"type":"string"},"rows":{"type":"array","items":{"type":"array","items":{"type":"string"}}},"headerRow":{"type":"boolean"},"chartType":{"type":"string","enum":["column","bar","line","pie","scatter"]},"title":{"type":"string"},"categories":{"type":"array","items":{"type":"string"}},"series":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"values":{"type":"array","items":{"type":"number"}},"color":{"type":"string"}},"required":["values"]}}},"required":["kind"]}"#;
@@ -136,6 +137,11 @@ fn read_tools_for_module(req: &CopilotRunRequest) -> Vec<ToolDef> {
             name: "read_base_records",
             description: "현재 베이스 테이블의 레코드를 오프셋과 검색어로 추가 조회한다.",
             parameters_json: READ_BASE_SCHEMA,
+        }],
+        CopilotModule::Slide => vec![ToolDef {
+            name: "read_slides",
+            description: "지정한 번호부터 슬라이드의 제목·항목·노트·개체를 모두 읽는다. 문맥에는 활성 슬라이드만 자세히 있다.",
+            parameters_json: READ_SLIDES_SCHEMA,
         }],
         _ => Vec::new(),
     }
@@ -318,6 +324,7 @@ pub fn synthesize_completion_from_tools(
                 | "find_sheet_cells"
                 | "search_pdf_pages"
                 | "read_base_records"
+                | "read_slides"
         ) {
             let mut entries = obj.to_vec();
             entries.push(("name".to_string(), StrictJsonValue::Str(inv.name.clone())));

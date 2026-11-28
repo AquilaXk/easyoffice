@@ -494,6 +494,9 @@ fn module_edit_guide(req: &CopilotRunRequest) -> &'static str {
         CopilotModule::Sheet => {
             "계약: sheet.write(sheet?,range?,cells:[{coord,raw,numFmt?,bold?,fill?,color?}]) | sheet.format(range,fill?,color?,bold?,numFmt?) | sheet.chart(chartType,dataRange,title?,legend?) | sheet.table(action,range) | sheet.pivot(sourceRange,destCell,rowField,valueField,agg) | sheet.cond_format(range,preset,value1?) | sheet.sort_filter(action,range,colOffset?,ascending?) | sheet.structure(action,index,count) | sheet.note(coord,text). 조회: read_sheet_range, find_sheet_cells."
         }
+        CopilotModule::Slide if allow_doc_read => {
+            "계약: slide.add(title,bullets?,notes?,layout?,transition?,elements?) | slide.update(index?,title?,bullets?,notes?,layout?,transition?,elements?) | slide.add_element(slideIndex?,element:{kind,x,y,w,h,text?}). 960x540 경계·겹침 금지. 활성 슬라이드 밖 조회: read_slides(start,count)."
+        }
         CopilotModule::Slide => {
             "계약: slide.add(title,bullets?,notes?,layout?,transition?,elements?) | slide.update(index?,title?,bullets?,notes?,layout?,transition?,elements?) | slide.add_element(slideIndex?,element:{kind,x,y,w,h,text?}). 960x540 경계·겹침 금지."
         }
@@ -550,6 +553,9 @@ pub fn build_prompt_bundle_for_llm(
             }
             (CopilotModule::Base, true, false) => {
                 r#"현재 읽기 전용 모드(ask)입니다. JSON 래퍼나 수정 작업 없이 사용자의 언어로 간결한 평문/마크다운으로 직접 답하세요. 추가 레코드를 조회할 때만 {"reply":"","toolCalls":[{"name":"read_base_records","offset":50,"limit":20}]} JSON으로 답하세요."#
+            }
+            (CopilotModule::Slide, true, false) => {
+                r#"현재 읽기 전용 모드(ask)입니다. JSON 래퍼나 수정 작업 없이 사용자의 언어로 간결한 평문/마크다운으로 직접 답하세요. 활성 슬라이드가 아닌 슬라이드의 내용을 읽을 때만 {"reply":"","toolCalls":[{"name":"read_slides","start":0,"count":5}]} JSON으로 답하세요."#
             }
             _ => {
                 "현재 읽기 전용 모드(ask)입니다. JSON 래퍼나 수정 작업 없이 사용자의 언어로 간결한 평문/마크다운으로 직접 답하세요."

@@ -254,6 +254,10 @@ pub enum CopilotToolCall {
         limit: usize,
         query: Option<String>,
     },
+    ReadSlides {
+        start: usize,
+        count: usize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -501,6 +505,12 @@ pub fn write_tool_call_json(out: &mut String, tc: &CopilotToolCall) {
                 push_json_str(out, q);
             }
             out.push('}');
+        }
+        CopilotToolCall::ReadSlides { start, count } => {
+            let _ = write!(
+                out,
+                "{{\"name\":\"read_slides\",\"start\":{start},\"count\":{count}}}"
+            );
         }
     }
 }

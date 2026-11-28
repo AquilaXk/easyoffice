@@ -72,7 +72,7 @@ pub fn doc_has_unread_blocks(req: &CopilotRunRequest) -> bool {
 }
 
 /// 현재 요청에 읽기 도구가 실제로 필요한지 판별한다.
-/// DOC/HWP 일반 대화는 `read_doc_blocks`를 상시 노출해 200문단·예산 경계 토글에 의한 캐시 무효화를 막는다.
+/// DOC/HWP 일반 대화는 `read_doc_blocks`를, SLIDE 일반 대화는 `read_slides`를 상시 노출해 200문단·예산 경계 토글에 의한 캐시 무효화를 막는다.
 pub fn has_read_tools(req: &CopilotRunRequest) -> bool {
     if req.lightweight || req.command.is_some() {
         return false;
@@ -84,6 +84,7 @@ pub fn has_read_tools(req: &CopilotRunRequest) -> bool {
             | CopilotModule::Sheet
             | CopilotModule::Pdf
             | CopilotModule::Base
+            | CopilotModule::Slide
     )
 }
 

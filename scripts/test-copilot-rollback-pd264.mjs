@@ -20,6 +20,7 @@ function actions({ restore, epoch }) {
   loadPerformParts(env);
   loadUiModule(UI("copilot-perform.js"), env);
   loadUiModule(UI("copilot-edit-mode.js"), env);
+  loadUiModule(UI("copilot-slide-read.js"), env);
   loadUiModule(UI("copilot-actions.js"), env);
   const calls = [];
   const instance = env.__EASYOFFICE_CREATE_COPILOT_ACTIONS__({

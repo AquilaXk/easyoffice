@@ -48,6 +48,9 @@ pub const MAX_OUTPUT_TOKENS: u32 = 8_192;
 pub const LIGHTWEIGHT_MAX_OUTPUT_TOKENS: u32 = 96;
 pub const MAX_PROMPT_CACHE_KEY_BYTES: usize = 512;
 pub const MAX_SLIDES: usize = 256;
+/// `read_slides` 한 번에 읽는 슬라이드 수 상한과 `count`를 생략했을 때의 값(`copilot-slide-read.js` `MAX_READ_SLIDES`와 같다).
+pub const MAX_READ_SLIDES: usize = 20;
+pub const DEFAULT_READ_SLIDES: usize = 5;
 pub const MAX_SLIDE_BULLETS: usize = 64;
 pub const MAX_SLIDE_ELEMENTS: usize = 64;
 pub const MAX_TEXT_CONTEXT_BYTES: usize = 2 * 1024 * 1024;

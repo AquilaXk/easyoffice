@@ -57,6 +57,7 @@ function makeActions(texts, selectedText = "") {
   loadUiModule(UI("copilot-perform.js"), env);
   loadUiModule(UI("sheet-refs.js"), env);
   loadUiModule(UI("copilot-edit-mode.js"), env);
+  loadUiModule(UI("copilot-slide-read.js"), env);
   loadUiModule(UI("copilot-actions.js"), env);
   const blocks = [];
   const editor = { contains: () => true, querySelectorAll: () => blocks };

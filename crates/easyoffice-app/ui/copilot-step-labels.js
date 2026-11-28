@@ -5,6 +5,8 @@
   // 문구에는 숫자와 셀 범위만 넣는다. 질의어·시트 이름 같은 문서 내용은 넣지 않는다.
   const FALLBACK = "문서 내용 확인";
   const DEFAULT_DOC_SPAN = 50;
+  const DEFAULT_SLIDE_SPAN = 5;
+  const MAX_SLIDE_SPAN = 20;
   const CELL_RANGE = /^[A-Za-z]{1,3}\d{1,7}(?::[A-Za-z]{1,3}\d{1,7})?$/;
 
   const count = (value) => (Number.isInteger(value) && value >= 0 ? value : null);
@@ -27,6 +29,13 @@
     return limit && limit > 1 ? `레코드 ${offset + 1}~${offset + limit} 읽음` : `레코드 ${offset + 1} 읽음`;
   }
 
+  // 슬라이드 번호도 사람이 세는 대로 1부터다. `count`가 없으면 기본 장수, 크면 한 번에 읽는 상한까지만 적는다(엔진 `DEFAULT_READ_SLIDES`·`MAX_READ_SLIDES`).
+  function slides(tc) {
+    const start = count(tc.start) ?? 0;
+    const span = Math.min(MAX_SLIDE_SPAN, Math.max(1, count(tc.count) ?? DEFAULT_SLIDE_SPAN));
+    return span > 1 ? `슬라이드 ${start + 1}~${start + span} 읽음` : `슬라이드 ${start + 1} 읽음`;
+  }
+
   const LABELS = Object.freeze({
     read_doc_blocks: docBlocks,
     read_hwp_paragraphs: docBlocks,
@@ -34,6 +43,7 @@
     find_sheet_cells: () => "시트에서 셀 찾음",
     search_pdf_pages: () => "PDF 쪽 검색",
     read_base_records: baseRecords,
+    read_slides: slides,
   });
 
   /** 조회 도구 호출 하나의 사람용 문구. */

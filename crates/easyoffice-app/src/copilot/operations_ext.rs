@@ -8,8 +8,9 @@ use super::op_types::{
 };
 use super::types::{
     is_valid_a1_coord, is_valid_hex_color, is_valid_range_ref, CopilotModule, CopilotRunRequest,
-    MAX_BASE_FIELDS, MAX_BASE_RECORDS, MAX_BASE_TEXT_BYTES, MAX_BOARD_TEXT_BYTES,
-    MAX_DOC_PARAGRAPHS, MAX_LLM_TOOL_CALLS, MAX_SLIDE_ELEMENTS,
+    DEFAULT_READ_SLIDES, MAX_BASE_FIELDS, MAX_BASE_RECORDS, MAX_BASE_TEXT_BYTES,
+    MAX_BOARD_TEXT_BYTES, MAX_DOC_PARAGRAPHS, MAX_LLM_TOOL_CALLS, MAX_READ_SLIDES, MAX_SLIDES,
+    MAX_SLIDE_ELEMENTS,
 };
 
 const MAX_SLIDE_TABLE_ROWS: usize = 64;
@@ -744,6 +745,21 @@ pub(super) fn validate_base_or_board_op(
     }
 }
 
+/// `read_slides(start, count)`: 둘 다 생략하면 처음 `DEFAULT_READ_SLIDES`장이다. 있는데 음수·소수·문자열이면 호출을 버리고
+/// (Fail-Closed), `count`가 상한을 넘으면 `MAX_READ_SLIDES`로 줄인다. 시작 슬라이드가 `MAX_SLIDES` 밖이면 버린다.
+fn read_slides_call(obj: &[(String, StrictJsonValue)]) -> Option<CopilotToolCall> {
+    let bounded = |key: &str, default: usize| match StrictJsonValue::get_field(obj, key) {
+        None | Some(StrictJsonValue::Null) => Some(default),
+        Some(value) => value.as_u64().and_then(|v| usize::try_from(v).ok()),
+    };
+    let start = bounded("start", 0)?;
+    let count = bounded("count", DEFAULT_READ_SLIDES)?;
+    (start < MAX_SLIDES && count >= 1).then_some(CopilotToolCall::ReadSlides {
+        start,
+        count: count.min(MAX_READ_SLIDES),
+    })
+}
+
 pub fn validate_tool_calls(
     req: &CopilotRunRequest,
     items: &[StrictJsonValue],
@@ -821,6 +837,9 @@ pub fn validate_tool_calls(
                         query,
                     });
                 }
+            }
+            ("read_slides", CopilotModule::Slide) if !req.lightweight => {
+                out.extend(read_slides_call(obj));
             }
             _ => {}
         }
