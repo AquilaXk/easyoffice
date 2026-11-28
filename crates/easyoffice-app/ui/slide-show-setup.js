@@ -49,9 +49,17 @@
     function syncDirection() {
       const effect = kit.val("slide-trans-effect");
       const axis = AXIS_EFFECTS.has(effect);
-      if ($("slide-trans-dir")) $("slide-trans-dir").hidden = axis;
-      if ($("slide-trans-axis")) $("slide-trans-axis").hidden = !axis;
-      for (const id of ["slide-trans-dir", "slide-trans-axis"]) if ($(id)) $(id).disabled = NO_DIRECTION.has(effect);
+      // A select is drawn as a `.custom-select` wrapper, so the wrapper is what is shown or hidden.
+      const show = (id, on) => {
+        const el = $(id);
+        if (!el) return;
+        el.hidden = !on;
+        const wrap = el.parentElement?.classList?.contains("custom-select") ? el.parentElement : el;
+        wrap.style.display = on ? "" : "none";
+        el.disabled = NO_DIRECTION.has(effect);
+      };
+      show("slide-trans-dir", !axis);
+      show("slide-trans-axis", axis);
     }
 
     function openTransition() {
