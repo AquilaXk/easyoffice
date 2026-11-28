@@ -68,14 +68,16 @@ fn the_new_kinds_round_trip_through_xlsx_with_their_plot_groups() {
         series_ref("저가", 'D'),
         series_ref("종가", 'E'),
     ];
-    let mut styling = SheetStyling::default();
-    styling.charts = vec![
-        sheet_chart(ChartKind::Doughnut, four[..1].to_vec()),
-        sheet_chart(ChartKind::Radar, four[..2].to_vec()),
-        sheet_chart(ChartKind::Bubble, four[..2].to_vec()),
-        sheet_chart(ChartKind::Stock, four.clone()),
-        sheet_chart(ChartKind::Combo, four[..3].to_vec()),
-    ];
+    let styling = SheetStyling {
+        charts: vec![
+            sheet_chart(ChartKind::Doughnut, four[..1].to_vec()),
+            sheet_chart(ChartKind::Radar, four[..2].to_vec()),
+            sheet_chart(ChartKind::Bubble, four[..2].to_vec()),
+            sheet_chart(ChartKind::Stock, four.clone()),
+            sheet_chart(ChartKind::Combo, four[..3].to_vec()),
+        ],
+        ..SheetStyling::default()
+    };
     let bytes = OoxmlCodec::pack_xlsx_multi_styled(&sheets(), &[], &[styling]).unwrap();
     let parts = chart_parts(&bytes);
     assert_eq!(parts.len(), 5);

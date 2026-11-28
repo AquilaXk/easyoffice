@@ -44,7 +44,7 @@ impl SlideAspect {
     /// A custom size from EMU sides; `None` when either side is outside the allowed range.
     pub fn custom(cx: u64, cy: u64) -> Option<Self> {
         let ok = |v: u64| (MIN_SLIDE_SIZE_EMU..=MAX_SLIDE_SIZE_EMU).contains(&v);
-        (ok(cx) && ok(cy)).then(|| Self::Custom {
+        (ok(cx) && ok(cy)).then_some(Self::Custom {
             cx: cx as u32,
             cy: cy as u32,
         })

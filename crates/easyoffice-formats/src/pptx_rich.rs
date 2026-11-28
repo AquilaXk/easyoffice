@@ -352,9 +352,9 @@ impl Emit<'_> {
         for (r_idx, row) in rows.iter().enumerate() {
             let _ = write!(out, "<a:tr h=\"{row_emu}\">");
             let cell_fill = fill.filter(|_| !header_row || r_idx == 0);
-            for c_idx in 0..cols {
+            for (c_idx, &covered) in cover[r_idx].iter().enumerate() {
                 let cell = row.get(c_idx).map_or("", String::as_str);
-                match cover[r_idx][c_idx] {
+                match covered {
                     CellCover::Plain => out.push_str("<a:tc>"),
                     CellCover::Origin(s) => {
                         out.push_str("<a:tc");

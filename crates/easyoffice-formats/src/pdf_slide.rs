@@ -299,10 +299,10 @@ fn draw_table(
             Some(0xFFFFFF)
         };
         let t_rgb = contrast_rgb(bg, None);
-        for ci in 0..n_cols {
+        for (ci, &covered) in cover[ri].iter().enumerate() {
             let cx = r.x + ci as f64 * cw;
             // A merged cell is drawn once over the cells it covers.
-            let (span_w, span_h) = match cover[ri][ci] {
+            let (span_w, span_h) = match covered {
                 CellCover::Covered { .. } => continue,
                 CellCover::Origin(s) => (cw * f64::from(s.col_span), rh * f64::from(s.row_span)),
                 CellCover::Plain => (cw, rh),

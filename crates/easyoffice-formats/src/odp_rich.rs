@@ -322,9 +322,9 @@ impl PageEmit<'_> {
                 let cover = cover_map(fx.map_or(&[][..], |f| f.spans.as_slice()), rows.len(), cols);
                 for (r, row) in rows.iter().enumerate() {
                     self.body.push_str("<table:table-row>");
-                    for c in 0..cols {
+                    for (c, &covered) in cover[r].iter().enumerate() {
                         let cell = row.get(c).map_or("", String::as_str);
-                        match cover[r][c] {
+                        match covered {
                             CellCover::Covered { .. } => {
                                 self.body.push_str("<table:covered-table-cell/>");
                                 continue;
