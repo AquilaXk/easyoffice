@@ -9,7 +9,7 @@ const UI = (name) => fileURLToPath(new URL("../crates/easyoffice-app/ui/" + name
 
 function performer({ elements = [], registered = [] } = {}) {
   const env = { __EASYOFFICE_SHEET_UTILS__: { registerDocImage: (...args) => registered.push(args) } };
-  for (const part of ["slide-svg.js", "slide-snap.js", "slide-fx.js", "slide-ext.js", "slide-group.js", "slide-canvas.js"]) loadUiModule(UI(part), env);
+  for (const part of ["slide-svg.js", "slide-snap.js", "slide-fx.js", "slide-ext.js", "slide-group.js", "slide-stage-size.js", "slide-canvas.js"]) loadUiModule(UI(part), env);
   loadPerformParts(env);
   loadUiModule(UI("copilot-perform.js"), env);
   const deck = [{ aspect: "16:9", title: "첫 슬라이드", lower: "", elements }];

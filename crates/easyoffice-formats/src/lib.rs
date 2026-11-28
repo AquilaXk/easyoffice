@@ -106,6 +106,7 @@ mod rich_rtf_table;
 mod rich_rtf_writer;
 mod rich_run_writers;
 pub mod rich_slide;
+pub mod rich_slide_aspect;
 pub mod rich_slide_ext;
 mod rich_table;
 mod rich_table_cells;

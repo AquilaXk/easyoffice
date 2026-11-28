@@ -7,11 +7,7 @@
   const fx = host.__EASYOFFICE_SLIDE_FX__;
   const slideExt = host.__EASYOFFICE_SLIDE_EXT__;
   const groups = host.__EASYOFFICE_SLIDE_GROUP__;
-  const STAGE_SIZES = Object.freeze({
-    "16:9": Object.freeze({ w: 960, h: 540 }),
-    "4:3": Object.freeze({ w: 720, h: 540 }),
-    A4: Object.freeze({ w: 841.89, h: 595.28 }),
-  });
+  const { STAGE_SIZES, isKnownAspect, stageSizeOf, applyStageSize } = host.__EASYOFFICE_SLIDE_STAGE_SIZE__;
   const LAYOUT_LABELS = Object.freeze({
     titleSlide: "제목 슬라이드", titleAndContent: "제목 및 내용",
     sectionHeader: "구역 머리글", twoColumn: "콘텐츠 2개", blank: "빈 화면",
@@ -52,10 +48,6 @@
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const round2 = (v) => Math.round(v * 100) / 100;
   const readU32BE = (u8, at) => (((u8[at] << 24) >>> 0) + (u8[at + 1] << 16) + (u8[at + 2] << 8) + u8[at + 3]) >>> 0;
-  const stageSizeOf = (aspect, orientation = "landscape") => {
-    const base = STAGE_SIZES[aspect] || STAGE_SIZES["16:9"];
-    return orientation === "portrait" ? { w: base.h, h: base.w } : base;
-  };
   const normalizeLayout = (raw) => (Object.hasOwn(LAYOUT_LABELS, raw) ? raw : "titleAndContent");
   const normalizeTransition = (raw) => (TRANSITIONS.has(raw) ? raw : "none");
 
@@ -271,7 +263,7 @@
   function serializeDeckPayload(slideDeckState, document, extractEditableDocumentText) {
     const utils = host.__EASYOFFICE_SHEET_UTILS__;
     const rawAspect = slideDeckState[0]?.aspect;
-    const aspect = Object.hasOwn(STAGE_SIZES, rawAspect) ? rawAspect : "16:9";
+    const aspect = isKnownAspect(rawAspect) ? rawAspect : "16:9";
     const orientation = slideDeckState[0]?.orientation === "portrait" ? "portrait" : "landscape";
     const pictures = slideExt.pictureTable();
     const slides = slideDeckState.map((s) => {
@@ -303,7 +295,7 @@
 
 
   function hydrateDecodedDeck(res, createEmptySlideStyleFields) {
-    const aspect = Object.hasOwn(STAGE_SIZES, res?.aspect) ? res.aspect : "16:9";
+    const aspect = isKnownAspect(res?.aspect) ? res.aspect : "16:9";
     const deckOrientation = res?.orientation === "portrait" ? "portrait" : "landscape";
     const srcSlides = Array.isArray(res?.slides) && res.slides.length > 0
       ? res.slides.slice(0, MAX_SLIDES)
@@ -491,7 +483,7 @@
     let selectedId = null, selectedIds = new Set(), snapEnabled = true, activeDrag = null, editingSessionKey = "", onElementDblClick = null;
 
     const say = (msg) => { const fb = $("status-command-feedback"); if (fb) fb.textContent = msg; };
-    const currentAspect = () => (Object.hasOwn(STAGE_SIZES, deck[0]?.aspect) ? deck[0].aspect : "16:9");
+    const currentAspect = () => (isKnownAspect(deck[0]?.aspect) ? deck[0].aspect : "16:9");
     const currentOrientation = () => (deck[0]?.orientation === "portrait" ? "portrait" : "landscape");
     const currentSlide = () => deck[getActiveSlideIndex()] || deck[0] || null;
     function ensureElements(slide = currentSlide()) {
@@ -976,7 +968,7 @@
 
   host.__EASYOFFICE_SLIDE_CANVAS_CODEC__ = {
     STAGE_SIZES, LAYOUT_LABELS, SHAPE_LABELS, CHART_LABELS, TRANSITION_LABELS,
-    stageSizeOf, normalizeLayout, normalizeTransition, normalizeHex6,
+    stageSizeOf, applyStageSize, normalizeLayout, normalizeTransition, normalizeHex6,
     normalizeSlideElement, serializeDeckPayload, hydrateDecodedDeck, renderStaticElementsLayer,
     buildElementDom, positionElementDom, parseImageHeader: parseImageHeaderFallback,
   };

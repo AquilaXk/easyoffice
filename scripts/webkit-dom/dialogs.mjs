@@ -201,6 +201,7 @@ const SLIDE_DIALOGS = [
   ["쇼 설정", "slide-show-dialog", [slideAct("show-setup")]],
   ["화면 전환", "slide-trans-dialog", [slideAct("transition-dialog")]],
   ["색 구성표", "slide-colors-dialog", [slideAct("color-scheme")]],
+  ["슬라이드 크기", "slide-size-dialog", [slideAct("slide-size")]],
   ["슬라이드 글꼴", "doc-font-dialog", [slideAct("font-dialog", { withElement: true })]],
   ["마스터 레이아웃", "slide-layout-dialog", [click('[data-studio-menu-cmd="slide-mod-master"]')]],
   ["도형", "slide-shape-dialog", [slideDialog("openShapeDialog")]],

@@ -606,7 +606,7 @@ pub(crate) fn write_slide_deck_decode_fields(
     let _ = write!(
         out,
         "\"aspect\":\"{}\",\"orientation\":\"{}\"",
-        deck.aspect.as_str(),
+        deck.aspect.to_wire(),
         deck.orientation.as_str()
     );
     crate::slide_ext_json::write_deck_settings(out, &deck.settings, push_str);
@@ -688,7 +688,7 @@ pub(crate) fn write_slide_deck_readback(
     let _ = write!(
         out,
         "\"aspect\":\"{}\",\"orientation\":\"{}\",\"slideCount\":{},\"slidesTruncated\":{truncated},\"slides\":[",
-        deck.aspect.as_str(),
+        deck.aspect.to_wire(),
         deck.orientation.as_str(),
         deck.slides.len()
     );

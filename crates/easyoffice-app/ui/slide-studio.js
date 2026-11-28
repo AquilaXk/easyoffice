@@ -6,7 +6,7 @@
   // black/white screen, presenter view). Every mutation goes through the workspace undo snapshot
   // and autosave activity hook; the slide model itself stays in `slideDeckState` so save,
   // open and autosave keep reading one source of truth.
-  const ASPECTS = new Set(["16:9", "4:3", "A4"]);
+  const pageSize = host.__EASYOFFICE_SLIDE_STAGE_SIZE__;
   const ASPECT_CYCLE = ["16:9", "4:3", "A4"];
   const THUMB_REFRESH_MS = 150;
   const EMPTY_TITLE_LABEL = "(제목 없음)";
@@ -135,7 +135,7 @@
 
     function deckAspect() {
       const raw = deck[0]?.aspect;
-      return ASPECTS.has(raw) ? raw : "16:9";
+      return pageSize.isKnownAspect(raw) ? raw : "16:9";
     }
 
     function deckOrientation() {
@@ -213,13 +213,28 @@
     const operations = { add: addSlide, duplicate: duplicateSlide, remove: removeSlide, moveUp, moveDown, toggleHidden };
 
     function setDeckAspect(value, options = {}) {
-      if (!ASPECTS.has(value) || value === deckAspect()) return;
+      if (!pageSize.isKnownAspect(value) || value === deckAspect()) return;
       if (options.recordUndo !== false) pushUndoSnapshot(false);
       deck.forEach((s) => {
         s.aspect = value;
       });
       getPanels().renderSlideDeck(getActiveSlideIndex());
       noteActivity();
+    }
+
+    // The page size dialog (슬라이드 크기): the aspect (a preset or `custom:<cx>x<cy>`) and the orientation in one undo step.
+    // An object outside the new page stays where it is, as in the presentation program; the editor clamps it on its next move.
+    function setDeckSize(value, orientation, options = {}) {
+      const nextOrientation = orientation === "portrait" ? "portrait" : "landscape";
+      if (!pageSize.isKnownAspect(value) || (value === deckAspect() && nextOrientation === deckOrientation())) return false;
+      if (options.recordUndo !== false) pushUndoSnapshot(false);
+      deck.forEach((s) => {
+        s.aspect = value;
+        s.orientation = nextOrientation;
+      });
+      getPanels().renderSlideDeck(getActiveSlideIndex());
+      noteActivity();
+      return true;
     }
 
     function cycleDeckAspect(options = {}) {
@@ -338,12 +353,11 @@
       const layout = deck[activeIdx]?.layout || "titleAndContent";
       const stage = byId("slide-stage-box");
       if (stage) {
-        stage.dataset.aspect = aspect;
-        stage.dataset.orientation = orientation;
+        pageSize.applyStageSize(stage, aspect, orientation);
         stage.dataset.layout = layout;
       }
       const select = byId("slide-aspect-select");
-      if (select) select.value = aspect;
+      if (select) select.value = pageSize.customSizeOf(aspect) ? "custom" : aspect;
       const layoutSel = byId("slide-layout-select");
       if (layoutSel) layoutSel.value = layout;
       if (stage) host.__EASYOFFICE_SLIDE_EXT__?.paintStage(document, stage, deck[activeIdx], activeIdx, slideCanvas?.stageSize?.() || { w: 960, h: 540 });
@@ -557,8 +571,7 @@
       const slide = deck[showIdx];
       const viewport = byId("slide-show-viewport");
       if (!slide || !viewport) return;
-      viewport.dataset.aspect = deckAspect();
-      viewport.dataset.orientation = deckOrientation();
+      pageSize.applyStageSize(viewport, deckAspect(), deckOrientation());
       const frame = buildSlideFrame(slide, showIdx);
       frame.id = "slide-show-frame";
       frame.querySelector("h2").id = "slide-show-title";
@@ -762,7 +775,12 @@
       };
       for (const [id, run] of Object.entries(clicks)) byId(id)?.addEventListener("click", run);
       const aspect = byId("slide-aspect-select");
-      aspect?.addEventListener("change", () => setDeckAspect(aspect.value));
+      // "사용자 지정" opens the size dialog; the select goes back to the size the deck has until the dialog applies another.
+      aspect?.addEventListener("change", () => {
+        if (aspect.value !== "custom") return setDeckAspect(aspect.value);
+        aspect.value = pageSize.customSizeOf(deckAspect()) ? "custom" : deckAspect();
+        host.__EASYOFFICE_SLIDE_RUN_ACT__?.("slide-size");
+      });
     }
 
     function bind() {
@@ -789,6 +807,7 @@
       moveUp,
       moveDown,
       setDeckAspect,
+      setDeckSize,
       cycleDeckAspect,
       toggleDeckOrientation,
       appendLink,

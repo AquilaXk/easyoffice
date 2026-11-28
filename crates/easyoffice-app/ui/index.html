@@ -663,6 +663,14 @@
               <div class="md-item" data-kinds="SLIDE" data-slide-act="format-background" role="menuitem" tabindex="-1"><span class="md-label">배경 서식…</span></div>
               <div class="md-item" data-kinds="SLIDE" data-slide-act="header-footer" role="menuitem" tabindex="-1"><span class="md-label">머리글 및 바닥글…</span></div>
               <div class="md-item" data-kinds="SLIDE" data-slide-act="color-scheme" role="menuitem" tabindex="-1"><span class="md-label">색 구성표…</span></div>
+              <div class="md-sub" data-kinds="SLIDE" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">슬라이드 크기</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="슬라이드 크기">
+                  <button type="button" class="md-item" data-slide-act="slide-size-4x3" role="menuitem" tabindex="-1"><span class="md-label">표준(4:3)</span></button>
+                  <button type="button" class="md-item" data-slide-act="slide-size-16x9" role="menuitem" tabindex="-1"><span class="md-label">와이드스크린(16:9)</span></button>
+                  <button type="button" class="md-item" data-slide-act="slide-size" role="menuitem" tabindex="-1"><span class="md-label">사용자 지정 슬라이드 크기…</span></button>
+                </div>
+              </div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="layout-orientation" role="menuitem" tabindex="-1"><span class="md-label">용지 방향</span></div>
             </div>
@@ -1496,6 +1504,7 @@
                   <option value="16:9" selected>16:9</option>
                   <option value="4:3">4:3</option>
                   <option value="A4">A4</option>
+                  <option value="custom">사용자 지정</option>
                 </select>
                 <label for="slide-layout-select" class="sb-size-unit">레이아웃</label>
                 <select id="slide-layout-select" class="sb-combo slide-layout-select">
@@ -3980,6 +3989,26 @@
         </div>
       </div>
     </dialog>
+    <dialog id="slide-size-dialog" class="tool-dialog" aria-labelledby="slide-size-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="slide-size-dialog-title">슬라이드 크기</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="slide-size-kind">슬라이드 크기 지정(<span class="dialog-key">S</span>)</label><select id="slide-size-kind" class="sb-combo dialog-select"></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="slide-size-w">너비(<span class="dialog-key">W</span>)</label><input id="slide-size-w" type="number" min="2.54" max="141.12" step="0.01" value="33.87" class="dialog-input" /><span class="dialog-unit">cm</span></div>
+          <div class="dialog-row"><label class="dialog-label" for="slide-size-h">높이(<span class="dialog-key">E</span>)</label><input id="slide-size-h" type="number" min="2.54" max="141.12" step="0.01" value="19.05" class="dialog-input" /><span class="dialog-unit">cm</span></div>
+          <fieldset class="dialog-group">
+            <legend>방향</legend>
+            <div class="dialog-row"><label class="dialog-checkbox"><input id="slide-size-landscape" type="radio" name="slide-size-orientation" value="landscape" checked /><span>가로(<span class="dialog-key">L</span>)</span></label></div>
+            <div class="dialog-row"><label class="dialog-checkbox"><input id="slide-size-portrait" type="radio" name="slide-size-orientation" value="portrait" /><span>세로(<span class="dialog-key">P</span>)</span></label></div>
+          </fieldset>
+          <p id="slide-size-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-slide-size-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
     <dialog id="slide-anim-dialog" class="tool-dialog" aria-labelledby="slide-anim-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="slide-anim-dialog-title">애니메이션 창</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -4257,6 +4286,7 @@
     <script src="./slide-fx.js"></script>
     <script src="./slide-ext.js"></script>
     <script src="./slide-group.js"></script>
+    <script src="./slide-stage-size.js"></script>
     <script src="./slide-canvas.js"></script>
     <script src="./slide-clipboard.js"></script>
     <script src="./slide-context-menu.js"></script>
@@ -4270,6 +4300,7 @@
     <script src="./slide-show-setup.js"></script>
     <script src="./slide-show-timing.js"></script>
     <script src="./slide-colors.js"></script>
+    <script src="./slide-size.js"></script>
     <script src="./slide-table.js"></script>
     <script src="./slide-show-anim.js"></script>
     <script src="./doc-symbol-dialog.js"></script>

@@ -58,8 +58,7 @@
       cell.draggable = true;
       const thumb = document.createElement("span");
       thumb.className = "slide-sorter-thumb";
-      thumb.dataset.aspect = ops.deckAspect();
-      thumb.dataset.orientation = ops.deckOrientation();
+      host.__EASYOFFICE_SLIDE_STAGE_SIZE__.applyStageSize(thumb, ops.deckAspect(), ops.deckOrientation());
       thumb.appendChild(ops.buildFrame(slide, idx));
       const num = document.createElement("span");
       num.className = "slide-sorter-num";

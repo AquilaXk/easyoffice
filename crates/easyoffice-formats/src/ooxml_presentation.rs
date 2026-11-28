@@ -16,7 +16,7 @@ use crate::pptx_master::{
 use crate::rich_image_writers::MediaParts;
 use crate::rich_slide::{
     RichSlideDeck, SlideAspect, SlideChartSeries, SlideMasterLayout, SlideOrientation,
-    MAX_SLIDE_CHART_POINTS, MAX_SLIDE_CHART_SERIES,
+    MAX_SLIDE_CHART_POINTS, MAX_SLIDE_CHART_SERIES, MAX_SLIDE_SIZE_EMU, MIN_SLIDE_SIZE_EMU,
 };
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_balanced_elements, extract_tag_bodies,
@@ -134,6 +134,14 @@ pub(crate) fn parse_slide_size_aspect(
             ));
         };
         if cx > 0 && cy > 0 {
+            // Fail-Closed: a size outside 1 inch to the coordinate cap is not scaled into a preset.
+            if !(MIN_SLIDE_SIZE_EMU..=MAX_SLIDE_SIZE_EMU).contains(&cx.min(cy))
+                || !(MIN_SLIDE_SIZE_EMU..=MAX_SLIDE_SIZE_EMU).contains(&cx.max(cy))
+            {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                    "PPTX 슬라이드 크기(p:sldSz {cx}×{cy})가 허용 범위(최소 {MIN_SLIDE_SIZE_EMU}, 최대 {MAX_SLIDE_SIZE_EMU} EMU)를 벗어났습니다."
+                )));
+            }
             return Ok(SlideAspect::from_emu_oriented(cx, cy));
         }
     }

@@ -365,8 +365,7 @@
       page.dataset.orientation = orientation;
       const stage = document.createElement("div");
       stage.className = "slide-stage";
-      stage.dataset.aspect = aspect;
-      stage.dataset.orientation = orientation;
+      host.__EASYOFFICE_SLIDE_STAGE_SIZE__.applyStageSize(stage, aspect, orientation);
       stage.dataset.layout = slide.layout || "titleAndContent";
       const titleZone = document.createElement("div");
       titleZone.className = "slide-title-zone";
@@ -395,9 +394,11 @@
 
     function buildSlides(rules) {
       if (slideDeckState.length === 0) throw new Error(MSG_EMPTY);
-      const aspect = Object.hasOwn(SLIDE_PAPER_MM, slideDeckState[0].aspect) ? slideDeckState[0].aspect : DEFAULT_ASPECT;
+      // A custom page size prints on a page of its own ratio, 297 mm on the long side.
+      const custom = host.__EASYOFFICE_SLIDE_STAGE_SIZE__.customSizeOf(slideDeckState[0].aspect);
+      const aspect = custom || Object.hasOwn(SLIDE_PAPER_MM, slideDeckState[0].aspect) ? slideDeckState[0].aspect : DEFAULT_ASPECT;
       const deckOrientation = slideDeckState[0].orientation === "portrait" ? "portrait" : "landscape";
-      const [baseW, baseH] = SLIDE_PAPER_MM[aspect];
+      const [baseW, baseH] = custom ? [297, Math.round((297 * custom.h * 10) / custom.w) / 10] : SLIDE_PAPER_MM[aspect];
       const [widthMm, heightMm] = deckOrientation === "portrait" ? [baseH, baseW] : [baseW, baseH];
       const paperClass = rules.classFor(widthMm, heightMm);
       // Hidden slides are not printed; a deck of nothing but hidden slides prints all of them. The slide

@@ -21,7 +21,7 @@ const STATUS_PARAGRAPHS = new Set([
   "sheet-link-status", "sheet-table-status", "sheet-ts-status", "sheet-dedupe-status", "sheet-slicer-status", "sheet-chart-status",
   "sheet-size-status", "sheet-cell-shift-status", "sheet-tc-status", "sheet-goto-status", "sheet-special-status", "sheet-subtotal-status",
   "sheet-image-status", "sheet-note-status",
-  "slide-fmt-status", "slide-para-status", "slide-bg-status", "slide-footer-status", "slide-anim-status", "slide-show-status", "slide-trans-status", "slide-colors-status",
+  "slide-fmt-status", "slide-para-status", "slide-bg-status", "slide-footer-status", "slide-anim-status", "slide-show-status", "slide-trans-status", "slide-colors-status", "slide-size-status",
   "slide-layout-status", "slide-shape-status", "slide-table-status", "slide-chart-status", "slide-image-status",
   "doc-stats-status", "doc-mailmerge-status", "doc-shape-status", "doc-chart-status", "doc-fn-status",
   "export-dialog-status",

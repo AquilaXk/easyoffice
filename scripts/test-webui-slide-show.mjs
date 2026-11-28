@@ -394,7 +394,7 @@ test("stage keeps the deck aspect ratio (16:9, 4:3, A4) and scales its text with
   const select = $(document, "slide-aspect-select");
   assert.deepEqual(
     select.querySelectorAll("option").map((o) => o.getAttribute("value")),
-    ["16:9", "4:3", "A4"]
+    ["16:9", "4:3", "A4", "custom"]
   );
   assert.equal(stage.dataset.aspect, "16:9");
   select.value = "4:3";
