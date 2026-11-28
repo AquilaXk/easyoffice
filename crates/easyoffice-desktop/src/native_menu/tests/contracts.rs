@@ -657,7 +657,7 @@ fn label_for_separates_hwp_and_office_terms_and_all_menus_stay_synced() {
     );
     assert_eq!(
         label_for(MenuKind::Doc, spec("tool:review-stats")),
-        "단어 개수"
+        "단어 수"
     );
     assert_eq!(label_for(MenuKind::Hwp, spec("insert:field")), "필드 입력");
     assert_eq!(

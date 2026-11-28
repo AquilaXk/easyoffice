@@ -951,3 +951,20 @@
 #eo-print-root .eo-run[data-eo-subscript="true"],
 #eo-print-root sub { vertical-align: sub; font-size: 0.78em; line-height: 0; }
 .doc-inline-table td > p { margin: 0; }
+/* Picture wrap (PD-395): the text goes along a floated picture; "위/아래" is the block picture the editor already has; the pictures
+   behind and in front of the text float too, the one behind is paler so the text above it stays readable. */
+.doc-inline-image.eo-wrap-square,
+.doc-inline-image.eo-wrap-behind,
+.doc-inline-image.eo-wrap-front { float: left; margin: 0.25em 1em 0.25em 0; }
+.doc-inline-image.eo-wrap-topBottom { clear: both; }
+.doc-inline-image.eo-wrap-behind { opacity: 0.55; }
+.doc-inline-image.eo-wrap-front { position: relative; z-index: 1; }
+/* The rotate handle above the selection frame, and the four cut handles that replace the size handles while 자르기 is on. */
+.doc-image-rotate-handle { left: calc(50% - 4px); top: -26px; border-radius: 50%; cursor: grab; }
+.doc-image-crop-handle { display: none; }
+.doc-image-resizer.is-cropping .doc-image-crop-handle { display: block; }
+.doc-image-resizer.is-cropping [data-resize-dir] { display: none; }
+.doc-image-crop-handle[data-crop-dir="n"] { left: calc(50% - 8px); top: -5px; width: 16px; cursor: ns-resize; }
+.doc-image-crop-handle[data-crop-dir="s"] { left: calc(50% - 8px); bottom: -5px; width: 16px; cursor: ns-resize; }
+.doc-image-crop-handle[data-crop-dir="w"] { left: -5px; top: calc(50% - 8px); height: 16px; cursor: ew-resize; }
+.doc-image-crop-handle[data-crop-dir="e"] { right: -5px; top: calc(50% - 8px); height: 16px; cursor: ew-resize; }

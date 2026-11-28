@@ -99,6 +99,30 @@ test("서식 복사 is dropped by a second use of the command and by Esc", async
   assert.equal(tools(h).isArmed(), false);
 });
 
+test("서식 복사 has a 홈 toolbar button with the paintbrush icon, and Ctrl+Shift+C and Ctrl+Shift+V copy and paste a format", async () => {
+  const h = await createRunHarness([p("가나다"), p("라마바")]);
+  const button = h.document.querySelector('.tb-btn[data-studio-cmd="format-painter"]');
+  assert.ok(button, "the toolbar button");
+  assert.equal(button.querySelector("[data-icon]").getAttribute("data-icon"), "paintbrush");
+  assert.match(button.getAttribute("title"), /서식 복사/);
+  format(h, h.blocks[0], { bold: true, color: "FF0000" });
+  await selectAll(h, h.blocks[0]);
+  const press = async (key, extra = {}) => {
+    const ev = { type: "keydown", key, ctrlKey: true, shiftKey: true, target: h.editor, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...extra };
+    h.document.dispatchEvent(ev);
+    await flushAsyncTurns(8);
+    return ev;
+  };
+  assert.equal((await press("C")).defaultPrevented, true);
+  assert.equal(feedback(h), "서식을 적용할 글을 선택하세요");
+  await selectAll(h, h.blocks[1]);
+  await press("V");
+  const second = saved(h)[1].runs[0];
+  assert.deepEqual([second.bold, second.color], [true, "FF0000"]);
+  assert.equal((await press("C", { shiftKey: false })).defaultPrevented, false, "Ctrl+C alone is the copy of the text");
+  assert.equal((await press("C", { altKey: true })).defaultPrevented, false);
+});
+
 test("붙여넣기 옵션 > 텍스트만 유지 pastes the plain text of the clipboard, not its HTML", async () => {
   const sys = {
     items: [],

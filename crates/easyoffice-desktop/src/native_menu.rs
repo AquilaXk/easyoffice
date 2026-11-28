@@ -231,7 +231,7 @@ pub fn label_for(kind: MenuKind, spec: &MenuItemSpec) -> &'static str {
             "view:zoom-fit-width" => return "페이지 너비",
             "view:ctrl-marks" => return "모든 서식 표시",
             "view:para-marks" => return "단락 표시",
-            "tool:review-stats" => return "단어 개수",
+            "tool:review-stats" => return "단어 수",
             "insert:symbol" => return "기호",
             "format:para-numbering" => return "번호 매기기",
             "format:para-bullet" => return "글머리 기호",

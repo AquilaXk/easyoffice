@@ -710,7 +710,7 @@
         blocks.push({ type: "paragraph", runs: [{ text: alt || "[그림]" }] });
         return;
       }
-      const block = { type: "image", format: stored.format, base64: stored.base64, alt };
+      const block = { type: "image", format: stored.format, base64: stored.base64, alt, ...host.__EASYOFFICE_DOC_WORD_MODEL__?.imageFlags(node) };
       const width = Number(data.eoImageWidthEmu);
       const height = Number(data.eoImageHeightEmu);
       if (width > 0 && height > 0) Object.assign(block, { widthEmu: width, heightEmu: height });

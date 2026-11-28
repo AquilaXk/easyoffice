@@ -102,7 +102,76 @@
     return Number.isInteger(rows) && rows > 0 ? { headerRows: rows } : {};
   };
 
+  // ---- pictures: wrap, crop and rotation (the data of `img.doc-inline-image`; the engine keeps the same three)
+
+  const IMAGE_WRAPS = ["inline", "square", "topBottom", "behind", "front"];
+  const MAX_CROP_SIDE = 99000;
+  const isCropSide = (v) => Number.isInteger(v) && v >= 0 && v <= MAX_CROP_SIDE;
+
+  // The layout a picture element holds, each part checked; a part that is not valid reads as its default.
+  function imageLayoutOf(node) {
+    const data = node.dataset || {};
+    const wrap = IMAGE_WRAPS.includes(data.eoImageWrap) ? data.eoImageWrap : "inline";
+    const sides = String(data.eoImageCrop ?? "").split(",").map(Number);
+    const [left, top, right, bottom] = sides;
+    const valid = sides.length === 4 && sides.every(isCropSide) && left + right <= MAX_CROP_SIDE && top + bottom <= MAX_CROP_SIDE;
+    const rotation = Number(data.eoImageRotation);
+    return {
+      wrap,
+      crop: valid ? { left, top, right, bottom } : { left: 0, top: 0, right: 0, bottom: 0 },
+      rotation: Number.isInteger(rotation) && rotation > 0 && rotation < 360 ? rotation : 0,
+    };
+  }
+
+  // The payload keys of a picture (`wrap`, `crop`, `rotation`): only what differs from a picture in the line, whole and upright.
+  function imageFlags(node) {
+    const { wrap, crop, rotation } = imageLayoutOf(node);
+    const out = {};
+    if (wrap !== "inline") out.wrap = wrap;
+    if (crop.left || crop.top || crop.right || crop.bottom) out.crop = crop;
+    if (rotation) out.rotation = rotation;
+    return out;
+  }
+
+  const permille = (v) => String(Math.round(v) / 1000) + "%";
+
+  // How a layout looks in the editor: the wrap is a class, the crop hides the cut sides (the frame keeps its size), the turn is
+  // a rotation. `className` is the whole class list of the picture.
+  function imageVisual(layout) {
+    const { wrap, crop, rotation } = layout;
+    const cut = crop.left || crop.top || crop.right || crop.bottom;
+    return {
+      className: "doc-inline-image" + (wrap === "inline" ? "" : " eo-wrap-" + wrap),
+      transform: rotation ? "rotate(" + rotation + "deg)" : "",
+      clipPath: cut ? "inset(" + [crop.top, crop.right, crop.bottom, crop.left].map(permille).join(" ") + ")" : "",
+    };
+  }
+
+  // The data of a layout on a picture element or a spec (`target.dataset` / `spec.data`); the defaults leave no data.
+  function imageData(layout) {
+    const data = {};
+    const { wrap, crop, rotation } = layout;
+    if (wrap !== "inline") data.eoImageWrap = wrap;
+    if (crop.left || crop.top || crop.right || crop.bottom) data.eoImageCrop = [crop.left, crop.top, crop.right, crop.bottom].join(",");
+    if (rotation) data.eoImageRotation = String(rotation);
+    return data;
+  }
+
+  // The layout of a decoded picture block on its spec.
+  function image(spec, block) {
+    const crop = block.crop && typeof block.crop === "object" ? block.crop : {};
+    const holder = { dataset: { eoImageWrap: block.wrap, eoImageCrop: [crop.left ?? 0, crop.top ?? 0, crop.right ?? 0, crop.bottom ?? 0].join(","), eoImageRotation: String(block.rotation ?? 0) } };
+    const layout = imageLayoutOf(holder);
+    Object.assign(spec.data, imageData(layout));
+    const visual = imageVisual(layout);
+    spec.attrs.class = visual.className;
+    if (visual.transform) spec.style.transform = visual.transform;
+    if (visual.clipPath) spec.style.clipPath = visual.clipPath;
+    return spec;
+  }
+
   host.__EASYOFFICE_DOC_WORD_MODEL__ = {
-    FIELD_CLASS, SECTION_BREAKS, isBookmarkName, isFieldCode, runSpecs, paragraph, table, carry, sameMarks, applyMarks, bookmarkRun, paragraphFlags, tableFlags,
+    FIELD_CLASS, SECTION_BREAKS, IMAGE_WRAPS, MAX_CROP_SIDE, isBookmarkName, isFieldCode, runSpecs, paragraph, table, carry, sameMarks, applyMarks, bookmarkRun, paragraphFlags, tableFlags,
+    imageLayoutOf, imageFlags, imageVisual, imageData, image,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

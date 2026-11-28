@@ -2,7 +2,7 @@
   "use strict";
 
   // The wording of the document window's status bar. The word processor window shows what the Word program's status bar
-  // shows (`N/M 페이지`, `단어 N개`, the word count opening the 단어 개수 dialog); the Hangul and Pages windows keep the
+  // shows (`N/M 페이지`, `N개 단어`, the word count opening the 단어 수 dialog); the Hangul and Pages windows keep the
   // position (단·줄·칸) and section words of their own products.
 
   function statusTexts({ word, current, total, cols, line, col, words, insertMode }) {
@@ -10,7 +10,7 @@
       return {
         pos: current + "/" + total + " 페이지",
         zone: current + " / " + total + " 페이지 · " + insertMode,
-        wordCount: "단어 " + words + "개",
+        wordCount: words + "개 단어",
       };
     }
     return {

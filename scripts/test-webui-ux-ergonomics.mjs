@@ -131,7 +131,7 @@ test("DOC and HWP module-specific ribbon tools build real DOM structures and dir
   await flushAsyncTurns(6);
   const statsDlg = document.getElementById("doc-stats-dialog");
   assert.equal(statsDlg.open, true, "review-stats opens document statistics dialog");
-  assert.equal(document.getElementById("doc-stats-title").textContent, "단어 개수");
+  assert.equal(document.getElementById("doc-stats-title").textContent, "단어 수");
   assert.deepEqual(Array.from(document.querySelectorAll("#doc-stats-grid dt"), (el) => el.textContent), ["페이지", "단어", "문자(공백 제외)", "문자(공백 포함)", "단락", "줄"]);
   pressEsc(statsDlg);
   assert.equal(statsDlg.open, false);
@@ -754,7 +754,7 @@ test("Slice 1: table sort/fn wizard, validation non-audit, rightIndentTwips roun
   document.dispatchEvent({ type: "selectionchange" });
   // The word processor window's status bar shows the page and the word count, not the line and column of the caret.
   assert.match(document.getElementById("status-studio-pos").textContent, /^1\/\d+ 페이지$/);
-  assert.match(document.getElementById("status-word-count").textContent, /^단어 \d+개$/);
+  assert.match(document.getElementById("status-word-count").textContent, /^\d+개 단어$/);
 
   userClick(document.getElementById("status-insert-mode"));
   assert.equal(document.getElementById("status-insert-mode").textContent, "수정");

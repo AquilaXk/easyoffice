@@ -3,6 +3,7 @@
 export const WORD_WEB_ONLY = new Set([
   "para-dialog",
   "format-painter",
+  "format-paste",
   "format-clear",
   "paste-text-only",
   "doc-properties",
@@ -20,4 +21,12 @@ export const WORD_WEB_ONLY = new Set([
   "table-header-repeat",
   "table-from-text",
   "table-to-text",
+  "image-wrap-inline",
+  "image-wrap-square",
+  "image-wrap-topBottom",
+  "image-wrap-behind",
+  "image-wrap-front",
+  "image-crop",
+  "image-rotate-right",
+  "image-rotate-left",
 ]);

@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // What the word processor window counts for the 단어 개수 dialog and the status bar: words, characters with and
+  // What the word processor window counts for the 단어 수 dialog and the status bar: words, characters with and
   // without spaces, paragraphs and lines of the body (tables included) and, when asked, of the footnotes and
   // endnotes. The page header and footer, the review comments and the format marks are not text of the document.
   // Words are runs of non-space characters (the Word program counts the same way); a paragraph is a block with no block

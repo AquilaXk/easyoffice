@@ -136,7 +136,7 @@
   };
 
   // The word processor window names the word count as the Word program does.
-  const DOC_CATALOG_TITLES = { "review-stats": "단어 개수" };
+  const DOC_CATALOG_TITLES = { "review-stats": "단어 수" };
 
   function buildRibbonCatalog() {
     const prefixes = {
@@ -381,6 +381,10 @@
     // The page break is made by the document editor itself (doc-pages.js); the menu item and the palette run the same command.
     { keys: "Ctrl+Enter", action: "doc-page-break", module: "DOC", external: true },
     { keys: "Ctrl+Shift+=", action: "home-superscript", module: "DOC", external: true },
+    // 서식 복사 and 서식 붙여넣기 of the document window are made by doc-format-tools.js (a keydown on the editor). Ctrl+Shift+C
+    // is a browser key (the element picker), so it is listed as a desktop shell key like Ctrl+N.
+    { keys: "Ctrl+Shift+C", action: "format-painter", module: "DOC", desktopOnly: true, external: true },
+    { keys: "Ctrl+Shift+V", action: "format-paste", module: "DOC", external: true },
     // The 골라 붙이기 dialog is opened by the grid's own key handler (sheet-input.js); the menu item and the palette run the same command.
     { keys: "Ctrl+Alt+V", action: "sheet-paste-special", module: "SHEET", external: true },
     // Pivot refresh is handled by the pivot bar's key listener when the active cell is inside a pivot table (PD-255).

@@ -186,7 +186,7 @@
               <div class="md-sub" data-kinds="DOC" role="menuitem" aria-haspopup="menu" tabindex="-1">
                 <span class="md-label">기호</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
                 <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="기호">
-                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="mod-symbol" role="menuitem" tabindex="-1"><span class="md-label">기타 기호…</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="mod-symbol" role="menuitem" tabindex="-1"><span class="md-label">다른 기호…</span></div>
                 </div>
               </div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="mod-symbol" role="menuitem" tabindex="-1"><span class="md-label">문자표</span></div>
@@ -258,8 +258,23 @@
               <div class="md-item" data-kinds="DOC PAGES HWP" data-studio-menu-cmd="home-subscript" role="menuitem" tabindex="-1"><span class="md-label">아래 첨자</span><span class="md-shortcut">Ctrl+=</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="font-dialog" role="menuitem" tabindex="-1"><span class="md-label">글꼴…</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="para-dialog" role="menuitem" tabindex="-1"><span class="md-label">단락…</span></div>
-              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="format-painter" role="menuitem" tabindex="-1"><span class="md-label">서식 복사</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="format-painter" role="menuitem" tabindex="-1"><span class="md-label">서식 복사</span><span class="md-shortcut">Ctrl+Shift+C</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="format-paste" role="menuitem" tabindex="-1"><span class="md-label">서식 붙여넣기</span><span class="md-shortcut">Ctrl+Shift+V</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="format-clear" role="menuitem" tabindex="-1"><span class="md-label">모든 서식 지우기</span></div>
+              <div class="md-sub" data-kinds="DOC" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">그림 서식</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="그림 서식">
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="image-wrap-inline" role="menuitem" tabindex="-1"><span class="md-label">줄 안</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="image-wrap-square" role="menuitem" tabindex="-1"><span class="md-label">정사각형</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="image-wrap-topBottom" role="menuitem" tabindex="-1"><span class="md-label">위/아래</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="image-wrap-behind" role="menuitem" tabindex="-1"><span class="md-label">텍스트 뒤</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="image-wrap-front" role="menuitem" tabindex="-1"><span class="md-label">텍스트 앞</span></div>
+                  <div class="md-sep"></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="image-crop" role="menuitem" tabindex="-1"><span class="md-label">자르기</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="image-rotate-right" role="menuitem" tabindex="-1"><span class="md-label">오른쪽으로 90도 회전</span></div>
+                  <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="image-rotate-left" role="menuitem" tabindex="-1"><span class="md-label">왼쪽으로 90도 회전</span></div>
+                </div>
+              </div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="home-style" role="menuitem" tabindex="-1"><span class="md-label">스타일 적용</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="para-shape" role="menuitem" tabindex="-1"><span class="md-label">양쪽 맞춤</span></div>
@@ -634,7 +649,7 @@
               <div class="md-item" data-kinds="DOC PAGES" data-studio-menu-cmd="review-accept-all" role="menuitem" tabindex="-1"><span class="md-label">모든 변경 내용 수락</span></div>
               <div class="md-item" data-kinds="DOC PAGES" data-studio-menu-cmd="review-reject-all" role="menuitem" tabindex="-1"><span class="md-label">모든 변경 내용 거부</span></div>
               <div class="md-item" data-kinds="DOC PAGES SHEET SLIDE" data-studio-menu-cmd="review-comment" role="menuitem" tabindex="-1"><span class="md-label">새 메모</span></div>
-              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="review-stats" role="menuitem" tabindex="-1"><span class="md-label">단어 개수</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="review-stats" role="menuitem" tabindex="-1"><span class="md-label">단어 수</span></div>
               <div class="md-item" data-kinds="PAGES SLIDE PDF" data-studio-menu-cmd="review-stats" role="menuitem" tabindex="-1"><span class="md-label">문서 통계·글자 수</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="PDF" data-studio-menu-cmd="pdf-mod-tooffice" role="menuitem" tabindex="-1"><span class="md-label">편집 문서 변환</span></div>
@@ -687,6 +702,7 @@
           <button type="button" class="tb-btn" data-studio-cmd="clip-cut" title="잘라내기 (Ctrl+X)" aria-label="잘라내기"><span class="tb-sprite icon-cut"></span><span class="tb-label">잘라<br/>내기</span></button>
           <button type="button" class="tb-btn" data-studio-cmd="clip-copy" title="복사 (Ctrl+C)" aria-label="복사"><span class="tb-sprite icon-copy"></span><span class="tb-label">복사</span></button>
           <button type="button" class="tb-btn tb-paste" data-studio-cmd="clip-paste" title="붙여넣기 (Ctrl+V)" aria-label="붙여넣기"><span class="tb-sprite icon-paste"></span><span class="tb-label">붙여<br/>넣기</span></button>
+          <button type="button" class="tb-btn" data-kinds="DOC" data-studio-cmd="format-painter" title="서식 복사 (Ctrl+Shift+C)" aria-label="서식 복사"><span class="tb-icon-svg" data-icon="paintbrush" aria-hidden="true"></span><span class="tb-label">서식<br/>복사</span></button>
         </div>
         <span class="tb-sep" aria-hidden="true"></span>
         <div class="tb-group sb-viewmark-group">
@@ -921,6 +937,11 @@
                   <span class="doc-image-handle" data-resize-dir="se"></span>
                   <span class="doc-image-handle" data-resize-dir="e"></span>
                   <span class="doc-image-handle" data-resize-dir="s"></span>
+                  <span class="doc-image-handle doc-image-crop-handle" data-crop-dir="n"></span>
+                  <span class="doc-image-handle doc-image-crop-handle" data-crop-dir="e"></span>
+                  <span class="doc-image-handle doc-image-crop-handle" data-crop-dir="s"></span>
+                  <span class="doc-image-handle doc-image-crop-handle" data-crop-dir="w"></span>
+                  <span class="doc-image-handle doc-image-rotate-handle" data-rotate-handle title="회전" aria-label="회전"></span>
                 </div>
               </div>
               <aside id="doc-review-pane" class="doc-review-pane" aria-labelledby="doc-review-title" hidden>
@@ -1578,7 +1599,7 @@
         <span class="statusbar-left-group">
           <span id="doc-page-zone-indicator" class="eo-style-zone" hidden>1 / 1 쪽 · 구역: 1 / 1 · 삽입</span>
           <span id="status-studio-pos" class="statusbar-pos-metrics">1/1 페이지</span>
-          <button id="status-word-count" class="statusbar-mode-btn" type="button" title="단어 개수" hidden>단어 0개</button>
+          <button id="status-word-count" class="statusbar-mode-btn" type="button" title="단어 수" hidden>0개 단어</button>
           <button id="status-insert-mode" class="statusbar-mode-btn" type="button" title="입력 모드 전환 (Insert)">삽입</button>
           <span class="eo-style-sep stb-divider" aria-hidden="true"></span>
           <span id="status-doc-filename" class="statusbar-doc-path">제목 없음 — 1쪽</span>
@@ -3701,6 +3722,7 @@
     <script src="./doc-word-model.js"></script>
     <script src="./doc-word-fields.js"></script>
     <script src="./doc-word-layout.js"></script>
+    <script src="./doc-word-image.js"></script>
     <script src="./doc-dialogs-ext.js"></script>
     <script src="./workspace-tools.js"></script>
     <script src="./workspace-panels.js"></script>

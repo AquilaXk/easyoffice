@@ -792,6 +792,7 @@ SOFTWARE.
 Source: https://github.com/lucide-icons/lucide (`icons/chevron-down.svg`, `icons/chevron-up.svg`, Copyright (c) 2026 Lucide Icons and Contributors).
 Nothing is vendored or linked at runtime. The path data of the two chevrons (`m6 9 6 6 6-6`, `m18 15-6-6-6 6`, 24x24 grid, stroke 2, round caps and joins) is embedded as the mask images `--chevron-down-mask` and `--chevron-up-mask` in `crates/easyoffice-app/ui/toolbar.css` (PD-377) and draws every drop-down arrow and the stacked buttons of the number fields. Both icons are among the Lucide icons derived from Feather, so the MIT license below applies to them as well as the ISC license.
 The copilot panel (PD-388) adds the path data of `thumbs-up`, `thumbs-down`, `rotate-ccw`, `arrow-up`, `arrow-down`, `loader`, `circle-help`, `pen-tool` and the three dots of `ellipsis` (`icons/thumbs-up.svg`, `icons/thumbs-down.svg`, `icons/rotate-ccw.svg`, `icons/arrow-up.svg`, `icons/arrow-down.svg`, `icons/loader.svg`, `icons/circle-question-mark.svg`, `icons/pen-tool.svg`, `icons/ellipsis.svg`; `circle-alert` is the circle with the two strokes `M12 8v4` and `M12 16h.01`) to the icon set `crates/easyoffice-app/ui/icons.js`, drawn as inline stroke SVG on the 24x24 grid. The `stop` square there is a plain shape of this app.
+The word processor window's format painter (PD-395) adds the path data of `paintbrush` (`icons/paintbrush.svg`) to `crates/easyoffice-app/ui/icons.js`.
 
 ```
 ISC License

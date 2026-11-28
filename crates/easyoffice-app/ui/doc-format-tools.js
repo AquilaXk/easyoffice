@@ -147,9 +147,31 @@
     feedback(env, "서식을 적용할 글을 선택하세요");
   }
 
+  // 서식 붙여넣기 (Ctrl+Shift+V): the copied format on the selection now.
+  function pasteCopied(env) {
+    disarm();
+    pasteFormat(env);
+  }
+
+  // Ctrl+Shift+C (⌘⇧C) copies the format and Ctrl+Shift+V (⌘⇧V) pastes it, as in the Word program. They run the menu
+  // items of the same commands, so the word processor window (where the items are shown) is the only place they act.
+  const SHORTCUT_COMMANDS = { c: "format-painter", v: "format-paste" };
+  function onShortcut(ev) {
+    if (!(ev.ctrlKey || ev.metaKey) || !ev.shiftKey || ev.altKey) return;
+    const cmd = SHORTCUT_COMMANDS[String(ev.key ?? "").toLowerCase()];
+    const document = host.document;
+    if (!cmd || !document?.getElementById("doc-editor")?.contains?.(ev.target)) return;
+    const item = document.querySelector(`.md-item[data-studio-menu-cmd="${cmd}"]`);
+    if (!item || item.hidden || item.closest?.("[hidden]")) return;
+    ev.preventDefault?.();
+    item.click();
+  }
+  host.document?.addEventListener?.("keydown", onShortcut);
+
   const commands = host.__EASYOFFICE_DOC_WORD_COMMANDS__;
   commands?.register("format-clear", clearFormatting);
   commands?.register("format-painter", painter);
+  commands?.register("format-paste", pasteCopied);
 
   host.__EASYOFFICE_DOC_FORMAT_TOOLS__ = { clearFormatting, painter, copyFormat, pasteFormat, paragraphLook, isArmed: () => armed !== null };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

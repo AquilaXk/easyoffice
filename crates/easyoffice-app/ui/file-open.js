@@ -153,7 +153,7 @@
       eoImageNaturalWidthPx: String(Number(block.widthPx) || 0),
       eoImageNaturalHeightPx: String(Number(block.heightPx) || 0),
     };
-    return spec;
+    return host.__EASYOFFICE_DOC_WORD_MODEL__.image(spec, block);
   }
 
   // The page-number field of a header or footer (`doc-page-frame.js`): drawn by the page, not text.

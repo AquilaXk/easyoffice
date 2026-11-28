@@ -180,17 +180,22 @@
       const container = box.parentElement;
       const imgRect = selectedImg.getBoundingClientRect?.() || { left: 0, top: 0 };
       const conRect = container?.getBoundingClientRect?.() || { left: 0, top: 0 };
+      const turned = selectedImg.style.transform || "";
       const wPx = Number.parseFloat(selectedImg.style.width) || Math.max(MIN_RESIZE_PX, Math.round((Number(selectedImg.dataset.eoImageWidthEmu) || 952500) / EMU_PER_PX));
       const hPx = Number.parseFloat(selectedImg.style.height) || Math.max(MIN_RESIZE_PX, Math.round((Number(selectedImg.dataset.eoImageHeightEmu) || 952500) / EMU_PER_PX));
       box.hidden = false;
-      box.style.left = Math.round(imgRect.left - conRect.left + (container?.scrollLeft || 0)) + "px";
-      box.style.top = Math.round(imgRect.top - conRect.top + (container?.scrollTop || 0)) + "px";
+      // A turned picture's rectangle is its bounding box: the frame is centred on it and turned the same way.
+      const insetX = turned ? ((imgRect.width || wPx) - wPx) / 2 : 0;
+      const insetY = turned ? ((imgRect.height || hPx) - hPx) / 2 : 0;
+      box.style.left = Math.round(imgRect.left - conRect.left + (container?.scrollLeft || 0) + insetX) + "px";
+      box.style.top = Math.round(imgRect.top - conRect.top + (container?.scrollTop || 0) + insetY) + "px";
+      box.style.transform = turned;
       box.style.width = Math.round(wPx) + "px";
       box.style.height = Math.round(hPx) + "px";
     }
 
     const selectImage = (img) => { selectedImg = img; syncResizerBox(); };
-    const clearSelection = () => { selectedImg = null; const box = resizerEl(); if (box) box.hidden = true; };
+    const clearSelection = () => { selectedImg = null; const box = resizerEl(); if (box) { box.hidden = true; box.classList?.remove("is-cropping"); } };
 
     // The picture element for `bytes` (registered, sized for the body or for `cell` of `table`), or `{ error }` when the
     // quota or the header refuses it. The element is not in the page yet; the paste path and the file picker both use it.
@@ -402,12 +407,14 @@
       });
       root?.addEventListener("eo-doc-mutated", syncResizerBox);
       document.addEventListener("mousedown", (ev) => {
-        if (selectedImg && !ev.target?.closest?.("img.doc-inline-image, #doc-image-resizer, #doc-image-size-dialog")) clearSelection();
+        if (selectedImg && !ev.target?.closest?.("img.doc-inline-image, #doc-image-resizer, #doc-image-size-dialog, .studio-menubar")) clearSelection();
       });
       document.addEventListener("keydown", deleteSelectedImage);
       env?.addEventListener?.("resize", syncResizerBox);
       document.querySelector(".doc-scroll-container")?.addEventListener("scroll", syncResizerBox);
       resizerEl()?.querySelectorAll?.("[data-resize-dir]").forEach((h) => h.addEventListener("pointerdown", (ev) => startHandleDrag(ev, h.dataset.resizeDir)));
+      // The handles that cut and turn the picture belong to the word processor window (`doc-word-image.js`).
+      resizerEl()?.querySelectorAll?.("[data-crop-dir], [data-rotate-handle]").forEach((h) => h.addEventListener("pointerdown", (ev) => host.__EASYOFFICE_DOC_WORD_IMAGE__?.onHandleDown(document, h, ev)));
 
       const dlg = $("doc-image-size-dialog");
       const wInput = $("doc-image-width-mm");
@@ -439,7 +446,7 @@
     const handles = (cmd) => cmd === CMD_INSERT_IMAGE;
     const run = (cmd) => (cmd === CMD_INSERT_IMAGE ? ($("doc-image-input")?.click(), { changed: false, openedPicker: true }) : { changed: false });
 
-    const api = { bind, handles, run, insertImageBytes, createImageElement, validateImageBytes, selectImage, clearSelection, syncResizer: syncResizerBox, parseImageHeader };
+    const api = { selected: () => selectedImg, withUndo, bind, handles, run, insertImageBytes, createImageElement, validateImageBytes, selectImage, clearSelection, syncResizer: syncResizerBox, parseImageHeader };
     host.__EASYOFFICE_DOC_IMAGE_API__ = api;
     return api;
   }

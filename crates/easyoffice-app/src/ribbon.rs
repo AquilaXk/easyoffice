@@ -492,7 +492,7 @@ impl RibbonCommandRouter {
                         (
                             "review-stats",
                             if module == OfficeModuleKind::Document {
-                                "단어 개수"
+                                "단어 수"
                             } else {
                                 "문서 통계·글자 수"
                             },

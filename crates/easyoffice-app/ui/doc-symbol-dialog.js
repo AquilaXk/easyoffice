@@ -310,7 +310,7 @@
       $("btn-symbol-insert")?.focus?.();
     }
 
-    // The rows of the Word program's 단어 개수 dialog, in its order.
+    // The rows of the Word program's 단어 수 dialog, in its order.
     function wordCountRows(includeNotes) {
       const stats = host.__EASYOFFICE_DOC_WORD_COUNT__.count(document.getElementById("doc-editor"), { includeNotes });
       return [
@@ -385,7 +385,7 @@
       }
       grid.replaceChildren(...children);
       const title = $("doc-stats-title");
-      if (title) title.textContent = word ? "단어 개수" : "문서 통계";
+      if (title) title.textContent = word ? "단어 수" : "문서 통계";
       const statusEl = $("doc-stats-status");
       if (statusEl) {
         statusEl.textContent = word ? "" : "공백 포함 " + rows[0][1] + "자 · 공백 제외 " + rows[1][1] + "자 · 단어 " + rows[2][1] + "개";
