@@ -9,11 +9,12 @@
   const RATINGS = Object.freeze(["up", "down"]);
 
   // 이유 키는 LibreChat의 `inaccurate`·`not_matched`·`other`와 같고 `too_long`은 이 앱의 것이다.
+  // 아이콘은 원본 `FEEDBACK_TAGS`의 `icon`과 같다(`inaccurate`·`not_matched`는 AlertCircle, `other`는 HelpCircle, `too_long`은 `bad_style`의 PenTool).
   const FEEDBACK_TAGS = Object.freeze([
-    { key: "inaccurate", label: "부정확함", rating: "down" },
-    { key: "too_long", label: "너무 김", rating: "down" },
-    { key: "not_matched", label: "지시와 다름", rating: "down" },
-    { key: "other", label: "기타", rating: "down" },
+    { key: "inaccurate", label: "부정확함", rating: "down", icon: "circle-alert" },
+    { key: "too_long", label: "너무 김", rating: "down", icon: "pen-tool" },
+    { key: "not_matched", label: "지시와 다름", rating: "down", icon: "circle-alert" },
+    { key: "other", label: "기타", rating: "down", icon: "circle-help" },
   ]);
 
   const getTagsForRating = (rating) => FEEDBACK_TAGS.filter((tag) => tag.rating === rating);

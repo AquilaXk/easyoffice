@@ -72,12 +72,6 @@
     ], 12);
   }
 
-  function buildExampleArrowIcon(d) {
-    const svg = createSvgIcon(d, [{ d: "M5 11L11 5M6.2 5H11V9.8", stroke: "currentColor", "stroke-width": "1.4", "stroke-linecap": "round", "stroke-linejoin": "round" }], 13);
-    svg.setAttribute("class", "eo-copilot-example-arrow");
-    return svg;
-  }
-
   const TITLE_MAX_CHARS = 40;
   const MAX_INPUT_ROWS = 5;
 
@@ -303,7 +297,6 @@
         const btn = mkEl("button", "eo-copilot-example-btn");
         btn.type = "button";
         btn.appendChild(mkEl("span", undefined, ex.label));
-        btn.appendChild(buildExampleArrowIcon(document));
         btn.addEventListener("click", () => useExample(ex));
         return btn;
       });
@@ -357,7 +350,8 @@
       threadEl.replaceChildren(...messages.map((msg) => threadView.renderTurn(msg)));
       syncTitle();
       renderWelcome();
-      if (bodyEl) bodyEl.scrollTop = keepScroll ? scrollTop : bodyEl.scrollHeight || 0;
+      if (bodyEl) scrollControl.jumpTo(keepScroll ? scrollTop : bodyEl.scrollHeight || 0);
+      scrollControl.sync();
     }
 
     function syncPanelChrome() {
@@ -717,6 +711,7 @@
       });
     }
 
+    const scrollControl = host.__EASYOFFICE_COPILOT_THREAD_VIEW__.createScrollControl({ document });
     const threadView = host.__EASYOFFICE_COPILOT_THREAD_VIEW__.createThreadView({
       document,
       copilotActions,
@@ -870,6 +865,7 @@
       modelUi.bind();
       byId("btn-copilot-toggle")?.addEventListener("click", () => toggle());
       byId("btn-copilot-close")?.addEventListener("click", () => setOpen(false));
+      scrollControl.bind();
       const { createPopupMenu } = host.__EASYOFFICE_COPILOT_POPUP__;
       moreMenu = createPopupMenu({ document, trigger: byId("btn-copilot-more"), menu: byId("copilot-more-menu"), align: "end" });
       plusMenu = createPopupMenu({ document, trigger: byId("btn-copilot-plus"), menu: byId("copilot-plus-menu"), placement: "up", align: "start", onOpen: buildPlusMenu });

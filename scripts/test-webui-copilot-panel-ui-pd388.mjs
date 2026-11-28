@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { REDUCED_MOTION } from "./test-support/copilot-accept.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // PD-388: the copilot panel as a chat screen. The conversation title and the menu in the header, the user's bubble, the
 // answer as plain text under a folded "N초 동안 작업" line, the small row under each message, and the composer card.
@@ -116,32 +117,40 @@ test("a turn shows the title, a right-side bubble row, a folded work line and th
 
 const rated = (document, value) => document.querySelector(`#copilot-thread [data-feedback="${value}"]`);
 
-test("좋아요·싫어요 are kept in the thread, one at a time, and 싫어요 shows the reason chips and 다시 생성", async () => {
+const reasonMenu = (document) => document.getElementById("copilot-feedback-menu");
+const reasonOption = (document, key) => document.querySelector(`#copilot-feedback-menu .eo-copilot-reason-option[data-tag="${key}"]`);
+
+test("좋아요·싫어요 show both buttons until one is chosen; 싫어요 opens the reason list (LibreChat Feedback)", async () => {
   const { document, userClick, send } = await open({ run: () => ({ status: "ok", mode: "ask", reply: "답", operations: [], locations: [] }) });
   await send("질문");
-  assert.equal(document.querySelectorAll(".eo-copilot-reasons").length, 0);
+  assert.equal(reasonMenu(document).hidden, true);
+  assert.ok(rated(document, "up") && rated(document, "down"), "both buttons before a rating");
   userClick(rated(document, "up"));
   assert.equal(rated(document, "up").getAttribute("aria-pressed"), "true");
-  assert.equal(document.querySelectorAll(".eo-copilot-reasons").length, 0, "no reasons for 좋아요");
+  assert.equal(rated(document, "down"), null, "only the chosen button stays");
+  assert.equal(reasonMenu(document).hidden, true, "no reasons for 좋아요");
+  userClick(rated(document, "up"));
+  assert.ok(rated(document, "up") && rated(document, "down"), "pressing again takes the rating back");
+
   userClick(rated(document, "down"));
-  assert.equal(rated(document, "up").getAttribute("aria-pressed"), "false", "one rating at a time");
-  assert.equal(rated(document, "down").getAttribute("aria-pressed"), "true");
-  const chips = Array.from(document.querySelectorAll(".eo-copilot-reasons .eo-copilot-reason-chip")).map((c) => c.textContent);
-  assert.deepEqual(chips, ["부정확함", "너무 김", "지시와 다름", "기타"]);
-  const regen = Array.from(document.querySelectorAll(".eo-copilot-reasons button")).find((b) => b.textContent === "다시 생성");
-  assert.ok(regen, "the row suggests 다시 생성");
+  assert.equal(reasonMenu(document).hidden, false, "the reasons open under the button");
+  assert.equal(rated(document, "down").getAttribute("aria-pressed"), "false", "nothing is rated until a reason is chosen");
+  const labels = Array.from(reasonMenu(document).querySelectorAll(".eo-copilot-reason-option")).map((c) => c.textContent);
+  assert.deepEqual(labels, ["부정확함", "너무 김", "지시와 다름", "기타"]);
   assert.equal(document.querySelectorAll('#copilot-thread button[data-copilot-action="regenerate"]').length, 1, "only one 다시 생성 on the last answer");
-  userClick(document.querySelector('.eo-copilot-reason-chip[data-tag="too_long"]'));
-  assert.equal(document.querySelector('.eo-copilot-reason-chip[data-tag="too_long"]').getAttribute("aria-pressed"), "true");
+  userClick(reasonOption(document, "too_long"));
+  assert.equal(reasonMenu(document).hidden, true, "choosing a reason closes the list");
+  assert.equal(rated(document, "down").getAttribute("aria-pressed"), "true");
+  assert.equal(rated(document, "up"), null, "only the chosen button stays");
   userClick(rated(document, "down"));
-  assert.equal(document.querySelectorAll(".eo-copilot-reasons").length, 0, "pressing again takes the rating back");
+  assert.ok(rated(document, "up") && rated(document, "down"), "pressing the chosen button takes the rating back");
 });
 
 test("the rating of the last answer is one line at the end of the next question, never in the history", async () => {
   const { document, userClick, send, runs } = await open({ run: () => ({ status: "ok", mode: "ask", reply: "답", operations: [], locations: [] }) });
   await send("첫 질문");
   userClick(rated(document, "down"));
-  userClick(document.querySelector('.eo-copilot-reason-chip[data-tag="too_long"]'));
+  userClick(reasonOption(document, "too_long"));
   await send("둘째 질문");
   assert.equal(runs()[1].prompt, "둘째 질문\n[직전 답변 평가: 싫어요 - 너무 김]");
   assert.ok(runs()[1].history.every((h) => !h.text.includes("평가")), "the line is not in the history");
@@ -157,8 +166,8 @@ test("다시 생성 after 싫어요 carries the rating of the answer it replaces
   const { document, userClick, send, runs } = await open({ run: () => ({ status: "ok", mode: "ask", reply: "답", operations: [], locations: [] }) });
   await send("질문");
   userClick(rated(document, "down"));
-  userClick(document.querySelector('.eo-copilot-reason-chip[data-tag="not_matched"]'));
-  userClick(Array.from(document.querySelectorAll(".eo-copilot-reasons button")).find((b) => b.textContent === "다시 생성"));
+  userClick(reasonOption(document, "not_matched"));
+  userClick(document.querySelector('#copilot-thread button[data-copilot-action="regenerate"]'));
   await flushAsyncTurns(14);
   assert.equal(runs()[1].prompt, "질문\n[직전 답변 평가: 싫어요 - 지시와 다름]");
   assert.equal(document.querySelectorAll("#copilot-thread .eo-copilot-msg--user").length, 1, "the question is not asked twice in the thread");
@@ -257,6 +266,18 @@ test("the header menu opens with 새 대화 and 모델 설정, and 새 대화 em
   assert.equal(menu.hidden, true, "picking an item closes the menu");
   assert.equal(document.getElementById("copilot-thread").children.length, 0);
   assert.equal(document.getElementById("copilot-title").textContent, "새 대화");
+});
+
+test("copilot.css uses only --copilot-* tokens that tokens.css defines, and tokens.css defines none that copilot.css leaves unused", () => {
+  const ui = (name) => readText(fileURLToPath(new URL("../crates/easyoffice-app/ui/" + name, import.meta.url)));
+  const css = ui("copilot.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  const tokens = ui("tokens.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  const defined = new Set([...tokens.matchAll(/^\s*(--copilot-[\w-]+)\s*:/gm)].map((m) => m[1]));
+  const own = new Set([...css.matchAll(/^\s*(--copilot-[\w-]+)\s*:/gm)].map((m) => m[1]));
+  const used = new Set([...css.matchAll(/var\((--copilot-[\w-]+)/g)].map((m) => m[1]));
+  const usedInTokens = new Set([...tokens.matchAll(/var\((--copilot-[\w-]+)/g)].map((m) => m[1]));
+  assert.deepEqual([...used].filter((t) => !defined.has(t) && !own.has(t)), [], "tokens used but not defined");
+  assert.deepEqual([...defined].filter((t) => !used.has(t) && !usedInTokens.has(t)), [], "tokens defined but never used");
 });
 
 test("the + menu lists the example questions and fills the input without sending", async () => {

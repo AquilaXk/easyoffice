@@ -73,5 +73,59 @@
     return { close, isOpen: () => open };
   }
 
-  host.__EASYOFFICE_COPILOT_POPUP__ = { createPopupMenu };
+  /**
+   * 눌린 단추 바로 아래(위쪽 자리가 모자라면 위)에 뜨는 메뉴 하나(싫어요 이유 목록). 단추는 대화를 다시 그릴 때마다 새로 만들어지므로
+   * 메뉴는 단추 소유가 아니라 `open(anchor, items)`로 그때그때 연다. 바깥을 누르거나 Esc, 항목 선택, 창 크기 변경에 닫는다.
+   * 자리는 원본 Feedback.tsx의 `Ariakit.Popover placement="bottom" gutter={8}`(단추 아래 가운데, 8px 띄움)을 따른다.
+   */
+  const FEEDBACK_GUTTER_PX = 8;
+
+  function createAnchoredMenu({ document, menu }) {
+    const view = document.defaultView || host;
+    let anchorEl = null;
+
+    function close(restoreFocus = false) {
+      if (!anchorEl) return;
+      const anchor = anchorEl;
+      anchorEl = null;
+      menu.hidden = true;
+      anchor.setAttribute?.("aria-expanded", "false");
+      if (restoreFocus) anchor.focus?.();
+    }
+
+    function open(anchor, items) {
+      close();
+      anchorEl = anchor;
+      menu.replaceChildren(...items);
+      menu.hidden = false;
+      anchor.setAttribute?.("aria-expanded", "true");
+      const box = anchor.getBoundingClientRect();
+      const width = menu.offsetWidth || 0;
+      const height = menu.offsetHeight || 0;
+      const vw = Number(view.innerWidth) || 0;
+      const vh = Number(view.innerHeight) || 0;
+      const left = box.left + box.width / 2 - width / 2;
+      menu.style.left = Math.max(EDGE_PX, Math.min(left, vw - width - EDGE_PX)) + "px";
+      const below = box.bottom + FEEDBACK_GUTTER_PX;
+      menu.style.top = (below + height > vh && box.top - FEEDBACK_GUTTER_PX - height > 0 ? box.top - FEEDBACK_GUTTER_PX - height : below) + "px";
+      menu.querySelector("button")?.focus?.();
+    }
+
+    menu.addEventListener("click", (ev) => {
+      if (ev.target?.closest?.("button")) close(false);
+    });
+    menu.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Escape") return;
+      ev.preventDefault();
+      close(true);
+    });
+    document.addEventListener("mousedown", (ev) => {
+      if (anchorEl && !menu.contains(ev.target) && !anchorEl.contains(ev.target)) close(false);
+    });
+    view.addEventListener?.("resize", () => close(false));
+
+    return { open, close, isOpen: () => anchorEl !== null };
+  }
+
+  host.__EASYOFFICE_COPILOT_POPUP__ = { createPopupMenu, createAnchoredMenu };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

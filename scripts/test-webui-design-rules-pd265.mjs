@@ -10,15 +10,16 @@ const UI = (name) => readText(fileURLToPath(new URL("../crates/easyoffice-app/ui
 const stripComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, "");
 const declarations = (css, property) => [...stripComments(css).matchAll(new RegExp("(?:^|[;{\\s])" + property + "\\s*:\\s*([^;}]+)", "g"))].map((m) => m[1].trim());
 
-// copilot.css: the rounded corners of the panel's bubble, composer card, chips and send button are the PD-388 exception, one token each.
+// copilot.css: the panel (bubble, composer card, buttons, menus, cards) takes the corner, shadow and ring values of the chat UI it
+// ports, one `--copilot-*` token each, as an exception to the app's 2px corners (PD-388, QA 2026-11-28). Nothing outside the panel changes.
 const RADIUS_OF = {
   "base.css": ["0", "var(--radius-sm)"],
   "board.css": ["0"],
-  "copilot.css": ["0", "var(--radius-sm)", "var(--radius-md)", "var(--copilot-bubble-radius)", "var(--copilot-composer-radius)", "var(--copilot-chip-radius)", "var(--copilot-send-radius)"],
+  "copilot.css": ["0", "var(--radius-sm)", "var(--radius-md)", "var(--copilot-radius-sm)", "var(--copilot-radius-md)", "var(--copilot-radius-lg)", "var(--copilot-radius-xl)", "var(--copilot-radius-2xl)", "var(--copilot-radius-control)", "var(--copilot-composer-radius)", "var(--copilot-pill-radius)"],
 };
 // The one gradient of the panel is the shimmer of the waiting line (a moving band of light text over muted text, PD-388).
 const SHIMMER_RULE = /\.eo-copilot-shimmer\s*\{[^}]*\}/;
-const SHADOW_OF = { "base.css": [], "board.css": [], "copilot.css": ["var(--shadow-dropdown)"] };
+const SHADOW_OF = { "base.css": [], "board.css": [], "copilot.css": ["var(--copilot-menu-shadow)", "var(--copilot-listbox-shadow)", "var(--copilot-focus-shadow)"] };
 
 for (const name of Object.keys(RADIUS_OF)) {
   test(`${name}: corners are 0 or the reference value, no gradient, no shadow beyond the reference tokens`, () => {

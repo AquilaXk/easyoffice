@@ -209,7 +209,9 @@ test("PD-361: SHEET uses spreadsheet labels, BOARD omits duplicate zoom chrome, 
   const stylesCss = readUi("styles.css");
   assert.doesNotMatch(stylesCss, /\.slide-thumb-snippet\s*\{[^}]*opacity:/);
   assert.doesNotMatch(stylesCss, /\.slide-thumb-title\.is-empty\s*\{[^}]*opacity:/);
-  assert.match(copilotCss, /:root\[data-theme-effective="dark"\] \.eo-copilot-send-btn:not\(:disabled\)/);
+  // The send button is primary on primary-foreground; in the dark theme the foreground is the dark background token (PD-388).
+  assert.match(copilotCss, /\.eo-copilot-send-btn\s*\{[^}]*background:\s*var\(--copilot-primary\);[^}]*color:\s*var\(--copilot-primary-foreground\)/s);
+  assert.match(readUi("tokens.css").slice(readUi("tokens.css").lastIndexOf(':root[data-theme-effective="dark"]')), /--copilot-primary-foreground:\s*var\(--ui-bg\)/);
   assert.match(contentCss, /#doc-editor\[data-eo-doc-flavor="pages"\]\[data-eo-hf-edit\] > section\[data-eo-hf="header"\]::after/);
   const menuBarCss = readUi("menu-bar.css");
   assert.match(menuBarCss, /\.md-sub\[hidden\]\s*\{\s*display:\s*none;\s*\}/);

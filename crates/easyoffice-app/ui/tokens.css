@@ -207,19 +207,116 @@
   --menu-item-padding: var(--space-2) var(--space-8) var(--space-2) calc(var(--space-12) + var(--space-4));
   --menu-footer-gap: 1px;                         /* 메뉴 아래 줄 항목 사이 틈(코파일럿 모델 메뉴) */
   --menu-hint-padding: 1px var(--space-2);        /* 메뉴 항목 힌트 칩 안쪽 여백 */
-  --textarea-min-height: 32px;                    /* 코파일럿 입력 칸의 최소 높이(한 줄 + 위아래 여백 4px씩) */
-  /* 코파일럿 패널(PD-388): 둥근 모서리는 이 패널의 말풍선·입력 카드·칩·전송 단추에만 둔 예외다. 앱의 다른 컨트롤은 2px 각진 모서리 그대로 */
-  --copilot-bubble-radius: 14px;                  /* 사용자 말풍선 */
-  --copilot-bubble-padding: var(--space-5) var(--space-6);
-  --copilot-composer-radius: 16px;                /* 입력 카드 */
-  --copilot-chip-radius: var(--radius-pill);      /* 모드·모델 칩, 바꾸기 계열 칩 */
-  --copilot-send-radius: var(--radius-pill);      /* 원형 전송 단추 */
-  --copilot-send-size: 28px;
-  --copilot-icon-size: 28px;                      /* 머리글·메시지 아래 아이콘 단추 */
+  --textarea-min-height: var(--copilot-u-10);     /* 코파일럿 입력 칸의 최소 높이(원본 min-h-10) */
+
+  /* 코파일럿 패널(PD-388): 기준 채팅 UI 저장소(assistant-ui `templates/minimal`의 Thread)의 크기표·모서리·그림자·글자·간격을 그대로 옮긴 값이다.
+     패널은 앱의 Spectrum S 크기표(12px 글자, 24px 컨트롤, 2px 모서리)의 예외이고, copilot.css는 아래 `--copilot-*` 토큰만 쓴다.
+     원본은 Tailwind v4(1rem = 16px)이므로 `--copilot-u-N`은 간격 단계 N(= N x 4px), 글자·줄 높이는 text-xs~2xl 표 값이다. 모서리는 원본 템플릿의
+     `--radius: 0.625rem`에서 나온 값(sm 6 / md 8 / lg 10 / xl 14)과 입력 카드의 `--composer-radius: 1rem`이다. 출처 파일·줄은 THIRD_PARTY_NOTICES.md. */
+  --copilot-u-0_5: 2px;
+  --copilot-u-1: 4px;
+  --copilot-u-1_5: 6px;
+  --copilot-u-2: 8px;
+  --copilot-u-2_5: 10px;
+  --copilot-u-3: 12px;
+  --copilot-u-3_5: 14px;
+  --copilot-u-4: 16px;
+  --copilot-u-5: 20px;
+  --copilot-u-6: 24px;
+  --copilot-u-7: 28px;
+  --copilot-u-7_5: 30px;
+  --copilot-u-8: 32px;
+  --copilot-u-10: 40px;
+  --copilot-u-12: 48px;
+  --copilot-u-14: 56px;
+  --copilot-u-18: 72px;                           /* 사용자 메시지 왼쪽 단추 자리의 최소 폭(원본 minmax(72px,1fr)) */
+  --copilot-u-32: 128px;                          /* 메뉴 최소 폭(원본 min-w-[8rem]) */
+  --copilot-u-48: 192px;                          /* 입력칸 최대 높이(원본 max-h-48) */
+  --copilot-font-xs: 12px;
+  --copilot-leading-xs: 16px;
+  --copilot-font-sm: 14px;
+  --copilot-leading-sm: 20px;
+  --copilot-font-chip: 12.8px;                    /* 원본 Button size sm의 text-[0.8rem] */
+  --copilot-font-base: 16px;
+  --copilot-leading-base: 24px;
+  --copilot-font-code: 13px;                      /* 원본 pre의 text-[13px] */
+  --copilot-leading-relaxed: 1.625;
+  --copilot-inline-code-size: 0.85em;
+  --copilot-radius-sm: 6px;
+  --copilot-radius-md: 8px;                       /* 제안 줄·오류 상자·칩 단추(Button sm) */
+  --copilot-radius-lg: 10px;                      /* 아이콘 단추, 메뉴 항목 */
+  --copilot-radius-xl: 14px;                      /* 메뉴 상자, 코드 블록 */
+  --copilot-composer-radius: 16px;                /* 입력 카드와 사용자 말풍선(원본 --composer-radius) */
+  --copilot-pill-radius: var(--radius-pill);      /* 원형 전송·중지·+ 단추(원본 rounded-full) */
   --copilot-menu-width: 188px;
-  --copilot-step-line-height: 1.6;
+  --copilot-duration: 150ms;                      /* tailwind 기본 transition과 tw-animate-css animate-in 기본 */
+  --copilot-duration-200: 200ms;
+  --copilot-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --copilot-ease-collapsible: cubic-bezier(0.32, 0.72, 0, 1);
+  --copilot-enter-rise-1: 4px;                    /* slide-in-from-bottom-1 */
+  --copilot-enter-rise-2: 8px;                    /* slide-in-from-bottom-2 */
+  --copilot-press-scale: 0.9;                     /* active:scale-90 (아이콘 단추) */
+  --copilot-press-scale-soft: 0.98;               /* active:scale-[0.98] (도구 줄) */
+  --copilot-disabled-opacity: 0.5;
+  --copilot-step-blur: 2px;
+  --copilot-pop-scale: 0.95;                      /* zoom-in-95 (메뉴가 열릴 때) */
+  --copilot-menu-blur: 4px;                       /* backdrop-blur-sm */
+  --copilot-spin-duration: 0.6s;                  /* 도구 줄의 진행 아이콘 */
+  --copilot-icon-stroke: 2;                       /* lucide 기본 선 굵기(앱 아이콘은 1.75) */
+  /* 모드·모델 선택은 Continue(Apache-2.0) `gui/src/components/ui/Listbox.tsx`·`ModeSelect.tsx`·`ModelSelect.tsx`의 값이다: 글자 = 편집기 글자 14px - 3, 단추·항목 안쪽 여백 px-1 py-0.5 / px-2 py-1, 메뉴 border 1px, 모서리 0.5rem, shadow-md, 폭 160~400px, 선택 항목은 bg-list-active */
+  --copilot-font-listbox: 11px;
+  --copilot-font-listbox-tiny: 10px;              /* ModelSelect의 text-[10px] 보조 글자 */
+  --copilot-listbox-min-width: 160px;
+  --copilot-listbox-max-width: 400px;
+  --copilot-model-button-height: 18px;            /* ModelSelect 단추 h-[18px] */
+  --copilot-listbox-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);  /* shadow-md */
+  --copilot-listbox-bg: var(--ui-surface-raised);   /* input-background */
+  --copilot-listbox-border: var(--ui-border-light); /* command-border */
+  --copilot-listbox-active: var(--ui-selected);     /* list-active */
+  --copilot-listbox-active-foreground: var(--ui-text);
+  --copilot-description: var(--ui-text-secondary);  /* description */
+  --copilot-description-muted: var(--ui-text-muted);
+  --copilot-mode-bg: color-mix(in srgb, var(--ui-text-hint) 20%, transparent);  /* bg-lightgray/20 (#999998) */
+  /* 싫어요 이유 목록은 LibreChat(MIT) `packages/chat/src/components/messages/Feedback.tsx`와 `packages/client/src/components/Button.tsx`(popover-option)의 값이다 */
+  --copilot-radius-2xl: 16px;                     /* rounded-theme-popover = --theme-popover-radius 1rem */
+  --copilot-radius-control: 12px;                 /* rounded-theme-control = --theme-control-radius 0.75rem */
+  --copilot-reason-icon-size: 19px;               /* Icon size 1.1875rem */
+  --copilot-popover-fade-duration: 190ms;         /* animate-composer-popover: opacity 190ms, scale 260ms, cubic-bezier(0.32, 0.72, 0, 1) */
+  --copilot-popover-scale-duration: 260ms;
+  --copilot-popover-scale: 0.94;
   --copilot-shimmer-duration: 1.8s;
   --copilot-shimmer-width: 220%;                  /* 반짝임 띠가 글자 폭에 대해 갖는 너비 */
+  /* 색: 원본의 의미(background, muted, foreground, border, primary)를 앱 색 토큰에 매핑한다. 라이트·다크는 앱 토큰이 따라간다. */
+  --copilot-background: var(--ui-surface);
+  --copilot-foreground: var(--ui-text);
+  --copilot-muted: var(--ui-bg-light);
+  --copilot-muted-foreground: var(--ui-text-muted);
+  --copilot-accent: var(--ui-hover);
+  --copilot-border: var(--ui-border-light);
+  --copilot-primary: var(--accent-strong);
+  --copilot-primary-foreground: var(--ui-text-on-accent);
+  --copilot-destructive: var(--ui-danger);
+  --copilot-ring: var(--focus-ring);
+  --copilot-popover: var(--ui-surface-raised);
+  --copilot-composer-bg: color-mix(in srgb, var(--copilot-muted) 30%, transparent);
+  --copilot-composer-border: color-mix(in srgb, var(--copilot-foreground) 10%, transparent);
+  --copilot-composer-border-focus: color-mix(in srgb, var(--copilot-foreground) 25%, transparent);
+  --copilot-placeholder: color-mix(in srgb, var(--copilot-muted-foreground) 60%, transparent);
+  --copilot-suggestion-hover: color-mix(in srgb, var(--copilot-foreground) 3%, transparent);
+  --copilot-outline-bg: color-mix(in srgb, var(--copilot-muted) 70%, transparent);
+  --copilot-ghost-hover: var(--copilot-muted);
+  --copilot-add-hover: color-mix(in srgb, var(--copilot-muted-foreground) 15%, transparent);
+  --copilot-tool-pre-color: color-mix(in srgb, var(--copilot-foreground) 90%, transparent);
+  --copilot-primary-hover: color-mix(in srgb, var(--copilot-primary) 80%, transparent);
+  --copilot-code-bg: color-mix(in srgb, var(--copilot-muted) 30%, transparent);
+  --copilot-code-border: color-mix(in srgb, var(--copilot-border) 50%, transparent);
+  --copilot-tool-pre-bg: color-mix(in srgb, var(--copilot-muted) 50%, transparent);
+  --copilot-rule: color-mix(in srgb, var(--copilot-muted-foreground) 20%, transparent);
+  --copilot-quote-rule: color-mix(in srgb, var(--copilot-muted-foreground) 30%, transparent);
+  --copilot-menu-bg: color-mix(in srgb, var(--copilot-popover) 95%, transparent);
+  --copilot-menu-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);  /* shadow-lg */
+  --copilot-focus-shadow: 0 0 0 1px color-mix(in srgb, var(--copilot-ring) 50%, transparent); /* ring-1 ring-ring/50 */
+  --copilot-error-bg: color-mix(in srgb, var(--copilot-destructive) 10%, transparent);
 
   /* 터치 타겟 (모바일) */
   --touch-target-min: 44px;
@@ -301,6 +398,12 @@
   --shadow-dialog: 4px 4px 16px rgba(0, 0, 0, 0.55);
   --shadow-light: 2px 2px 8px rgba(0, 0, 0, 0.32);
   --overlay-bg: rgba(0, 0, 0, 0.45);
+
+  /* 코파일럿 패널: 원본의 dark: 변형(outline 단추 배경 muted/50, ghost 호버 muted/50) */
+  --copilot-primary-foreground: var(--ui-bg);
+  --copilot-outline-bg: color-mix(in srgb, var(--copilot-muted) 50%, transparent);
+  --copilot-ghost-hover: color-mix(in srgb, var(--copilot-muted) 50%, transparent);
+  --copilot-add-hover: color-mix(in srgb, var(--copilot-muted-foreground) 30%, transparent);
 }
 
 .visually-hidden {

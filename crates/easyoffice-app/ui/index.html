@@ -1457,7 +1457,7 @@
             <div class="eo-copilot-head">
               <span id="copilot-title" class="eo-copilot-title">새 대화</span>
               <div class="eo-copilot-head-actions">
-                <button id="btn-copilot-more" type="button" class="eo-copilot-icon-btn" data-icon="ellipsis-vertical" aria-haspopup="menu" aria-expanded="false" aria-controls="copilot-more-menu" aria-label="더보기" title="더보기"></button>
+                <button id="btn-copilot-more" type="button" class="eo-copilot-icon-btn" data-icon="ellipsis" aria-haspopup="menu" aria-expanded="false" aria-controls="copilot-more-menu" aria-label="더보기" title="더보기"></button>
                 <div id="copilot-more-menu" class="eo-copilot-popup" role="menu" hidden>
                   <button id="btn-copilot-new" type="button" class="eo-copilot-popup-item" role="menuitem">새 대화</button>
                   <button id="btn-copilot-ghost" type="button" class="eo-copilot-popup-item eo-copilot-ghost-btn" role="menuitemcheckbox" aria-checked="false" aria-pressed="false" title="입력하는 동안 텍스트 예측 표시 (Tab 수락 / Esc 닫기)">텍스트 예측</button>
@@ -1473,6 +1473,8 @@
               <div id="copilot-thread" class="eo-copilot-thread" role="log" aria-live="polite" aria-label="코파일럿 대화 내역"></div>
             </div>
             <div class="eo-copilot-composer">
+              <div id="copilot-feedback-menu" class="eo-copilot-feedback-popover" role="menu" aria-label="싫어요 이유" hidden></div>
+              <button id="btn-copilot-scroll-bottom" type="button" class="eo-copilot-scroll-bottom" data-icon="arrow-down" aria-label="맨 아래로" title="맨 아래로" hidden></button>
               <div id="copilot-selection-row" class="eo-copilot-sel-row" hidden>
                 <span id="copilot-selection-label" class="eo-copilot-sel-chip">A1</span>
               </div>
@@ -1487,10 +1489,10 @@
                 ></textarea>
                 <div class="eo-copilot-composer-bar">
                   <div class="eo-copilot-composer-tools">
-                    <button id="btn-copilot-plus" type="button" class="eo-copilot-icon-btn" data-icon="plus" aria-haspopup="menu" aria-expanded="false" aria-controls="copilot-plus-menu" aria-label="예시 질문" title="예시 질문"></button>
+                    <button id="btn-copilot-plus" type="button" class="eo-copilot-icon-btn eo-copilot-add-btn" data-icon="plus" aria-haspopup="menu" aria-expanded="false" aria-controls="copilot-plus-menu" aria-label="예시 질문" title="예시 질문"></button>
                     <div id="copilot-plus-menu" class="eo-copilot-popup eo-copilot-popup--up" role="menu" hidden></div>
                     <button id="btn-copilot-mode" type="button" class="eo-copilot-pill-btn eo-copilot-mode-btn" data-mode="edit" aria-haspopup="menu" aria-expanded="false" aria-controls="copilot-mode-menu" title="현재 문서를 직접 편집"><span id="copilot-mode-btn-text">편집</span><span class="eo-copilot-caret eo-chevron" aria-hidden="true"></span></button>
-                    <div id="copilot-mode-menu" class="eo-copilot-popup eo-copilot-popup--up" role="menu" hidden>
+                    <div id="copilot-mode-menu" class="eo-copilot-popup eo-copilot-popup--up eo-copilot-listbox" role="menu" hidden>
                       <button type="button" class="eo-copilot-popup-item" role="menuitemradio" data-mode-choice="ask" aria-checked="false">질문</button>
                       <button type="button" class="eo-copilot-popup-item" role="menuitemradio" data-mode-choice="edit" aria-checked="true">편집</button>
                     </div>
