@@ -53,7 +53,7 @@ async function documentOf(page) {
 }
 
 /** Opens the sample in the editor through the shell's own file input, with the panel's menu entry of the editor (도구 > 코파일럿) pressed. */
-async function openSampleWithPanel(page) {
+export async function openSampleWithPanel(page) {
   await page.addInitScript(keepEditorPort);
   await page.reload();
   await page.waitForSelector("#hwp-frame");
@@ -69,7 +69,7 @@ async function openSampleWithPanel(page) {
   return documentOf(page);
 }
 
-const plainParagraph = (doc) => doc.paragraphs.findIndex((p) => !p.hasControls && p.text.length > 20);
+export const plainParagraph = (doc) =>doc.paragraphs.findIndex((p) => !p.hasControls && p.text.length > 20);
 const textWithControl = (doc) => doc.paragraphs.findIndex((p) => p.hasControls && p.text.trim().length > 0);
 const emptyControlAnchor = (doc) => doc.paragraphs.findIndex((p, i) => p.hasControls && p.text === "" && i > 2);
 

@@ -71,10 +71,11 @@ export const copilotSlideSteps = [
     await acceptChange(page);
     assert.equal(await page.textContent(`${CURSOR} .eo-copilot-label`), "코파일럿");
     // The box stands where the answer says, as a share of the stage, and the selection is drawn over exactly that box.
+    // (The box the insert menu makes holds a default text first: wait for a part of the answer's own text.)
     await page.waitForFunction((full) => {
       const t = document.querySelector("#slide-canvas-layer .slide-el-textbox")?.textContent || "";
-      return t.length > 0 && t.length < full;
-    }, text.length);
+      return t.length > 0 && t.length < full.length && full.startsWith(t);
+    }, text);
     const stage = await boxOf(page, "#slide-stage-box");
     const card = await boxOf(page, "#slide-canvas-layer .slide-el");
     near(card.left, stage.left + (120 / 960) * stage.width, 2, "card left");

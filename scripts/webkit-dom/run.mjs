@@ -4,6 +4,7 @@
 import { baseSteps } from "./base.mjs";
 import { copilotDocSteps, copilotSlideSteps } from "./copilot.mjs";
 import { copilotBasePointerSteps, copilotBoardPointerSteps, copilotSheetPointerSteps } from "./copilot-pointer.mjs";
+import { copilotRealBaseSteps, copilotRealBoardSteps, copilotRealDocSteps, copilotRealSheetSteps, copilotRealSlideSteps } from "./copilot-real.mjs";
 import { baseDialogSteps, docDialogSteps, pdfDialogSteps, sheetDialogSteps, slideDialogSteps } from "./dialogs.mjs";
 import { docSteps } from "./doc.mjs";
 import { hwpInsertBelowSteps, hwpPointerSteps } from "./hwp.mjs";
@@ -24,12 +25,12 @@ try {
     baseUrl: `http://127.0.0.1:${engine.port}`,
     captureDir,
     groups: [
-      { module: "SHEET", steps: [...sheetSteps, ...sheetDialogSteps, ...copilotSheetPointerSteps] },
-      { module: "DOC", steps: [...docSteps, ...copilotDocSteps, ...docDialogSteps] },
+      { module: "SHEET", steps: [...sheetSteps, ...sheetDialogSteps, ...copilotSheetPointerSteps, ...copilotRealSheetSteps] },
+      { module: "DOC", steps: [...docSteps, ...copilotDocSteps, ...copilotRealDocSteps, ...docDialogSteps] },
       { module: "HWP", steps: [...hwpInsertBelowSteps, ...hwpPointerSteps] },
-      { module: "SLIDE", steps: [...copilotSlideSteps, ...slideDialogSteps] },
-      { module: "BASE", steps: [...baseSteps, ...copilotBasePointerSteps, ...baseDialogSteps] },
-      { module: "BOARD", steps: copilotBoardPointerSteps },
+      { module: "SLIDE", steps: [...copilotSlideSteps, ...copilotRealSlideSteps, ...slideDialogSteps] },
+      { module: "BASE", steps: [...baseSteps, ...copilotBasePointerSteps, ...copilotRealBaseSteps, ...baseDialogSteps] },
+      { module: "BOARD", steps: [...copilotBoardPointerSteps, ...copilotRealBoardSteps] },
       { module: "PDF", steps: pdfDialogSteps },
     ],
   });

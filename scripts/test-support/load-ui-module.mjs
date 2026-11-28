@@ -35,9 +35,13 @@ export function loadUiModule(modulePath, env) {
   return env;
 }
 
-const PERFORM_PARTS = ["copilot-perform-slide.js", "copilot-perform-sheet.js", "copilot-perform-ext.js", "copilot-perform-hwp.js", "copilot-perform-cite.js"];
+const PERFORM_PARTS = [
+  "copilot-perform-slide.js", "copilot-perform-sheet.js", "copilot-perform-ext.js", "copilot-perform-hwp.js", "copilot-perform-cite.js",
+  // The pointer's real operation of the controls (PD-392), which `copilot-actions.js` creates next to the performer.
+  "copilot-actuator.js", "copilot-real.js", "copilot-real-doc.js", "copilot-real-ext.js", "copilot-real-sheet.js", "copilot-real-slide.js", "copilot-real-turn.js",
+];
 
-/** The per-module parts the copilot performer (`copilot-perform.js`) reads when it is created; load them before it. */
+/** The per-module parts the copilot performer (`copilot-perform.js`) reads when it is created, and the real-operation parts of the actions; load them before those. */
 export function loadPerformParts(env) {
   for (const name of PERFORM_PARTS) loadUiModule(fileURLToPath(new URL("../../crates/easyoffice-app/ui/" + name, import.meta.url)), env);
 }
