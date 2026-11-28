@@ -9800,7 +9800,31 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## Desktop shell woff2 decoder (PD-397)
 
-The desktop shell (`crates/easyoffice-desktop`, not the engine crates) depends on `wuff` 0.2.10 (`MIT`, Copyright (c) Nico Burns, <https://github.com/nicoburns/wuff>), a pure Rust WOFF and WOFF2 decoder, used unmodified from crates.io with its `brotli` feature only. It decodes the Noto Sans KR woff2 of the editor bundle into the face the PDF export falls back to (`crates/easyoffice-desktop/src/pdf_font_face.rs`), so the installer no longer carries a second copy of that font as a TTF. `wuff` is a port of the woff2 reference decoder of Google (`MIT`, Copyright 2013-2015 Google Inc.), whose notice stays in the source files of the crate. Its two dependencies, `brotli-decompressor` (`BSD-3-Clause/MIT`, already in the closure through `hayro`) and `bytes` (`MIT`, already in the closure through `tauri`), are used at the versions the lock file already held. No code of `wuff` was copied into this repository; the license text travels in its source package.
+The desktop shell (`crates/easyoffice-desktop`, not the engine crates) depends on `wuff` 0.2.10 (`MIT`, Copyright (c) Nico Burns, <https://github.com/nicoburns/wuff>), a pure Rust WOFF and WOFF2 decoder, used unmodified from crates.io with its `brotli` feature only. It decodes the Noto Sans KR woff2 of the editor bundle into the face the PDF export falls back to (`crates/easyoffice-desktop/src/pdf_font_face.rs`), so the installer no longer carries a second copy of that font as a TTF. `wuff` is a port of the woff2 reference decoder of Google (`MIT`, Copyright 2014 and 2015 Google Inc., as in the headers of `table_tags.rs` and `variable_length.rs` of the crate). Its two dependencies, `brotli-decompressor` (`BSD-3-Clause/MIT`, already in the closure through `hayro`) and `bytes` (`MIT`, already in the closure through `tauri`), are used at the versions the lock file already held. No code of `wuff` was copied into this repository. The published 0.2.10 package carries no license file (only the `license = "MIT"` field and a link to the repository), so the MIT permission text is given here, with the copyright line of the author, because the desktop binary contains the compiled crate:
+
+```
+MIT License
+
+Copyright (c) Nico Burns
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ## Reference app (code adapted)
 
